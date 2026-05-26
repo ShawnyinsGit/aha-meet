@@ -1,0 +1,34 @@
+{
+  "appId": "com.ahameet.app",
+  "productName": "AhaMeet",
+  "icon": "build/icon.icns",
+  "directories": {
+    "output": "release",
+    "buildResources": "build"
+  },
+  "files": [
+    "dist/**/*",
+    "dist-electron/**/*",
+    "package.json"
+  ],
+  "asarUnpack": [
+    "**/node_modules/@anthropic-ai/**/*"
+  ],
+  "extraResources": [
+    { "from": "build/whisper", "to": "whisper", "filter": ["**/*"] },
+    { "from": "build/claude-defaults", "to": "claude-defaults", "filter": ["**/*"] }
+  ],
+  "mac": {
+    "category": "public.app-category.developer-tools",
+    "target": [
+      { "target": "dmg", "arch": ["arm64"] }
+    ],
+    "hardenedRuntime": false,
+    "gatekeeperAssess": false,
+    "identity": null
+  },
+  "dmg": {
+    "title": "AhaMeet ${version}",
+    "writeUpdateInfo": false
+  }
+}

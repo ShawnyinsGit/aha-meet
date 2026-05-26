@@ -1,0 +1,39 @@
+{
+  "name": "aha-meet",
+  "version": "0.5.5",
+  "description": "Real-time meeting-style collaboration with Claude Code",
+  "private": true,
+  "type": "module",
+  "main": "dist-electron/main.js",
+  "scripts": {
+    "dev": "vite",
+    "dev:electron": "tsc -p tsconfig.electron.json && electron .",
+    "build:renderer": "vite build",
+    "build:electron": "tsc -p tsconfig.electron.json && cp electron/preload.cjs dist-electron/preload.cjs",
+    "build": "npm run build:renderer && npm run build:electron",
+    "start": "npm run build && electron .",
+    "prebuild:whisper": "node scripts/fetch-whisper.mjs",
+    "prebuild:claude-defaults": "node scripts/bundle-claude-defaults.mjs",
+    "dist": "npm run prebuild:whisper && npm run prebuild:claude-defaults && npm run build && electron-builder --mac --arm64",
+    "dist:dmg": "npm run prebuild:whisper && npm run prebuild:claude-defaults && npm run build && electron-builder --mac --arm64 --publish never"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.3.150",
+    "@ricky0123/vad-web": "^0.0.30",
+    "fft.js": "^4.0.4",
+    "lucide-react": "^1.16.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.4",
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.3"
+  }
+}
