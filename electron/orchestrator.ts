@@ -23,6 +23,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { ClaudeSession, type SessionEvent } from './claude-session.js';
+import type { AutoApproveScope } from './auto-approve-policy.js';
 import type { PlanMeetingTask } from './meeting-tools.js';
 import {
   DecisionWatcher,
@@ -77,7 +78,7 @@ export type {
 interface OrchestratorOpts {
   emit: (e: OrchestratorEvent) => void;
   cwd: string;
-  autoApprove?: boolean;
+  autoApproveScope?: AutoApproveScope;
   workerEnv?: NodeJS.ProcessEnv;
   /** Optional override for ClaudeSession construction. Production code leaves
    *  this unset; tests inject a stub so cleanup paths can run without
@@ -94,7 +95,7 @@ export class Orchestrator implements OrchestratorBridge {
   private scheduler: WorkerScheduler;
   private emit: (e: OrchestratorEvent) => void;
   private cwd: string;
-  private autoApprove: boolean;
+  private autoApproveScope: AutoApproveScope;
   private workerEnv: NodeJS.ProcessEnv | undefined;
   private confirmDestructive: ((toolName: string, input: Record<string, unknown>) => Promise<boolean>) | undefined;
   private closed = false;
@@ -140,7 +141,7 @@ export class Orchestrator implements OrchestratorBridge {
   constructor(opts: OrchestratorOpts) {
     this.emit = opts.emit;
     this.cwd = opts.cwd;
-    this.autoApprove = opts.autoApprove ?? false;
+    this.autoApproveScope = opts.autoApproveScope ?? 'off';
     this.workerEnv = opts.workerEnv;
     this.confirmDestructive = opts.confirmDestructive;
     this.projectId = computeProjectId(this.cwd);
@@ -149,7 +150,7 @@ export class Orchestrator implements OrchestratorBridge {
     this.scheduler = new WorkerScheduler({
       emit: (e) => this.safeEmit(e),
       cwd: this.cwd,
-      autoApprove: this.autoApprove,
+      autoApproveScope: this.autoApproveScope,
       workerEnv: this.workerEnv,
       confirmDestructive: this.confirmDestructive,
       sessionFactory: this.sessionFactory,
@@ -161,10 +162,10 @@ export class Orchestrator implements OrchestratorBridge {
     Orchestrator.ensureShutdownHook();
   }
 
-  setAutoApprove(on: boolean) {
-    this.autoApprove = on;
-    this.talker?.setAutoApprove(on);
-    this.scheduler.setAutoApprove(on);
+  setAutoApproveScope(scope: AutoApproveScope) {
+    this.autoApproveScope = scope;
+    this.talker?.setAutoApproveScope(scope);
+    this.scheduler.setAutoApproveScope(scope);
   }
 
   private safeEmit(e: OrchestratorEvent) {
@@ -193,7 +194,7 @@ export class Orchestrator implements OrchestratorBridge {
 
     this.talker = this.sessionFactory({
       cwd: this.cwd,
-      autoApprove: this.autoApprove,
+      autoApproveScope: this.autoApproveScope,
       envOverride: this.workerEnv,
       confirmDestructive: this.confirmDestructive,
       emit: (e) => this.onTalkerEvent(e),

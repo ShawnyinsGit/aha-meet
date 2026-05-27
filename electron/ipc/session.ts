@@ -4,6 +4,7 @@ import { Orchestrator } from '../orchestrator.js';
 import { mergedSubprocessEnv } from '../settings-loader.js';
 import { formatError } from '../format-error.js';
 import { updateSettings } from '../store.js';
+import type { AutoApproveScope } from '../auto-approve-policy.js';
 import type { IpcContext } from './context.js';
 
 const PERMISSION_MODES = new Set(['default', 'acceptEdits', 'bypassPermissions', 'plan'] as const);
@@ -31,7 +32,7 @@ export function registerSessionIpc(ctx: IpcContext): void {
       const next = new Orchestrator({
         emit: ctx.emitToRenderer,
         cwd: resolvedCwd,
-        autoApprove: ctx.getAutoApprove(),
+        autoApproveScope: ctx.getAutoApprove(),
         workerEnv,
         confirmDestructive: ctx.nativeConfirmDestructive,
       });
@@ -88,15 +89,19 @@ export function registerSessionIpc(ctx: IpcContext): void {
     return { ok: true };
   });
 
-  ipcMain.handle('session:set-auto-approve', async (_e, on: boolean) => {
-    const next = !!on;
+  ipcMain.handle('session:set-auto-approve', async (_e, scope: unknown) => {
+    const VALID_SCOPES = new Set<string>(['off', 'read', 'all']);
+    const next: AutoApproveScope =
+      typeof scope === 'string' && VALID_SCOPES.has(scope)
+        ? (scope as AutoApproveScope)
+        : 'off';
     ctx.setAutoApprove(next);
     // Live-toggle the running session if any — affects subsequent canUseTool
     // calls only; in-flight permission requests stay pending until resolved
     // (or session ends).
     const o = ctx.getOrchestrator();
-    if (o) o.setAutoApprove(next);
-    return { ok: true, autoApprove: next };
+    if (o) o.setAutoApproveScope(next);
+    return { ok: true, autoApproveScope: next };
   });
 
   ipcMain.handle('session:end', async () => {

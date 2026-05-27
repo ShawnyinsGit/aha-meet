@@ -4,6 +4,7 @@ import { dirname, join } from 'node:path';
 import { Orchestrator, type OrchestratorEvent } from './orchestrator.js';
 import { disposeWhisper } from './whisper.js';
 import { buildClaudeShadowHome } from './claude-defaults.js';
+import type { AutoApproveScope } from './auto-approve-policy.js';
 import type { IpcContext } from './ipc/context.js';
 import { registerSessionIpc } from './ipc/session.js';
 import { registerAuthIpc } from './ipc/auth.js';
@@ -25,10 +26,10 @@ let orchestrator: Orchestrator | null = null;
 // burning tokens. We park the reference here so a follow-up
 // `session:interrupt` (or app shutdown) can still abort the recap.
 let recapPending: Orchestrator | null = null;
-// Trust-mode flag — module-level so it survives between session start/stop
+// Trust-mode scope — module-level so it survives between session start/stop
 // and isn't lost when the renderer reloads. Default OFF every launch; we
 // intentionally do NOT persist this to disk.
-let autoApprove = false;
+let autoApprove: AutoApproveScope = 'off';
 // Shadow HOME pointing at the merged bundled+user .claude tree, computed
 // once at app launch. `null` in dev mode → SDK uses real ~/.claude.
 let claudeShadowHome: string | null = null;

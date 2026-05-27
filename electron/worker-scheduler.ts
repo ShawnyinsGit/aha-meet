@@ -36,6 +36,7 @@ import {
   titleFromDescription,
 } from './orchestrator-helpers.js';
 import type { SteerResult } from './meeting-mcp.js';
+import type { AutoApproveScope } from './auto-approve-policy.js';
 import type {
   MeetingPlan,
   MeetingPlanNode,
@@ -56,8 +57,8 @@ export interface WorkerSchedulerOpts {
   emit: (e: OrchestratorEvent) => void;
   /** Shared workspace cwd; every worker session inherits this. */
   cwd: string;
-  /** Initial trust-mode flag. Live updates go through `setAutoApprove`. */
-  autoApprove: boolean;
+  /** Initial trust-mode scope. Live updates go through `setAutoApproveScope`. */
+  autoApproveScope: AutoApproveScope;
   /** Env override threaded into ClaudeSession (HOME redirect for the shadow
    *  ~/.claude merge + the env allowlist from settings-loader). */
   workerEnv?: NodeJS.ProcessEnv;
@@ -91,21 +92,21 @@ export class WorkerScheduler {
   private workers: Map<string, WorkerHandle> = new Map();
   private recentEdits: Map<string, RecentFileEdit> = new Map();
   private workerIdSeq = 0;
-  private autoApprove: boolean;
+  private autoApproveScope: AutoApproveScope;
   private readonly opts: WorkerSchedulerOpts;
 
   constructor(opts: WorkerSchedulerOpts) {
     this.opts = opts;
-    this.autoApprove = opts.autoApprove;
+    this.autoApproveScope = opts.autoApproveScope;
   }
 
   // ---------------------------------------------------------------------------
   // Mutators
 
-  setAutoApprove(on: boolean): void {
-    this.autoApprove = on;
+  setAutoApproveScope(scope: AutoApproveScope): void {
+    this.autoApproveScope = scope;
     for (const handle of this.workers.values()) {
-      handle.session?.setAutoApprove(on);
+      handle.session?.setAutoApproveScope(scope);
     }
   }
 
@@ -506,7 +507,7 @@ export class WorkerScheduler {
     try {
       handle.session = this.opts.sessionFactory({
         cwd: this.opts.cwd,
-        autoApprove: this.autoApprove,
+        autoApproveScope: this.autoApproveScope,
         envOverride: this.opts.workerEnv,
         confirmDestructive: this.opts.confirmDestructive,
         emit: (e) => this.onWorkerEvent(handle.id, e),

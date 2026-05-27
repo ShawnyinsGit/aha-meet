@@ -1,7 +1,7 @@
 import { query, type Query, type SDKMessage, type SDKUserMessage, type CanUseTool, type PermissionResult, type Options } from '@anthropic-ai/claude-agent-sdk';
 import { mergedSubprocessEnv } from './settings-loader.js';
 import { errorMessage } from './format-error.js';
-import { classifyToolRisk } from './auto-approve-policy.js';
+import { classifyToolRisk, type AutoApproveScope } from './auto-approve-policy.js';
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -72,21 +72,19 @@ export class ClaudeSession {
   private cwd: string;
   private sessionOptions: Partial<Options>;
   private envOverride: NodeJS.ProcessEnv | undefined;
-  // Trust-mode flag. When true, canUseTool resolves `allow` immediately and
-  // skips emitting a permission-request event, so the worker plows through
-  // tool calls without manual approval. Toggled live by the orchestrator.
-  // Default OFF — never enabled silently; the user must opt in via the UI.
-  // S3: auto-approve no longer covers destructive tools (Write/Edit/Bash/…).
-  // Those still escalate via `confirmDestructive` so a compromised renderer
-  // can't fake an approval and run arbitrary fs/shell commands.
-  private autoApprove = false;
+  // Trust-mode scope. Controls which tools are silently approved:
+  //   'off'  → all tools go through the permission flow (default)
+  //   'read' → only safe/read tools auto-approved, destructive still escalate
+  //   'all'  → all tools auto-approved including Write/Bash (no prompt)
+  // Toggled live by the orchestrator. Default OFF — never enabled silently.
+  private autoApproveScope: AutoApproveScope = 'off';
   private confirmDestructive: ConfirmDestructive | undefined;
 
   constructor(opts: {
     emit: (e: SessionEvent) => void;
     cwd: string;
     sessionOptions?: Partial<Options>;
-    autoApprove?: boolean;
+    autoApproveScope?: AutoApproveScope;
     /** Process env to feed into the worker subprocess. Overrides
      *  mergedSubprocessEnv() — used to redirect HOME at the merged
      *  bundled+user `.claude` shadow dir. */
@@ -101,26 +99,25 @@ export class ClaudeSession {
     this.emit = opts.emit;
     this.cwd = opts.cwd;
     this.sessionOptions = opts.sessionOptions ?? {};
-    this.autoApprove = opts.autoApprove ?? false;
+    this.autoApproveScope = opts.autoApproveScope ?? 'off';
     this.envOverride = opts.envOverride;
     this.confirmDestructive = opts.confirmDestructive;
   }
 
-  /** Toggle trust-mode live. Affects subsequent canUseTool calls only —
-   * any permission requests already pending stay pending until the user
-   * (or the orchestrator on session end) resolves them. */
-  setAutoApprove(on: boolean) {
-    this.autoApprove = on;
+  /** Toggle auto-approve scope live. Affects subsequent canUseTool calls only. */
+  setAutoApproveScope(scope: AutoApproveScope) {
+    this.autoApproveScope = scope;
   }
 
   start() {
     if (this.q) return;
     const canUseTool: CanUseTool = async (toolName, input, options) => {
-      if (this.autoApprove) {
-        // S3 tiering: only read-only / app-internal tools get the silent allow.
-        // Destructive ones (Write / Edit / Bash / unknown) must still ask the
-        // user — via a native OS dialog if main wired one up, otherwise fall
-        // through to the renderer permission flow so we never silently approve.
+      if (this.autoApproveScope !== 'off') {
+        // 'all' scope: every tool is auto-approved (user explicitly chose this).
+        if (this.autoApproveScope === 'all') {
+          return { behavior: 'allow', updatedInput: input };
+        }
+        // 'read' scope: only safe tools auto-approved; destructive ones escalate.
         if (classifyToolRisk(toolName) === 'safe') {
           return { behavior: 'allow', updatedInput: input };
         }

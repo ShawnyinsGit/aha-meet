@@ -26,7 +26,7 @@ import {
   prewarmSpeakerModel,
   SPEAKER_MODEL_ID,
 } from './lib/speaker-embedding';
-import type { DesktopSource, VoicePrint } from './types';
+import type { AutoApproveScope, DesktopSource, VoicePrint } from './types';
 
 // Target seconds of clean speech (not wall time) to collect for enrollment.
 // 6-8s of speech consistently produces a stable embedding for CAM++ in
@@ -54,7 +54,7 @@ export function App() {
   const [drawerOpen, setDrawerOpen] = useState(true);
   const [ttsOn, setTtsOn] = useState(true);
   const [muted, setMuted] = useState(false);
-  const [autoApprove, setAutoApprove] = useState(false);
+  const [autoApproveScope, setAutoApproveScope] = useState<AutoApproveScope>('off');
   const [multiAgent, setMultiAgent] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [aiSpeaking, setAiSpeaking] = useState(false);
@@ -425,24 +425,26 @@ export function App() {
     return () => setSpeakCallback(null);
   }, [setSpeakCallback, ttsOn]);
 
-  // Push the trust-mode flag down to the main process. Two channels working
-  // together: setAutoApprove flips the canUseTool short-circuit (instant, even
-  // mid-session); setPermissionMode mirrors it through the SDK's permission
-  // mode for belt-and-braces so any path that bypasses canUseTool still won't
-  // block. Sent on every session start so a new session inherits the toggle.
+  // Push the trust-mode scope down to the main process. setAutoApprove flips
+  // the canUseTool short-circuit (instant, even mid-session); setPermissionMode
+  // mirrors it through the SDK's permission mode for belt-and-braces so any
+  // path that bypasses canUseTool still won't block. Sent on every session
+  // start so a new session inherits the scope.
   useEffect(() => {
-    void window.vibeMeet.setAutoApprove(autoApprove);
+    void window.vibeMeet.setAutoApprove(autoApproveScope);
     if (!state.running) return;
-    void window.vibeMeet.setPermissionMode(autoApprove ? 'bypassPermissions' : 'default');
-  }, [autoApprove, state.running]);
+    void window.vibeMeet.setPermissionMode(
+      autoApproveScope !== 'off' ? 'bypassPermissions' : 'default',
+    );
+  }, [autoApproveScope, state.running]);
 
   // If auto-approve is toggled on while a prompt is already showing, resolve
   // it immediately so the user isn't blocked by a stale modal.
   useEffect(() => {
-    if (autoApprove && state.pendingPermission) {
+    if (autoApproveScope !== 'off' && state.pendingPermission) {
       void resolvePermission(state.pendingPermission.id, 'allow');
     }
-  }, [autoApprove, state.pendingPermission, resolvePermission]);
+  }, [autoApproveScope, state.pendingPermission, resolvePermission]);
 
   const join = useCallback(async (cwd: string) => {
     setJoined(true);
@@ -513,8 +515,8 @@ ${trimmed}`;
       <MeetingHeader
         cwd={state.cwd}
         elapsed={elapsed}
-        autoApprove={autoApprove}
-        onToggleAutoApprove={() => setAutoApprove((v) => !v)}
+        autoApproveScope={autoApproveScope}
+        onChangeAutoApproveScope={setAutoApproveScope}
         multiAgent={multiAgent}
         onToggleMultiAgent={() => setMultiAgent((v) => !v)}
         settingsSlot={

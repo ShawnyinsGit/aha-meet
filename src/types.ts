@@ -1,3 +1,5 @@
+export type AutoApproveScope = 'off' | 'read' | 'all';
+
 export type AgentSource = 'talker' | string;
 
 export type WorkerStatus = 'pending' | 'running' | 'done' | 'failed';
@@ -108,7 +110,7 @@ export interface VibeMeetApi {
   resolvePermission: (id: string, decision: 'allow' | 'deny', message?: string) => Promise<{ ok: boolean }>;
   interrupt: () => Promise<{ ok: boolean }>;
   setPermissionMode: (mode: string) => Promise<{ ok: boolean }>;
-  setAutoApprove: (on: boolean) => Promise<{ ok: boolean; autoApprove?: boolean }>;
+  setAutoApprove: (scope: AutoApproveScope) => Promise<{ ok: boolean; autoApproveScope?: AutoApproveScope }>;
   endSession: () => Promise<{ ok: boolean }>;
   pickCwd: () => Promise<string | null>;
   getLastCwd: () => Promise<string | null>;

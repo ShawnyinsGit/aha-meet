@@ -6,6 +6,7 @@
 // back into main.ts directly.
 
 import type { BrowserWindow } from 'electron';
+import type { AutoApproveScope } from '../auto-approve-policy.js';
 import type { Orchestrator, OrchestratorEvent } from '../orchestrator.js';
 
 export interface IpcContext {
@@ -15,8 +16,8 @@ export interface IpcContext {
   setOrchestrator: (o: Orchestrator | null) => void;
   getRecapPending: () => Orchestrator | null;
   setRecapPending: (o: Orchestrator | null) => void;
-  getAutoApprove: () => boolean;
-  setAutoApprove: (v: boolean) => void;
+  getAutoApprove: () => AutoApproveScope;
+  setAutoApprove: (v: AutoApproveScope) => void;
   getCurrentCwd: () => string | null;
   setCurrentCwd: (v: string | null) => void;
   getClaudeShadowHome: () => string | null;

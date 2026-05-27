@@ -10,6 +10,14 @@
 
 export type ToolRisk = 'safe' | 'destructive';
 
+/**
+ * Auto-approve scope — controls which tools are silently approved.
+ *   'off'  → no auto-approve, all tools go through the permission flow
+ *   'read' → only read-only / safe tools are auto-approved
+ *   'all'  → all tools (including Write/Bash) are auto-approved without prompt
+ */
+export type AutoApproveScope = 'off' | 'read' | 'all';
+
 // Tools that only READ state — auto-approve is allowed to short-circuit these.
 // `Task` delegates to a subagent which runs with its own canUseTool gate, so
 // the delegation itself is harmless (the subagent's individual tool calls are
