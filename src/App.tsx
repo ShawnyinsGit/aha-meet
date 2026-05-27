@@ -81,6 +81,9 @@ export function App() {
   const [selectedVoiceName, setSelectedVoiceNameState] = useState<string | null>(null);
   const [guidanceDismissed, setGuidanceDismissed] = useState(false);
   const [guideOpen, setGuideOpen] = useState(false);
+  // Session-level flag: user clicked "Maybe later" — don't re-open this session
+  // even if voiceschanged fires again (e.g. a voice download completes).
+  const [guidanceClosedThisSession, setGuidanceClosedThisSession] = useState(false);
   const [filterMode, setFilterModeState] = useState<SpeechFilterMode>('strict');
 
   // Multi-agent mode is always active — no toggle.
