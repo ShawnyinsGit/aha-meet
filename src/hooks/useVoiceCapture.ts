@@ -10,6 +10,20 @@ const MIN_SAMPLES_FOR_GATE = 8000;
 // embedding to be accepted. Tuned empirically; expose to settings later if
 // real-world false-reject rate is too high.
 const VOICE_LOCK_THRESHOLD = 0.5;
+// Barge-in-during-playback gate: a speech segment that starts while TTS is
+// playing must reach this many samples (~480ms @ 16 kHz) before we treat it
+// as a real user interruption. Below this we assume it's AEC residue, a
+// throat clear, or a cough and drop it silently. 480ms is empirically long
+// enough to filter common false positives without making real interruptions
+// feel laggy.
+const MIN_SAMPLES_FOR_BARGE_IN = 7680;
+// Average speech-probability needed across a suppressed segment before we
+// accept it as a barge-in. AEC residue and room noise tend to sit around
+// 0.45-0.55 (just at VAD's positiveSpeechThreshold); real speech runs
+// higher, but the segment also includes ~384ms of low-prob redemption tail
+// which drags the average down. 0.55 is a deliberate middle ground that
+// accepts real speech and rejects pure-echo blips.
+const MIN_AVG_PROB_FOR_BARGE_IN = 0.55;
 
 interface UseVoiceCaptureOptions {
   enabled: boolean;
@@ -38,6 +52,7 @@ interface UseVoiceCaptureResult {
   active: boolean;
   listening: boolean;
   lastError: string | null;
+  permissionDenied: boolean;
   speechLevel: number;
   asrAvailable: boolean | null;
 }
@@ -60,6 +75,7 @@ export function useVoiceCapture({
   const [active, setActive] = useState(false);
   const [listening, setListening] = useState(false);
   const [lastError, setLastError] = useState<string | null>(null);
+  const [permissionDenied, setPermissionDenied] = useState(false);
   const [speechLevel, setSpeechLevel] = useState(0);
   const [asrAvailable, setAsrAvailable] = useState<boolean | null>(null);
 
@@ -77,9 +93,16 @@ export function useVoiceCapture({
   // re-downloads the worklet + onnx model and re-prompts for mic on some
   // browsers). The transcribePcm call inside onSpeechEnd reads the ref.
   const langRef = useRef(lang);
-  // Tracks whether the in-flight speech segment started while suppressed; if
-  // so we drop it at speech-end even if suppression has since cleared.
+  // Tracks whether the in-flight speech segment started while suppressed
+  // (TTS was playing). Read at speech-end to apply the barge-in duration
+  // gate: short segments are treated as echo/throat-clears and dropped,
+  // long ones cancel TTS and feed the transcript.
   const segmentSuppressedRef = useRef(false);
+  // Running stats for the in-flight segment: count of frames and sum of
+  // speech probability. Used at speech-end with segmentSuppressedRef to
+  // gate barge-in by average confidence (a single high spike isn't enough).
+  const segmentFrameCountRef = useRef(0);
+  const segmentProbSumRef = useRef(0);
 
   useEffect(() => {
     onTranscriptRef.current = onTranscript;
@@ -92,6 +115,14 @@ export function useVoiceCapture({
   }, [onVoiceLockReject]);
   useEffect(() => {
     tapSegmentRef.current = tapSegment;
+    // When a tap is installed mid-segment (typical for enrollment: user opens
+    // the panel and clicks Start while Claude's greeting echo has already
+    // tripped VAD with suppressedRef=true → segmentSuppressedRef=true), clear
+    // the stale suppression flag so the in-flight segment's eventual
+    // onSpeechEnd routes the audio to the tap instead of dropping it.
+    if (tapSegment) {
+      segmentSuppressedRef.current = false;
+    }
   }, [tapSegment]);
   useEffect(() => {
     suppressedRef.current = suppressed;
@@ -170,34 +201,70 @@ export function useVoiceCapture({
             // Claude is mid-greeting. Barge-in is also pointless here: the
             // user isn't trying to interrupt, they're recording themselves.
             const tapping = tapSegmentRef.current != null;
-            if (suppressedRef.current && !tapping) {
-              // TTS is playing — treat this as speaker echo, not user speech.
-              // Don't barge in (that would cut Claude off mid-sentence) and
-              // mark the segment so we drop the transcript at speech-end.
-              segmentSuppressedRef.current = true;
-              return;
-            }
-            segmentSuppressedRef.current = false;
+            // Reset per-segment stats regardless of path.
+            segmentFrameCountRef.current = 0;
+            segmentProbSumRef.current = 0;
+            // Remember whether TTS was playing at the moment speech began.
+            // The decision to barge in (or drop as echo) is deferred to
+            // speech-end so we can gate by duration + average confidence;
+            // firing barge-in here would let a single VAD trip from AEC
+            // residue cut Claude off mid-sentence.
+            segmentSuppressedRef.current = suppressedRef.current && !tapping;
             setListening(true);
-            if (!tapping) {
-              // Barge-in: immediately cut Claude off if he was talking.
+            if (!tapping && !segmentSuppressedRef.current) {
+              // TTS isn't playing — fire barge-in immediately so the next
+              // assistant utterance (if one starts mid-segment) gets cut off
+              // without waiting for speech-end.
               onBargeInRef.current?.();
             }
           },
           onSpeechEnd: async (audio: Float32Array) => {
-            if (segmentSuppressedRef.current) {
-              segmentSuppressedRef.current = false;
-              return;
-            }
             setListening(false);
 
-            // Enrollment tap takes precedence: hand the raw segment to the
-            // collector and skip both the gate and transcription. Enrollment
-            // happens before any voice print exists, so there's no gate to run.
+            // Enrollment tap takes precedence over everything else, including
+            // the suppression flag. The flag may have been set by an
+            // onSpeechStart that fired during TTS playback before the user
+            // installed the tap (e.g. greeting echo trips VAD, then user opens
+            // the panel and clicks Start mid-segment). If we honoured the flag
+            // here, the user's enrollment audio would be silently dropped and
+            // the panel would hang at "等待麦克风启动…". Route to the tap and
+            // clear the flag so the next segment starts clean.
             const tap = tapSegmentRef.current;
             if (tap) {
+              segmentSuppressedRef.current = false;
               try { tap(audio); } catch (e) { setLastError(String((e as Error)?.message ?? e)); }
               return;
+            }
+
+            if (segmentSuppressedRef.current) {
+              segmentSuppressedRef.current = false;
+              // Segment started during TTS playback. Apply the barge-in
+              // gate: enough audio AND sustained high speech probability →
+              // real interrupt; otherwise drop as echo/throat-clear/cough.
+              const frames = segmentFrameCountRef.current;
+              const avgProb = frames > 0 ? segmentProbSumRef.current / frames : 0;
+              segmentFrameCountRef.current = 0;
+              segmentProbSumRef.current = 0;
+              const longEnough = audio.length >= MIN_SAMPLES_FOR_BARGE_IN;
+              const confident = avgProb >= MIN_AVG_PROB_FOR_BARGE_IN;
+              console.info('[barge-in] suppressed-segment decision', {
+                durationSec: +(audio.length / 16000).toFixed(2),
+                minSec: +(MIN_SAMPLES_FOR_BARGE_IN / 16000).toFixed(2),
+                avgProb: +avgProb.toFixed(2),
+                minAvgProb: MIN_AVG_PROB_FOR_BARGE_IN,
+                decision: longEnough && confident ? 'INTERRUPT' : 'DROP',
+              });
+              if (!longEnough || !confident) {
+                return;
+              }
+              // Real interrupt: cut Claude off now so playback stops before
+              // the transcript even finishes. The transcript still flows
+              // through the normal voice-lock + send pipeline below.
+              onBargeInRef.current?.();
+            } else {
+              // Reset stats for the next segment.
+              segmentFrameCountRef.current = 0;
+              segmentProbSumRef.current = 0;
             }
 
             // Voice-lock gate: drop segments that don't match the enrolled
@@ -207,20 +274,46 @@ export function useVoiceCapture({
             // utterance through.
             const lockOn = voiceLockEnabledRef.current;
             const enrolled = voicePrintEmbeddingRef.current;
-            if (lockOn && enrolled && audio.length >= MIN_SAMPLES_FOR_GATE) {
+            const durationSec = audio.length / 16000;
+            if (!lockOn) {
+              console.info('[voice-lock] gate=off, passing segment', {
+                hasEmbedding: !!enrolled,
+                durationSec: +durationSec.toFixed(2),
+              });
+            } else if (!enrolled) {
+              console.info('[voice-lock] gate=on but no enrolled voiceprint, passing');
+            } else if (audio.length < MIN_SAMPLES_FOR_GATE) {
+              console.info('[voice-lock] segment too short for gate, passing', {
+                durationSec: +durationSec.toFixed(2),
+                minSec: MIN_SAMPLES_FOR_GATE / 16000,
+              });
+            } else {
               try {
                 const emb = await embedSpeaker(audio);
                 if (emb) {
                   const sim = cosineSimilarity(emb, enrolled);
-                  if (sim < VOICE_LOCK_THRESHOLD) {
+                  const pass = sim >= VOICE_LOCK_THRESHOLD;
+                  console.info('[voice-lock] check', {
+                    sim: +sim.toFixed(3),
+                    threshold: VOICE_LOCK_THRESHOLD,
+                    durationSec: +durationSec.toFixed(2),
+                    decision: pass ? 'PASS' : 'REJECT',
+                    embDim: emb.length,
+                    enrolledDim: enrolled.length,
+                  });
+                  if (!pass) {
                     onVoiceLockRejectRef.current?.();
                     return;
                   }
+                } else {
+                  console.warn('[voice-lock] embedSpeaker returned null (segment likely too short post-fbank), passing through');
                 }
               } catch (e) {
-                // If embedding fails (e.g. model still loading) fall through to
-                // transcription rather than silently dropping legitimate speech.
-                console.warn('[voice-lock] embedding failed, passing through:', e);
+                // Embedding failed — historically we let the segment through so
+                // a flaky model load wouldn't silently swallow legitimate
+                // speech. But that also masks a misconfigured gate (the user
+                // thinks they're protected when they aren't), so log loudly.
+                console.error('[voice-lock] embedding failed, passing through — gate is NOT enforcing:', e);
               }
             }
 
@@ -249,11 +342,19 @@ export function useVoiceCapture({
           },
           onVADMisfire: () => {
             segmentSuppressedRef.current = false;
+            segmentFrameCountRef.current = 0;
+            segmentProbSumRef.current = 0;
             setListening(false);
           },
           onFrameProcessed: (probs) => {
             // Cheap UI signal: smoothed speech probability for the mic meter.
             setSpeechLevel((prev) => prev * 0.6 + probs.isSpeech * 0.4);
+            // Accumulate per-segment stats used by the barge-in gate at
+            // speech-end. The library calls this for every frame, including
+            // silence between segments; the running totals are reset in
+            // onSpeechStart so only the in-flight segment's frames count.
+            segmentFrameCountRef.current += 1;
+            segmentProbSumRef.current += probs.isSpeech;
           },
         });
         if (cancelled) {
@@ -267,7 +368,13 @@ export function useVoiceCapture({
         setLastError(null);
       } catch (e) {
         const msg = String((e as Error)?.message ?? e);
-        setLastError(`Mic init failed: ${msg}`);
+        // B18: detect permission denial so the UI can show a targeted guide
+        // instead of a generic error string.
+        const isPerm = e instanceof DOMException && (
+          e.name === 'NotAllowedError' || e.name === 'PermissionDeniedError'
+        );
+        setPermissionDenied(isPerm);
+        setLastError(isPerm ? 'Microphone permission denied — please enable in System Settings' : `Mic init failed: ${msg}`);
         setActive(false);
       }
     })();
@@ -283,5 +390,5 @@ export function useVoiceCapture({
     };
   }, [enabled]);
 
-  return { active, listening, lastError, speechLevel, asrAvailable };
+  return { active, listening, lastError, permissionDenied, speechLevel, asrAvailable };
 }

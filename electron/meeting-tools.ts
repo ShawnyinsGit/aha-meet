@@ -12,6 +12,7 @@ export const MEETING_TOOLS = {
   PLAN_MEETING: 'plan_meeting',
   DELEGATE_TO: 'delegate_to',
   TASK_DONE: 'task_done',
+  REQUEST_DECISION: 'request_user_decision',
 } as const;
 
 export type MeetingToolName = (typeof MEETING_TOOLS)[keyof typeof MEETING_TOOLS];
@@ -40,6 +41,23 @@ export const delegateToArgsSchema = {
 
 export const taskDoneArgsSchema = {
   summary: z.string().min(1).describe('One-line summary of what changed; surfaced to Talker context.'),
+};
+
+export const decisionOptionSchema = z.object({
+  title: z.string().min(1).describe('Short label for this option.'),
+  summary: z.string().min(1).describe('One-paragraph explanation of what this option entails.'),
+  pros: z.array(z.string()).default([]).describe('Bullet-list of upsides.'),
+  cons: z.array(z.string()).default([]).describe('Bullet-list of downsides or risks.'),
+  recommendationScore: z.number().int().min(1).max(10).describe('1-10 rating; higher means more strongly recommended.'),
+});
+
+export type DecisionOptionInput = z.infer<typeof decisionOptionSchema>;
+
+export const requestDecisionArgsSchema = {
+  question: z.string().min(1).describe('Short question shown as the doc title and Calendar/Reminders title (e.g. "用方案 A 还是方案 B？").'),
+  context: z.string().optional().describe('Optional background; pasted into the markdown doc under the question.'),
+  options: z.array(decisionOptionSchema).min(2).describe('All viable options the user could pick, ranked best-on-top by recommendationScore.'),
+  deadlineMs: z.number().int().positive().describe('Epoch ms. Used for the Calendar event start time + Reminders due date. Pick something reasonable based on urgency (e.g. now + 1 day for non-urgent, +30 min for blocking decisions).'),
 };
 
 export interface PlanValidationError {

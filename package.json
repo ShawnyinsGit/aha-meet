@@ -1,6 +1,6 @@
 {
   "name": "aha-meet",
-  "version": "0.5.5",
+  "version": "0.5.9",
   "description": "Real-time meeting-style collaboration with Claude Code",
   "private": true,
   "type": "module",
@@ -16,8 +16,9 @@
     "test": "npm run build:electron && node --import \"data:text/javascript,import { register } from 'node:module'; import { pathToFileURL } from 'node:url'; register('./tests/electron-stub.mjs', pathToFileURL('./'));\" --test tests/*.test.mjs",
     "prebuild:whisper": "node scripts/fetch-whisper.mjs",
     "prebuild:claude-defaults": "node scripts/bundle-claude-defaults.mjs",
-    "dist": "npm run prebuild:whisper && npm run prebuild:claude-defaults && npm run build && electron-builder --mac --arm64",
-    "dist:dmg": "npm run prebuild:whisper && npm run prebuild:claude-defaults && npm run build && electron-builder --mac --arm64 --publish never"
+    "prebuild:speaker": "node scripts/fetch-speaker-model.mjs",
+    "dist": "npm run prebuild:whisper && npm run prebuild:speaker && npm run prebuild:claude-defaults && npm run build && electron-builder --mac --arm64",
+    "dist:dmg": "npm run prebuild:whisper && npm run prebuild:speaker && npm run prebuild:claude-defaults && npm run build && electron-builder --mac --arm64 --publish never"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.150",

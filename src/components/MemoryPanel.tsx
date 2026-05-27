@@ -286,7 +286,7 @@ export function MemoryPanel() {
     <div className="drawer-settings memory-panel">
       <div className="drawer-settings-row">
         <div className="drawer-settings-label">
-          <div className="drawer-settings-title">🧠 跨会议记忆 · Memory</div>
+          <div className="drawer-settings-title">跨会议记忆 · Memory</div>
           <div className="drawer-settings-hint">
             Claude 自动沉淀的要点 / 决策 / 待办 / 事实,会注入下一场会议的开场上下文。
           </div>

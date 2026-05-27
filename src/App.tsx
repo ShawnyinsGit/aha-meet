@@ -55,6 +55,7 @@ export function App() {
   const [ttsOn, setTtsOn] = useState(true);
   const [muted, setMuted] = useState(false);
   const [autoApprove, setAutoApprove] = useState(false);
+  const [multiAgent, setMultiAgent] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [aiSpeaking, setAiSpeaking] = useState(false);
   const [startedAt, setStartedAt] = useState<number | null>(null);
@@ -86,8 +87,8 @@ export function App() {
   const [guidanceClosedThisSession, setGuidanceClosedThisSession] = useState(false);
   const [filterMode, setFilterModeState] = useState<SpeechFilterMode>('strict');
 
-  // Multi-agent mode is always active — no toggle.
-  const multiAgent = true;
+  // Whether to surface subagents in the participant panel. Independent of the
+  // multi-agent send mode toggle in the header.
   const showSubagents = true;
 
   const { voices, ready: voicesReady } = useVoices();
@@ -194,9 +195,13 @@ export function App() {
   }, []);
 
   const handleOpenGuide = useCallback(() => setGuideOpen(true), []);
-  const handleGuideClose = useCallback(() => setGuideOpen(false), []);
+  const handleGuideClose = useCallback(() => {
+    setGuideOpen(false);
+    setGuidanceClosedThisSession(true);
+  }, []);
   const handleDismissForever = useCallback(() => {
     setGuidanceDismissed(true);
+    setGuidanceClosedThisSession(true);
     setGuideOpen(false);
     void window.vibeMeet.setVoicePref({ guidanceDismissed: true });
   }, []);
@@ -238,13 +243,9 @@ export function App() {
             };
             setVoicePrint(vp);
             setVoicePrintEmbedding(mean);
-            // Do NOT auto-enable the gate. Auto-enable created a silent-fail
-            // trap: enrollment with imperfect samples would lock everyone
-            // (including the user) out of normal speech, and the only signal
-            // was a small "ignored other voice" toast easy to miss. Make the
-            // user explicitly flip the switch once they've confirmed the
-            // print is good — preserves their existing toggle state otherwise.
+            setVoiceLockEnabled(true);
             void window.vibeMeet.setVoicePrint(vp);
+            void window.vibeMeet.setVoiceLockEnabled(true);
             showEnrollmentToast('saved');
           } else {
             // averageEmbeddings only returns null on degenerate input (all
@@ -284,6 +285,15 @@ export function App() {
     // Cut Claude off if he's mid-greeting — otherwise his TTS bleeds into
     // the user's own speakers and contaminates the enrollment sample.
     cancelSpeech();
+    // cancelSpeech() flips activeSession.cancelled but does NOT invoke the
+    // speakConversational onAllDone callback that resets aiSpeaking — so
+    // without this synchronous reset, `suppressed` stays true into the next
+    // render and useVoiceCapture's suppressedRef keeps swallowing user audio
+    // even though TTS playback is gone. Tear down the speaking flag locally
+    // so the next render of useAsr propagates suppressed=false to the VAD
+    // callbacks well before the user's first enrollment segment lands.
+    speakingRef.current = false;
+    setAiSpeaking(false);
     if (prevMutedRef.current === null) {
       prevMutedRef.current = muted;
     }
@@ -321,10 +331,9 @@ export function App() {
           };
           setVoicePrint(vp);
           setVoicePrintEmbedding(mean);
-          // Do NOT auto-enable the gate here either — same silent-fail
-          // trap as handleEnrollmentSegment. User opts in explicitly
-          // via the voice-lock switch once they've verified the print.
+          setVoiceLockEnabled(true);
           void window.vibeMeet.setVoicePrint(vp);
+          void window.vibeMeet.setVoiceLockEnabled(true);
           showEnrollmentToast('saved');
         } else {
           showEnrollmentToast('tooShort');
@@ -443,6 +452,11 @@ export function App() {
 
   const leave = useCallback(async () => {
     cancelSpeech();
+    // cancelSpeech() doesn't fire the active session's onAllDone, so reset
+    // the speaking flag here too — otherwise a leave during TTS leaves
+    // aiSpeaking=true and the next session re-joins with the mic suppressed.
+    speakingRef.current = false;
+    setAiSpeaking(false);
     stopShare();
     await endSession();
     setJoined(false);
@@ -468,6 +482,28 @@ export function App() {
     await sendImage(dataUrl, caption);
   }, [captureFrame, sendImage, share.sourceName]);
 
+  // 多 Agent 并行: when the header toggle is on, every user message is wrapped
+  // in a meta-instruction that nudges the Talker to call its plan_meeting MCP
+  // tool, which evaluates dependencies, decomposes the request into a DAG of
+  // workers, and spawns them in parallel via the orchestrator. Reuses the
+  // existing infrastructure — no new IPC, no parallel LLM path.
+  const sendWithMode = useCallback(async (raw: string) => {
+    const trimmed = raw.trim();
+    if (!trimmed) return;
+    if (!multiAgent) {
+      await sendText(trimmed);
+      return;
+    }
+    const directive = `请把下面这段需求当作"多 Agent 并行"模式处理：先评估各子任务之间的依赖关系，再拆成多个相互独立（或按依赖排序）的子任务，**立即调用 plan_meeting 工具**一次性派发给多个 worker 并行执行。
+- 仔细判断哪些任务可以并行、哪些有依赖（用 deps 字段标注）。
+- 每个 task 给一个稳定的 kebab-case id、一句话标题、给 worker 看的完整 prompt。
+- 拆完直接调工具，不要先问我确认。
+
+需求：
+${trimmed}`;
+    await sendText(directive);
+  }, [multiAgent, sendText]);
+
   if (!joined) {
     return <JoinScreen onJoin={join} defaultCwd={state.cwd ?? rememberedCwd ?? undefined} lastError={state.lastError} />;
   }
@@ -479,8 +515,19 @@ export function App() {
         elapsed={elapsed}
         autoApprove={autoApprove}
         onToggleAutoApprove={() => setAutoApprove((v) => !v)}
+        multiAgent={multiAgent}
+        onToggleMultiAgent={() => setMultiAgent((v) => !v)}
         settingsSlot={
           <SettingsMenu badge={enrollment != null}>
+            <MemoryPanel />
+            <VoiceSelector
+              voices={voices}
+              selectedVoiceName={selectedVoiceName}
+              onChange={handleVoiceChange}
+              onOpenGuide={handleOpenGuide}
+              filterMode={filterMode}
+              onChangeFilterMode={handleFilterModeChange}
+            />
             <VoiceLockPanel
               enabled={voiceLockEnabled}
               enrolledAt={voicePrint?.enrolledAt ?? null}
@@ -501,15 +548,6 @@ export function App() {
               onCancelEnroll={handleCancelEnrollment}
               onClearEnrollment={handleClearEnrollment}
             />
-            <MemoryPanel />
-            <VoiceSelector
-              voices={voices}
-              selectedVoiceName={selectedVoiceName}
-              onChange={handleVoiceChange}
-              onOpenGuide={handleOpenGuide}
-              filterMode={filterMode}
-              onChangeFilterMode={handleFilterModeChange}
-            />
           </SettingsMenu>
         }
       />
@@ -525,7 +563,6 @@ export function App() {
               <ParticipantPanel
                 workers={workers.workerList}
                 plan={workers.plan}
-                cwd={state.cwd}
                 running={state.running}
                 aiSpeaking={aiSpeaking}
                 onResolvePermission={resolvePermission}
@@ -538,7 +575,7 @@ export function App() {
                     speaking={effectiveListening && !muted}
                     muted={muted}
                     status={muted ? 'Muted' : effectiveListening ? 'Speaking' : 'Mic idle'}
-                    bottomText={muted ? 'Mic off' : effectiveListening ? 'Listening…' : 'Ready'}
+                    ariaLabel="查看我派出的任务"
                   />
                 }
               />
@@ -552,7 +589,8 @@ export function App() {
           activity={state.activity}
           pending={state.pendingPermission}
           onResolve={resolvePermission}
-          onSend={sendText}
+          onSend={sendWithMode}
+          multiAgent={multiAgent}
           disabled={!state.running}
         />
       </main>

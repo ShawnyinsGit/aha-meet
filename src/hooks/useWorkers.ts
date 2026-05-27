@@ -1,6 +1,6 @@
 import { useCallback, useSyncExternalStore } from 'react';
 import { meetingStore, type WorkerState } from '../lib/meeting-store';
-import type { MeetingPlan, PlanMeetingTaskInput } from '../types';
+import type { MeetingPlan } from '../types';
 
 export interface UseWorkersResult {
   workers: Map<string, WorkerState>;
@@ -16,7 +16,6 @@ export interface UseWorkersResult {
   resolvePermission: (id: string, decision: 'allow' | 'deny') => Promise<void>;
   interrupt: () => Promise<void>;
   endSession: () => Promise<void>;
-  planMeeting: (tasks: PlanMeetingTaskInput[]) => Promise<{ ok: boolean; error?: string }>;
   setSpeakCallback: (cb: ((text: string) => void) | null) => void;
 }
 
@@ -40,10 +39,6 @@ export function useWorkers(): UseWorkersResult {
   );
   const interrupt = useCallback(() => meetingStore.interrupt(), []);
   const endSession = useCallback(() => meetingStore.endSession(), []);
-  const planMeeting = useCallback(
-    (tasks: PlanMeetingTaskInput[]) => meetingStore.planMeeting(tasks),
-    [],
-  );
 
   return {
     workers: state.workers,
@@ -59,7 +54,6 @@ export function useWorkers(): UseWorkersResult {
     resolvePermission,
     interrupt,
     endSession,
-    planMeeting,
     setSpeakCallback,
   };
 }

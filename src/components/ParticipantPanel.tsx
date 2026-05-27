@@ -1,15 +1,17 @@
-import { useEffect, useMemo, useState } from 'react';
-import type { ReactNode } from 'react';
+import { cloneElement, isValidElement, useCallback, useEffect, useMemo, useState } from 'react';
+import type { ReactElement, ReactNode } from 'react';
 import { ChevronUp, ChevronDown } from 'lucide-react';
 import type { WorkerState } from '../lib/meeting-store';
 import type { MeetingPlan } from '../types';
 import { ClaudeWorkspace } from './ClaudeWorkspace';
 import { WorkerCard } from './WorkerCard';
+import { UserTasksPanel } from './UserTasksPanel';
+
+const USER_SLOT = 'user';
 
 interface ParticipantPanelProps {
   workers: WorkerState[];
   plan: MeetingPlan | null;
-  cwd: string | null;
   running: boolean;
   aiSpeaking: boolean;
   selfTile: ReactNode;
@@ -19,7 +21,6 @@ interface ParticipantPanelProps {
 export function ParticipantPanel({
   workers,
   plan,
-  cwd,
   running,
   aiSpeaking,
   selfTile,
@@ -63,18 +64,40 @@ export function ParticipantPanel({
   }, [plan, workers]);
 
   // Default: host (talker) workspace expanded. Selection only changes when the
-  // user explicitly clicks a tile.
+  // user explicitly clicks a tile. The synthetic USER_SLOT id corresponds to
+  // clicking your own avatar — renders the user-task list in the detail area.
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   useEffect(() => {
-    if (selectedId && !workers.some((w) => w.id === selectedId)) {
+    if (selectedId && selectedId !== USER_SLOT && !workers.some((w) => w.id === selectedId)) {
       setSelectedId(null);
     }
   }, [selectedId, workers]);
 
   const effectiveSelected = selectedId ?? 'talker';
   const selectedWorker =
-    sortedWorkers.find((w) => w.id === effectiveSelected) ?? sortedWorkers[0] ?? null;
+    effectiveSelected === USER_SLOT
+      ? null
+      : (sortedWorkers.find((w) => w.id === effectiveSelected) ?? sortedWorkers[0] ?? null);
+
+  const handleSelectUser = useCallback(() => setSelectedId(USER_SLOT), []);
+
+  // Inject selection + click handler into the caller-provided self tile so it
+  // behaves the same as any worker tile. The caller can still pass its own
+  // onClick — we wrap it.
+  const wrappedSelfTile = useMemo(() => {
+    if (!isValidElement(selfTile)) return selfTile;
+    const el = selfTile as ReactElement<Record<string, unknown>>;
+    const props = el.props ?? {};
+    const existingClick = props.onClick as (() => void) | undefined;
+    return cloneElement(el, {
+      selected: effectiveSelected === USER_SLOT,
+      onClick: () => {
+        existingClick?.();
+        handleSelectUser();
+      },
+    });
+  }, [selfTile, effectiveSelected, handleSelectUser]);
 
   const [barCollapsed, setBarCollapsed] = useState(false);
 
@@ -82,7 +105,7 @@ export function ParticipantPanel({
     <aside className="tiles tiles--stack">
       <div className={`tiles-bar ${barCollapsed ? 'tiles-bar-collapsed' : ''}`}>
         <div className="tiles-bar-scroll">
-          <div className="tiles-bar-self">{selfTile}</div>
+          <div className="tiles-bar-self">{wrappedSelfTile}</div>
           {sortedWorkers.map((w) => (
             <WorkerCard
               key={w.id}
@@ -107,10 +130,11 @@ export function ParticipantPanel({
         </button>
       </div>
       <div className="tiles-detail">
-        {selectedWorker && (
+        {effectiveSelected === USER_SLOT ? (
+          <UserTasksPanel workers={workers} />
+        ) : selectedWorker && (
           <ClaudeWorkspace
             key={selectedWorker.id}
-            cwd={cwd}
             speaking={selectedWorker.role === 'talker' && aiSpeaking}
             awaitingPermission={Boolean(selectedWorker.pendingPermission)}
             running={running}
@@ -121,6 +145,28 @@ export function ParticipantPanel({
             avatar={selectedWorker.role === 'talker' ? 'claude' : 'worker'}
             initial={selectedWorker.title.trim().slice(0, 1).toUpperCase()}
             hideHero
+            task={
+              selectedWorker.role === 'talker'
+                ? undefined
+                : (selectedWorker.status === 'running' || selectedWorker.status === 'pending') && selectedWorker.title
+                  ? selectedWorker.title
+                  : null
+            }
+            taskStatus={
+              selectedWorker.role === 'talker'
+                ? undefined
+                : (selectedWorker.role === 'worker' && aiSpeaking
+                    ? 'speaking'
+                    : selectedWorker.status)
+            }
+            taskSpecialty={selectedWorker.role === 'talker' ? undefined : selectedWorker.specialty}
+            taskDeps={selectedWorker.role === 'talker' ? undefined : selectedWorker.deps}
+            taskHistory={selectedWorker.role === 'talker' ? undefined : selectedWorker.taskHistory}
+            currentTool={selectedWorker.currentTool}
+            currentToolInput={selectedWorker.currentToolInput}
+            lastText={selectedWorker.lastText}
+            startedAt={selectedWorker.startedAt}
+            pendingPermissionTool={selectedWorker.pendingPermission?.toolName ?? null}
           />
         )}
       </div>

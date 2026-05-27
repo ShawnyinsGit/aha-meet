@@ -1,6 +1,7 @@
 import { query, type Query, type SDKMessage, type SDKUserMessage, type CanUseTool, type PermissionResult, type Options } from '@anthropic-ai/claude-agent-sdk';
 import { mergedSubprocessEnv } from './settings-loader.js';
 import { errorMessage } from './format-error.js';
+import { classifyToolRisk } from './auto-approve-policy.js';
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -53,6 +54,14 @@ export type SessionEvent =
   | { kind: 'error'; error: string }
   | { kind: 'ended' };
 
+/** Native confirmer for destructive tool calls when auto-approve is on. The
+ *  Electron implementation lives in main.ts and calls dialog.showMessageBox;
+ *  resolves true on Allow, false on Deny. */
+export type ConfirmDestructive = (
+  toolName: string,
+  input: Record<string, unknown>,
+) => Promise<boolean>;
+
 export class ClaudeSession {
   private q: Query | null = null;
   private inputQueue: SDKUserMessage[] = [];
@@ -67,7 +76,11 @@ export class ClaudeSession {
   // skips emitting a permission-request event, so the worker plows through
   // tool calls without manual approval. Toggled live by the orchestrator.
   // Default OFF — never enabled silently; the user must opt in via the UI.
+  // S3: auto-approve no longer covers destructive tools (Write/Edit/Bash/…).
+  // Those still escalate via `confirmDestructive` so a compromised renderer
+  // can't fake an approval and run arbitrary fs/shell commands.
   private autoApprove = false;
+  private confirmDestructive: ConfirmDestructive | undefined;
 
   constructor(opts: {
     emit: (e: SessionEvent) => void;
@@ -78,12 +91,19 @@ export class ClaudeSession {
      *  mergedSubprocessEnv() — used to redirect HOME at the merged
      *  bundled+user `.claude` shadow dir. */
     envOverride?: NodeJS.ProcessEnv;
+    /** Native OS confirmer for destructive tool calls under auto-approve. In
+     *  Electron, wired to dialog.showMessageBox so a compromised renderer
+     *  cannot fake the approval. If omitted (tests, non-Electron contexts)
+     *  destructive tools under auto-approve fall back to the renderer
+     *  permission-request path. */
+    confirmDestructive?: ConfirmDestructive;
   }) {
     this.emit = opts.emit;
     this.cwd = opts.cwd;
     this.sessionOptions = opts.sessionOptions ?? {};
     this.autoApprove = opts.autoApprove ?? false;
     this.envOverride = opts.envOverride;
+    this.confirmDestructive = opts.confirmDestructive;
   }
 
   /** Toggle trust-mode live. Affects subsequent canUseTool calls only —
@@ -95,14 +115,27 @@ export class ClaudeSession {
 
   start() {
     if (this.q) return;
-    const canUseTool: CanUseTool = (toolName, input, options) => {
-      // Trust-mode short-circuit: resolve allow with the original input and
-      // intentionally skip emitting `permission-request` so the UI doesn't
-      // flicker a pending row that gets answered a tick later. The tool call
-      // itself still shows up in the activity feed once the SDK fires it,
-      // so there's still an audit trail of what ran.
+    const canUseTool: CanUseTool = async (toolName, input, options) => {
       if (this.autoApprove) {
-        return Promise.resolve<PermissionResult>({ behavior: 'allow', updatedInput: input });
+        // S3 tiering: only read-only / app-internal tools get the silent allow.
+        // Destructive ones (Write / Edit / Bash / unknown) must still ask the
+        // user — via a native OS dialog if main wired one up, otherwise fall
+        // through to the renderer permission flow so we never silently approve.
+        if (classifyToolRisk(toolName) === 'safe') {
+          return { behavior: 'allow', updatedInput: input };
+        }
+        if (this.confirmDestructive) {
+          const allowed = await this.confirmDestructive(toolName, input);
+          return allowed
+            ? { behavior: 'allow', updatedInput: input }
+            : {
+                behavior: 'deny',
+                message: 'User denied this destructive tool call (auto-approve native confirm).',
+                interrupt: false,
+              };
+        }
+        // No native confirmer available — degrade to the standard prompt path
+        // below rather than auto-allowing a destructive call.
       }
       return new Promise<PermissionResult>((resolve) => {
         const id = randomUUID();

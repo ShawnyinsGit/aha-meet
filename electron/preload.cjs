@@ -21,9 +21,9 @@ const api = {
   getDesktopSources: () => ipcRenderer.invoke('desktop:get-sources'),
   checkScreenPermission: () => ipcRenderer.invoke('desktop:check-permission'),
   openScreenSettings: () => ipcRenderer.invoke('desktop:open-settings'),
+  relaunchApp: () => ipcRenderer.invoke('app:relaunch'),
   asrAvailable: () => ipcRenderer.invoke('asr:available'),
   transcribePcm: (pcmBuffer, lang) => ipcRenderer.invoke('asr:transcribe', pcmBuffer, lang),
-  planMeeting: (tasks) => ipcRenderer.invoke('meeting:plan-manual', tasks),
   auth: {
     getConfig: () => ipcRenderer.invoke('auth:get-config'),
     setApiKey: (key) => ipcRenderer.invoke('auth:set-api-key', key),
@@ -36,6 +36,9 @@ const api = {
     update: (id, patch) => ipcRenderer.invoke('memory:update', { id, patch }),
     delete: (id) => ipcRenderer.invoke('memory:delete', id),
     currentProjectId: () => ipcRenderer.invoke('memory:projectId'),
+  },
+  decisions: {
+    open: (path) => ipcRenderer.invoke('decision:open', path),
   },
   onEvent: (cb) => {
     const listener = (_, e) => cb(e);

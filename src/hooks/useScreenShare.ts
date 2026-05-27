@@ -51,17 +51,25 @@ export function useScreenShare() {
         streamRef.current.getTracks().forEach((t) => t.stop());
       }
       streamRef.current = stream;
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        const v = videoRef.current;
-        v.play().catch(() => { /* ignore autoplay errors */ });
-      }
       stream.getVideoTracks()[0]?.addEventListener('ended', () => stop());
+      // Flip state first so <video> mounts; the effect below binds the stream
+      // to videoRef.current once it exists.
       setState({ active: true, sourceId, sourceName, error: null });
     } catch (err: unknown) {
       setState({ ...initial, error: errorMessage(err) });
     }
   }, [stop]);
+
+  useEffect(() => {
+    if (!state.active) return;
+    const v = videoRef.current;
+    const s = streamRef.current;
+    if (!v || !s) return;
+    if (v.srcObject !== s) {
+      v.srcObject = s;
+    }
+    v.play().catch(() => { /* ignore autoplay errors */ });
+  }, [state.active]);
 
   const captureFrame = useCallback((): string | null => {
     const v = videoRef.current;

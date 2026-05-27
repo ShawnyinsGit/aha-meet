@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import type { KeyboardEvent } from 'react';
 import { Bell } from 'lucide-react';
 import type { WorkerState } from '../lib/meeting-store';
+import type { WorkerSpecialty } from '../types';
 import { ClaudeAvatar } from './ClaudeAvatar';
 
 interface WorkerCardProps {
@@ -22,6 +23,17 @@ const statusTone: Record<WorkerState['status'], 'idle' | 'waiting' | 'working' |
   failed: 'failed',
 };
 
+const specialtyLabels: Record<WorkerSpecialty, string> = {
+  general: 'General',
+  frontend: 'Frontend',
+  backend: 'Backend',
+  electron: 'Electron',
+  devops: 'DevOps',
+  test: 'Test',
+  docs: 'Docs',
+  review: 'Review',
+};
+
 function avatarInitial(title: string): string {
   const trim = title.trim();
   if (!trim) return '?';
@@ -40,14 +52,6 @@ function statusLabel(worker: WorkerState, speaking: boolean): string {
     case 'failed':  return 'Failed';
     default:        return 'Idle';
   }
-}
-
-/** Bottom context line: last spoken text for talker, task title for workers. */
-function bottomText(worker: WorkerState): string {
-  if (worker.role === 'talker') {
-    return worker.lastText || 'Waiting for input…';
-  }
-  return worker.title || 'Worker';
 }
 
 const PULSE_MS = 600;
@@ -98,7 +102,6 @@ export function WorkerCard({
 
   if (mode === 'gallery') {
     const label = statusLabel(worker, Boolean(speaking));
-    const bottom = bottomText(worker);
     const roleName = isTalker ? 'Talker' : 'Worker';
 
     return (
@@ -112,7 +115,7 @@ export function WorkerCard({
         {/* Role badge — top-right */}
         <div className="tile-role-badge">{roleName}</div>
 
-        <div className={`worker-card-stage ${isTalker ? 'worker-card-stage-talker' : 'worker-card-stage-worker'}`}>
+        <div className={`worker-card-stage worker-card-stage-centered ${isTalker ? 'worker-card-stage-talker' : 'worker-card-stage-worker'}`}>
           <div className={`worker-card-avatar worker-card-avatar-${isTalker ? 'talker' : 'worker'}`}>
             {avatar}
           </div>
@@ -127,10 +130,12 @@ export function WorkerCard({
           </div>
         </div>
 
-        {/* Bottom line: task / last text */}
-        <div className="tile-footer">
-          <span className="tile-bottom-text" title={bottom}>{bottom}</span>
-        </div>
+        {/* Specialty badge — bottom-left chip */}
+        {!isTalker && (
+          <div className={`tile-specialty-badge tile-specialty-${worker.specialty}`}>
+            {specialtyLabels[worker.specialty]}
+          </div>
+        )}
 
         {/* Permission approval inline */}
         {worker.pendingPermission && (

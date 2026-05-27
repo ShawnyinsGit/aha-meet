@@ -3,10 +3,11 @@ import type {
   AgentSource,
   MeetingPlan,
   PendingPermission,
-  PlanMeetingTaskInput,
   RendererEvent,
   TranscriptEntry,
+  WorkerSpecialty,
   WorkerStatus,
+  WorkerTaskHistoryEntry,
 } from '../types';
 import { MEETING_TOOL_NAMES } from '../../electron/meeting-tools';
 import { extractText, extractToolUses, uid } from './sdk-message';
@@ -36,6 +37,9 @@ export interface WorkerState {
   lastText: string;
   endedAt: number | null;
   summary: string;
+  specialty: WorkerSpecialty;
+  startedAt: number | null;
+  taskHistory: WorkerTaskHistoryEntry[];
 }
 
 export interface MeetingState {
@@ -63,6 +67,9 @@ function createTalkerState(): WorkerState {
     lastText: '',
     endedAt: null,
     summary: '',
+    specialty: 'general',
+    startedAt: null,
+    taskHistory: [],
   };
 }
 
@@ -85,6 +92,7 @@ class MeetingStore {
   private speakCallback: ((text: string) => void) | null = null;
   private lastSession: { cwd: string; greeting?: string } | null = null;
   private endedSources: Set<AgentSource> = new Set();
+  private intendedExit = false;
   private subscribed = false;
   private unsubscribeEvents: (() => void) | null = null;
 
@@ -134,6 +142,9 @@ class MeetingStore {
       lastText: '',
       endedAt: null,
       summary: '',
+      specialty: init?.specialty ?? 'general',
+      startedAt: init?.startedAt ?? null,
+      taskHistory: init?.taskHistory ?? [],
     };
     this.state.workers.set(id, w);
     return w;
@@ -154,11 +165,48 @@ class MeetingStore {
     if (e.kind === 'worker-spawned') {
       // Workers can be observed via their own session events before the
       // worker-spawned event arrives; pre-create the row defensively.
+      // Reuse path: if this id already has a finished task (endedAt set), the
+      // orchestrator is reassigning it. Archive the just-completed task into
+      // taskHistory before resetting the transient fields for the new task.
       this.mutate((s) => {
         const workers = new Map(s.workers);
         const existing = workers.get(e.workerId);
+        const now = Date.now();
+        const isReassign = !!(existing && existing.endedAt !== null);
+        const archivedHistory: WorkerTaskHistoryEntry[] = isReassign
+          ? [
+              ...existing!.taskHistory,
+              {
+                id: `${e.workerId}-task-${existing!.taskHistory.length + 1}`,
+                title: existing!.title,
+                status: existing!.status === 'idle' ? 'done' : existing!.status,
+                startedAt: existing!.startedAt ?? existing!.endedAt!,
+                finishedAt: existing!.endedAt!,
+                summary: existing!.summary || undefined,
+              },
+            ]
+          : existing?.taskHistory ?? [];
         const next: WorkerState = existing
-          ? { ...existing, title: e.title, deps: e.deps, status: 'running' }
+          ? {
+              ...existing,
+              title: e.title,
+              deps: e.deps,
+              status: 'running',
+              specialty: e.specialty,
+              startedAt: now,
+              endedAt: null,
+              summary: '',
+              currentTool: null,
+              currentToolInput: null,
+              pendingPermission: null,
+              lastText: '',
+              // Drop the previous task's activity stream so the tile's "what's
+              // happening now" feed reflects only the current task. Transcript
+              // is worker-only chatter, keep it short the same way.
+              activity: isReassign ? [] : existing.activity,
+              transcript: isReassign ? [] : existing.transcript,
+              taskHistory: archivedHistory,
+            }
           : {
               id: e.workerId,
               title: e.title,
@@ -173,6 +221,9 @@ class MeetingStore {
               lastText: '',
               endedAt: null,
               summary: '',
+              specialty: e.specialty,
+              startedAt: now,
+              taskHistory: [],
             };
         workers.set(e.workerId, next);
         return { ...s, workers };
@@ -221,10 +272,11 @@ class MeetingStore {
       // Only flip global running off when the Talker is gone. Workers come
       // and go but the meeting keeps running until the Talker dies.
       if (source === 'talker') {
+        const intended = this.intendedExit;
         this.mutate((s) => ({
           ...s,
           running: false,
-          lastError: s.lastError ?? 'Session ended unexpectedly.',
+          lastError: intended ? s.lastError : (s.lastError ?? 'Session ended unexpectedly.'),
         }));
       }
       return;
@@ -242,6 +294,51 @@ class MeetingStore {
             detail: JSON.stringify(e.input).slice(0, 200),
             ts: Date.now(),
             source,
+          }],
+          MAX_ACTIVITY,
+        ),
+      }));
+      return;
+    }
+    if (e.kind === 'decision-pending') {
+      const sideChannels = [
+        e.calendarOk ? '日历' : null,
+        e.remindersOk ? '提醒' : null,
+      ].filter(Boolean);
+      const sideNote = sideChannels.length > 0
+        ? ` · 已发到${sideChannels.join('/')}`
+        : '';
+      this.updateWorker('talker', (w) => ({
+        ...w,
+        activity: appendCapped(
+          w.activity,
+          [{
+            id: uid(),
+            kind: 'system',
+            title: `等你确认：${e.question}`,
+            detail: `推荐方案：${e.recommendedTitle}${sideNote}`,
+            ts: Date.now(),
+            source: 'talker',
+            actionPath: e.path,
+          }],
+          MAX_ACTIVITY,
+        ),
+      }));
+      return;
+    }
+    if (e.kind === 'decision-resolved') {
+      this.updateWorker('talker', (w) => ({
+        ...w,
+        activity: appendCapped(
+          w.activity,
+          [{
+            id: uid(),
+            kind: 'system',
+            title: `用户已确认：${e.question}`,
+            detail: e.conclusion,
+            ts: Date.now(),
+            source: 'talker',
+            actionPath: e.path,
           }],
           MAX_ACTIVITY,
         ),
@@ -384,6 +481,7 @@ class MeetingStore {
   async startSession(cwd: string, greeting?: string) {
     this.lastSpoken = '';
     this.endedSources = new Set();
+    this.intendedExit = false;
     this.lastSession = { cwd, greeting };
     this.state = emptyState();
     this.notify();
@@ -396,9 +494,11 @@ class MeetingStore {
   async restartSession() {
     const last = this.lastSession;
     if (!last) return;
+    this.intendedExit = true;
     try { await window.vibeMeet.endSession(); } catch { /* ignore */ }
     this.lastSpoken = '';
     this.endedSources = new Set();
+    this.intendedExit = false;
     this.state = emptyState();
     this.notify();
     const res = await window.vibeMeet.startSession(last.cwd, last.greeting);
@@ -425,7 +525,13 @@ class MeetingStore {
       ...w,
       transcript: appendCapped(
         w.transcript,
-        [{ id: uid(), role: 'user', text: `🖼 ${caption || 'Shared current screen'}`, ts: Date.now() }],
+        [{
+          id: uid(),
+          role: 'user',
+          text: caption || 'Shared current screen',
+          imageUrl: dataUrl,
+          ts: Date.now(),
+        }],
         MAX_TRANSCRIPT,
       ),
     }));
@@ -459,13 +565,10 @@ class MeetingStore {
   }
 
   async endSession() {
+    this.intendedExit = true;
     await window.vibeMeet.endSession();
     this.endedSources = new Set();
-    this.mutate((s) => ({ ...s, running: false }));
-  }
-
-  async planMeeting(tasks: PlanMeetingTaskInput[]) {
-    return window.vibeMeet.planMeeting(tasks);
+    this.mutate((s) => ({ ...s, running: false, lastError: null }));
   }
 }
 

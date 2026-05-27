@@ -8,6 +8,7 @@ import { createWriteStream, existsSync, mkdirSync, statSync, copyFileSync, chmod
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
+import { cachePath, ensureCacheDir, materializeFromCache } from './lib/asset-cache.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(here, '..');
@@ -85,13 +86,26 @@ async function ensureModel() {
     return;
   }
 
+  // Reuse a previously-downloaded copy from the durable cache before hitting the network.
+  const cached = cachePath('whisper', MODEL_NAME);
+  if (fileSize(cached) >= MODEL_MIN_SIZE) {
+    const how = materializeFromCache(cached, dest);
+    log(`model restored from cache (${how}): ${cached}`);
+    return;
+  }
+
+  ensureCacheDir('whisper');
   for (const url of MODEL_MIRRORS) {
     log(`downloading model from ${url}`);
     try {
-      await downloadWithCurl(url, dest);
-      const size = fileSize(dest);
+      // Download into the cache, then materialize into the build dir. That
+      // way the next `npm run dist:dmg` (even after `rm -rf build/`) skips
+      // the 190 MB pull.
+      await downloadWithCurl(url, cached);
+      const size = fileSize(cached);
       if (size >= MODEL_MIN_SIZE) {
-        log(`model ok (${(size / 1e6).toFixed(1)} MB)`);
+        const how = materializeFromCache(cached, dest);
+        log(`model ok (${(size / 1e6).toFixed(1)} MB) — cached at ${cached}, ${how}ed to ${dest}`);
         return;
       }
       log(`download incomplete (${size} bytes), trying next mirror`);
@@ -102,7 +116,7 @@ async function ensureModel() {
   }
   throw new Error(
     `Unable to download ${MODEL_NAME} from any mirror. ` +
-    `Place the file manually at ${dest} (~190 MB).`,
+    `Place the file manually at ${cached} or ${dest} (~190 MB).`,
   );
 }
 

@@ -9,17 +9,20 @@ import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, statSync, unlinkSync, renameSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { cachePath, ensureCacheDir, materializeFromCache } from './lib/asset-cache.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(here, '..');
 const outDir = join(repoRoot, 'public', 'voice-id');
 
 const MODEL_NAME = '3dspeaker_campplus_sv_zh_en_16k.onnx';
-// CAM++ from 3D-Speaker, mirrored on HuggingFace by sherpa-onnx maintainer.
-// Trained on CN-Celeb + VoxCeleb; usable for cross-lingual voice verification.
+// CAM++ from 3D-Speaker (200k trained on CN + EN common), pre-converted to ONNX.
+// The previous sherpa-onnx mirror became 401/404; this welcomyou repo is the
+// currently-reachable copy. ~28 MB. We rename to MODEL_NAME locally so the
+// renderer URL (referenced from speaker-embedding.ts) stays stable.
 const MIRRORS = [
-  `https://hf-mirror.com/csukuangfj/sherpa-onnx-speaker-embedding-models/resolve/main/3dspeaker_speech_campplus_sv_zh-cn_16k-common.onnx`,
-  `https://huggingface.co/csukuangfj/sherpa-onnx-speaker-embedding-models/resolve/main/3dspeaker_speech_campplus_sv_zh-cn_16k-common.onnx`,
+  `https://hf-mirror.com/welcomyou/campplus-3dspeaker-200k-onnx/resolve/main/campplus_cn_en_common_200k.onnx`,
+  `https://huggingface.co/welcomyou/campplus-3dspeaker-200k-onnx/resolve/main/campplus_cn_en_common_200k.onnx`,
 ];
 const MIN_SIZE = 20_000_000; // ~28 MB upstream; reject obvious failures
 const MAX_SIZE = 80_000_000;
@@ -73,16 +76,33 @@ async function main() {
     log(`existing file size ${existing} out of expected range — re-downloading`);
     try { unlinkSync(dest); } catch { /* ignore */ }
   }
+
+  // Reuse a previously-downloaded copy from the durable cache before hitting the network.
+  const cached = cachePath('voice-id', MODEL_NAME);
+  const cachedSize = fileSize(cached);
+  if (cachedSize >= MIN_SIZE && cachedSize <= MAX_SIZE) {
+    const how = materializeFromCache(cached, dest);
+    log(`restored from cache (${how}): ${cached}`);
+    return;
+  }
+  if (cachedSize > 0) {
+    try { unlinkSync(cached); } catch { /* ignore */ }
+  }
+
+  ensureCacheDir('voice-id');
   let lastErr = null;
   for (const url of MIRRORS) {
     log(`downloading from ${url}`);
     try {
-      await downloadWithCurl(url, dest);
-      const size = fileSize(dest);
+      // Download into the cache, then materialize into public/voice-id/.
+      // Survives `rm -rf public/voice-id/` and fresh git checkouts.
+      await downloadWithCurl(url, cached);
+      const size = fileSize(cached);
       if (size < MIN_SIZE) {
         throw new Error(`downloaded size ${size} below expected ${MIN_SIZE}`);
       }
-      log(`done (${size} bytes)`);
+      const how = materializeFromCache(cached, dest);
+      log(`done (${size} bytes) — cached at ${cached}, ${how}ed to ${dest}`);
       return;
     } catch (e) {
       lastErr = e;

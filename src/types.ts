@@ -2,6 +2,25 @@ export type AgentSource = 'talker' | string;
 
 export type WorkerStatus = 'pending' | 'running' | 'done' | 'failed';
 
+export type WorkerSpecialty =
+  | 'general'
+  | 'frontend'
+  | 'backend'
+  | 'electron'
+  | 'devops'
+  | 'test'
+  | 'docs'
+  | 'review';
+
+export interface WorkerTaskHistoryEntry {
+  id: string;
+  title: string;
+  status: WorkerStatus;
+  startedAt: number;
+  finishedAt: number;
+  summary?: string;
+}
+
 export interface MeetingPlanNode {
   id: string;
   title: string;
@@ -18,16 +37,11 @@ export type RendererEvent =
   | { kind: 'permission-request'; id: string; toolName: string; input: Record<string, unknown>; toolUseID: string; source?: AgentSource }
   | { kind: 'error'; error: string; source?: AgentSource }
   | { kind: 'ended'; source?: AgentSource }
-  | { kind: 'worker-spawned'; workerId: string; title: string; deps: string[]; source?: AgentSource }
+  | { kind: 'worker-spawned'; workerId: string; title: string; deps: string[]; specialty: WorkerSpecialty; source?: AgentSource }
   | { kind: 'worker-ended'; workerId: string; status: WorkerStatus; summary?: string; source?: AgentSource }
-  | { kind: 'plan-updated'; plan: MeetingPlan; source?: AgentSource };
-
-export interface PlanMeetingTaskInput {
-  id: string;
-  title: string;
-  prompt: string;
-  deps?: string[];
-}
+  | { kind: 'plan-updated'; plan: MeetingPlan; source?: AgentSource }
+  | { kind: 'decision-pending'; decisionId: string; question: string; path: string; recommendedTitle: string; calendarOk: boolean; remindersOk: boolean; source?: AgentSource }
+  | { kind: 'decision-resolved'; decisionId: string; question: string; path: string; conclusion: string; source?: AgentSource };
 
 export interface DesktopSource {
   id: string;
@@ -110,14 +124,17 @@ export interface VibeMeetApi {
   >;
   checkScreenPermission: () => Promise<'not-determined' | 'granted' | 'denied' | 'restricted' | 'unknown'>;
   openScreenSettings: () => Promise<{ ok: boolean }>;
+  relaunchApp: () => Promise<void>;
   asrAvailable: () => Promise<{ ok: boolean; available: boolean }>;
   transcribePcm: (
     pcm: ArrayBuffer,
     lang?: 'auto' | 'zh' | 'en',
   ) => Promise<{ ok: true; text: string } | { ok: false; error: string }>;
-  planMeeting: (tasks: PlanMeetingTaskInput[]) => Promise<{ ok: boolean; error?: string }>;
   auth: AuthApi;
   memory: MemoryApi;
+  decisions: {
+    open: (path: string) => Promise<{ ok: boolean; error?: string }>;
+  };
   onEvent: (cb: (e: RendererEvent) => void) => () => void;
 }
 
@@ -132,6 +149,7 @@ export interface TranscriptEntry {
   role: 'user' | 'assistant' | 'system';
   text: string;
   ts: number;
+  imageUrl?: string;
 }
 
 export interface ActivityEntry {
@@ -141,6 +159,8 @@ export interface ActivityEntry {
   detail?: string;
   ts: number;
   source?: AgentSource;
+  /** Absolute path to a decision markdown doc; renderer shows an "Open" button when set. */
+  actionPath?: string;
 }
 
 export interface PendingPermission {

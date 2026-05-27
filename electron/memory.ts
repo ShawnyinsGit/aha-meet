@@ -76,6 +76,22 @@ const SECRET_PATTERNS: RegExp[] = [
 let cachedFile: MemoryFile | null = null;
 let cachedPath: string | null = null;
 
+// Serializes every read-modify-write against memory.json. Without this, two
+// concurrent `save_memory` MCP calls would both `readFromDisk()` (same cached
+// snapshot), each add their own entry, and the second `persist()` would
+// silently overwrite the first. The queue is a single tail-promise chain;
+// errors are swallowed locally so one failed write doesn't poison the chain.
+let writeQueue: Promise<unknown> = Promise.resolve();
+
+function withWriteLock<T>(fn: () => T | Promise<T>): Promise<T> {
+  const next = writeQueue.then(() => fn());
+  writeQueue = next.then(
+    () => undefined,
+    () => undefined,
+  );
+  return next;
+}
+
 function memoryPath(): string {
   if (cachedPath) return cachedPath;
   cachedPath = join(app.getPath('userData'), 'memory.json');
@@ -181,53 +197,59 @@ export async function appendEntry(
     createdAt: now,
     updatedAt: now,
   };
-  const current = readFromDisk();
-  persist({ entries: [...current.entries, entry] });
-  return { ok: true, entry };
+  return withWriteLock(() => {
+    const current = readFromDisk();
+    persist({ entries: [...current.entries, entry] });
+    return { ok: true, entry };
+  });
 }
 
 export async function updateEntry(
   id: string,
   patch: Partial<Pick<MemoryEntry, 'category' | 'content' | 'tags'>>,
 ): Promise<MemoryEntry | null> {
-  const current = readFromDisk();
-  const idx = current.entries.findIndex((e) => e.id === id);
-  if (idx < 0) return null;
-  const existing = current.entries[idx];
-  const nextCategory =
-    patch.category && VALID_CATEGORIES.has(patch.category)
-      ? patch.category
-      : existing.category;
-  const nextContent =
-    typeof patch.content === 'string' ? patch.content.trim() : existing.content;
-  if (nextContent.length === 0 || nextContent.length > MAX_CONTENT_CHARS) {
-    return null;
-  }
-  const nextTags = Array.isArray(patch.tags)
-    ? patch.tags.filter((t) => typeof t === 'string' && t.length > 0).slice(0, MAX_TAGS)
-    : existing.tags;
-  if (containsSecret(nextContent) || containsSecret(nextTags.join(' '))) {
-    return null;
-  }
-  const updated: MemoryEntry = {
-    ...existing,
-    category: nextCategory,
-    content: nextContent,
-    tags: nextTags,
-    updatedAt: Date.now(),
-  };
-  const nextEntries = [...current.entries];
-  nextEntries[idx] = updated;
-  persist({ entries: nextEntries });
-  return updated;
+  return withWriteLock(() => {
+    const current = readFromDisk();
+    const idx = current.entries.findIndex((e) => e.id === id);
+    if (idx < 0) return null;
+    const existing = current.entries[idx];
+    const nextCategory =
+      patch.category && VALID_CATEGORIES.has(patch.category)
+        ? patch.category
+        : existing.category;
+    const nextContent =
+      typeof patch.content === 'string' ? patch.content.trim() : existing.content;
+    if (nextContent.length === 0 || nextContent.length > MAX_CONTENT_CHARS) {
+      return null;
+    }
+    const nextTags = Array.isArray(patch.tags)
+      ? patch.tags.filter((t) => typeof t === 'string' && t.length > 0).slice(0, MAX_TAGS)
+      : existing.tags;
+    if (containsSecret(nextContent) || containsSecret(nextTags.join(' '))) {
+      return null;
+    }
+    const updated: MemoryEntry = {
+      ...existing,
+      category: nextCategory,
+      content: nextContent,
+      tags: nextTags,
+      updatedAt: Date.now(),
+    };
+    const nextEntries = [...current.entries];
+    nextEntries[idx] = updated;
+    persist({ entries: nextEntries });
+    return updated;
+  });
 }
 
 export async function deleteEntry(id: string): Promise<boolean> {
-  const current = readFromDisk();
-  const next = current.entries.filter((e) => e.id !== id);
-  if (next.length === current.entries.length) return false;
-  persist({ entries: next });
-  return true;
+  return withWriteLock(() => {
+    const current = readFromDisk();
+    const next = current.entries.filter((e) => e.id !== id);
+    if (next.length === current.entries.length) return false;
+    persist({ entries: next });
+    return true;
+  });
 }
 
 export async function listEntries(

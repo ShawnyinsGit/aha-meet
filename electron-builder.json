@@ -12,7 +12,9 @@
     "package.json"
   ],
   "asarUnpack": [
-    "**/node_modules/@anthropic-ai/**/*"
+    "**/node_modules/@anthropic-ai/**/*",
+    "dist/vad/**/*",
+    "dist/voice-id/**/*"
   ],
   "extraResources": [
     { "from": "build/whisper", "to": "whisper", "filter": ["**/*"] },

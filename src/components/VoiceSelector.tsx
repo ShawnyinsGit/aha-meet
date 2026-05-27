@@ -37,7 +37,7 @@ export function VoiceSelector({
     <div className="drawer-settings">
       <div className="drawer-settings-row">
         <div className="drawer-settings-label">
-          <div className="drawer-settings-title">🗣 中文播报音色</div>
+          <div className="drawer-settings-title">中文播报音色</div>
           <div className="drawer-settings-hint">
             {chineseVoices.length === 0
               ? '没检测到中文音色,会用浏览器默认引擎'
@@ -73,7 +73,7 @@ export function VoiceSelector({
 
       <div className="drawer-settings-row" style={{ marginTop: 12 }}>
         <div className="drawer-settings-label">
-          <div className="drawer-settings-title">🧹 播报过滤</div>
+          <div className="drawer-settings-title">播报过滤</div>
           <div className="drawer-settings-hint">
             {strict
               ? '英文段和工具调用不念出来'

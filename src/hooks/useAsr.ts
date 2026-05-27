@@ -55,10 +55,18 @@ export function useAsr({
     window.vibeMeet
       .asrAvailable()
       .then((r) => {
-        if (!cancelled) setAsrAvailable(r.ok ? r.available : false);
+        if (cancelled) return;
+        const available = r.ok ? r.available : false;
+        // One-shot diagnostic so we can confirm which path a packaged build
+        // committed to. Without this, a silent fallback to browser mode is
+        // invisible — and browser mode has historically broken enrollment.
+        console.info('[asr] probe →', { available, raw: r });
+        setAsrAvailable(available);
       })
-      .catch(() => {
-        if (!cancelled) setAsrAvailable(false);
+      .catch((e) => {
+        if (cancelled) return;
+        console.warn('[asr] probe failed, falling back to browser mode:', e);
+        setAsrAvailable(false);
       });
     return () => {
       cancelled = true;
@@ -68,12 +76,21 @@ export function useAsr({
   const mode: AsrMode =
     asrAvailable === null ? 'probing' : asrAvailable ? 'whisper' : 'browser';
 
+  // Enrollment needs raw PCM segments, which only the VAD-based path produces.
+  // webkitSpeechRecognition (browser path) owns its own audio capture and
+  // emits transcripts, never raw audio — so it cannot feed the enrollment
+  // collector. Whenever a `tapSegment` is requested we mount VAD even in
+  // browser mode and silence browser ASR. This (a) makes enrollment work
+  // regardless of whether whisper is bundled, and (b) prevents browser ASR
+  // from transcribing the user's enrollment audio into the chat transcript.
+  const enrollmentActive = !!tapSegment;
+
   // Both backends mount unconditionally (React hook rules) but only the one
   // matching the chosen mode gets `enabled: true`. During probing both stay
   // off so we don't trigger a mic permission prompt before we know which
   // path we're committing to.
   const whisper = useVoiceCapture({
-    enabled: enabled && mode === 'whisper',
+    enabled: enabled && mode !== 'probing' && (mode === 'whisper' || enrollmentActive),
     onTranscript,
     onBargeIn,
     lang,
@@ -85,12 +102,17 @@ export function useAsr({
   });
 
   const browser = useContinuousSpeech({
-    enabled: enabled && mode === 'browser',
+    enabled: enabled && mode === 'browser' && !enrollmentActive,
     onFinal: onTranscript,
     onInterim: (t: string) => {
       if (t.length >= 2) onBargeIn?.();
     },
   });
+
+  // During enrollment we always run VAD (even in browser mode) so its view of
+  // listening/speechLevel/support is the live one. Outside enrollment we fall
+  // back to whichever backend is mounted for that mode.
+  const usingWhisperPath = mode === 'whisper' || (mode === 'browser' && enrollmentActive);
 
   // Treat probing as supported so the mic button doesn't flicker disabled
   // on startup. Once probed: whisper considers `active || muted` supported
@@ -98,13 +120,13 @@ export function useAsr({
   const supported =
     mode === 'probing'
       ? true
-      : mode === 'whisper'
+      : usingWhisperPath
         ? whisper.active || muted
         : browser.supported;
 
-  const listening = mode === 'browser' ? browser.listening : whisper.listening;
-  const speechLevel = mode === 'whisper' ? whisper.speechLevel : 0;
-  const lastError = mode === 'whisper' ? whisper.lastError : null;
+  const listening = usingWhisperPath ? whisper.listening : browser.listening;
+  const speechLevel = usingWhisperPath ? whisper.speechLevel : 0;
+  const lastError = usingWhisperPath ? whisper.lastError : null;
 
   return { mode, listening, supported, speechLevel, lastError };
 }
