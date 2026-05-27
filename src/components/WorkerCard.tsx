@@ -1,14 +1,11 @@
 import { useEffect, useState } from 'react';
 import type { KeyboardEvent } from 'react';
-import { Mic, Bell } from 'lucide-react';
+import { Bell } from 'lucide-react';
 import type { WorkerState } from '../lib/meeting-store';
 import { ClaudeAvatar } from './ClaudeAvatar';
 
 interface WorkerCardProps {
   worker: WorkerState;
-  // Kept on the prop list for API parity with the dock-detail consumer, but
-  // intentionally unused now — gallery/sidebar tiles stay Zoom-clean and
-  // don't render dep chips. Detail-level info belongs in the dock workspace.
   depTitles?: Map<string, string>;
   mode: 'gallery' | 'sidebar';
   selected?: boolean;
@@ -31,6 +28,28 @@ function avatarInitial(title: string): string {
   return trim.slice(0, 1).toUpperCase();
 }
 
+/** Human-readable status label shown below the avatar. */
+function statusLabel(worker: WorkerState, speaking: boolean): string {
+  if (speaking) return 'Speaking';
+  if (worker.pendingPermission) return 'Waiting';
+  if (worker.currentTool) return 'Thinking';
+  switch (worker.status) {
+    case 'running': return 'Running';
+    case 'pending': return 'Pending';
+    case 'done':    return 'Done';
+    case 'failed':  return 'Failed';
+    default:        return 'Idle';
+  }
+}
+
+/** Bottom context line: last spoken text for talker, task title for workers. */
+function bottomText(worker: WorkerState): string {
+  if (worker.role === 'talker') {
+    return worker.lastText || 'Waiting for input…';
+  }
+  return worker.title || 'Worker';
+}
+
 const PULSE_MS = 600;
 
 export function WorkerCard({
@@ -44,9 +63,6 @@ export function WorkerCard({
   const isTalker = worker.role === 'talker';
   const tone = statusTone[worker.status];
 
-  // Pulse for ~600ms whenever a new activity row lands. This is the only
-  // "something is happening" signal on the lean tile — no transcript, no
-  // current-tool text, no recent-activity list.
   const [pulse, setPulse] = useState(false);
   const lastTs = worker.activity.length > 0 ? worker.activity[worker.activity.length - 1].ts : 0;
   useEffect(() => {
@@ -81,6 +97,10 @@ export function WorkerCard({
     .join(' ');
 
   if (mode === 'gallery') {
+    const label = statusLabel(worker, Boolean(speaking));
+    const bottom = bottomText(worker);
+    const roleName = isTalker ? 'Talker' : 'Worker';
+
     return (
       <div
         className={className}
@@ -89,28 +109,30 @@ export function WorkerCard({
         onClick={onSelect}
         onKeyDown={onSelect ? handleKey : undefined}
       >
+        {/* Role badge — top-right */}
+        <div className="tile-role-badge">{roleName}</div>
+
         <div className={`worker-card-stage ${isTalker ? 'worker-card-stage-talker' : 'worker-card-stage-worker'}`}>
           <div className={`worker-card-avatar worker-card-avatar-${isTalker ? 'talker' : 'worker'}`}>
             {avatar}
           </div>
+          {/* Status below avatar */}
           <div className="worker-card-status-badge">
-            <span className={`worker-card-pill worker-card-pill-${tone}`}>{worker.status}</span>
-            {speaking && (
-              <span className="worker-card-icon worker-card-icon-speaking" title="Speaking" aria-label="Speaking">
-                <Mic size={12} />
-              </span>
-            )}
+            <span className={`worker-card-pill worker-card-pill-${tone}`}>{label}</span>
             {worker.pendingPermission && (
-              <span className="worker-card-icon worker-card-icon-perm" title="Awaiting your approval" aria-label="Awaiting approval">
-                <Bell size={12} />
+              <span className="worker-card-icon worker-card-icon-perm" title="Awaiting approval" aria-label="Awaiting approval">
+                <Bell size={11} />
               </span>
             )}
           </div>
         </div>
-        <div className="worker-card-footer">
-          <span className="worker-card-title" title={worker.title}>{worker.title}</span>
-          <span className="worker-card-role">{isTalker ? 'Claude' : 'Worker'}</span>
+
+        {/* Bottom line: task / last text */}
+        <div className="tile-footer">
+          <span className="tile-bottom-text" title={bottom}>{bottom}</span>
         </div>
+
+        {/* Permission approval inline */}
         {worker.pendingPermission && (
           <div className="worker-card-perm">
             <div className="worker-card-perm-text">
@@ -118,21 +140,11 @@ export function WorkerCard({
               <span className="worker-card-perm-tool">{worker.pendingPermission.toolName}</span>?
             </div>
             <div className="worker-card-perm-actions">
-              <button
-                type="button"
-                className="worker-card-perm-allow"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  if (worker.pendingPermission) onResolvePermission(worker.pendingPermission.id, 'allow');
-                }}
+              <button type="button" className="worker-card-perm-allow"
+                onClick={(e) => { e.stopPropagation(); if (worker.pendingPermission) onResolvePermission(worker.pendingPermission.id, 'allow'); }}
               >Allow</button>
-              <button
-                type="button"
-                className="worker-card-perm-deny"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  if (worker.pendingPermission) onResolvePermission(worker.pendingPermission.id, 'deny');
-                }}
+              <button type="button" className="worker-card-perm-deny"
+                onClick={(e) => { e.stopPropagation(); if (worker.pendingPermission) onResolvePermission(worker.pendingPermission.id, 'deny'); }}
               >Deny</button>
             </div>
           </div>
@@ -141,6 +153,7 @@ export function WorkerCard({
     );
   }
 
+  // sidebar mode — horizontal layout
   return (
     <div
       className={className}
@@ -154,18 +167,11 @@ export function WorkerCard({
           {avatar}
         </div>
         <div className="worker-card-titleblock">
-          <div className="worker-card-title" title={worker.title}>
-            {worker.title}
-          </div>
+          <div className="worker-card-title" title={worker.title}>{worker.title}</div>
           <div className="worker-card-meta">
             <span className={`worker-card-pill worker-card-pill-${tone}`}>{worker.status}</span>
-            {speaking && (
-              <span className="worker-card-icon worker-card-icon-speaking" title="Speaking" aria-label="Speaking">
-                <Mic size={12} />
-              </span>
-            )}
             {worker.pendingPermission && (
-              <span className="worker-card-icon worker-card-icon-perm" title="Awaiting your approval" aria-label="Awaiting approval">
+              <span className="worker-card-icon worker-card-icon-perm" title="Awaiting approval" aria-label="Awaiting approval">
                 <Bell size={12} />
               </span>
             )}
@@ -180,30 +186,12 @@ export function WorkerCard({
             <span className="worker-card-perm-tool">{worker.pendingPermission.toolName}</span>?
           </div>
           <div className="worker-card-perm-actions">
-            <button
-              type="button"
-              className="worker-card-perm-allow"
-              onClick={(e) => {
-                e.stopPropagation();
-                if (worker.pendingPermission) {
-                  onResolvePermission(worker.pendingPermission.id, 'allow');
-                }
-              }}
-            >
-              Allow
-            </button>
-            <button
-              type="button"
-              className="worker-card-perm-deny"
-              onClick={(e) => {
-                e.stopPropagation();
-                if (worker.pendingPermission) {
-                  onResolvePermission(worker.pendingPermission.id, 'deny');
-                }
-              }}
-            >
-              Deny
-            </button>
+            <button type="button" className="worker-card-perm-allow"
+              onClick={(e) => { e.stopPropagation(); if (worker.pendingPermission) onResolvePermission(worker.pendingPermission.id, 'allow'); }}
+            >Allow</button>
+            <button type="button" className="worker-card-perm-deny"
+              onClick={(e) => { e.stopPropagation(); if (worker.pendingPermission) onResolvePermission(worker.pendingPermission.id, 'deny'); }}
+            >Deny</button>
           </div>
         </div>
       )}

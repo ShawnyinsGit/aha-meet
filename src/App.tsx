@@ -529,12 +529,13 @@ export function App() {
                 selfTile={
                   <ParticipantTile
                     name="You"
-                    role="Developer"
+                    role="You"
                     initials="You"
                     variant="self"
                     speaking={effectiveListening && !muted}
                     muted={muted}
-                    status={muted ? 'Muted' : effectiveListening ? 'Mic live' : 'Mic idle'}
+                    status={muted ? 'Muted' : effectiveListening ? 'Speaking' : 'Mic idle'}
+                    bottomText={muted ? 'Mic off' : effectiveListening ? 'Listening…' : 'Ready'}
                   />
                 }
               />
