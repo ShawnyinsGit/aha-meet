@@ -26,9 +26,28 @@ export function ParticipantPanel({
   onResolvePermission,
 }: ParticipantPanelProps) {
   const sortedWorkers = useMemo(() => {
+    // Priority order:
+    // 0 = talker (host, always first)
+    // 1 = running workers (active, most relevant)
+    // 2 = pending workers (queued, about to run)
+    // 3 = idle workers
+    // 4 = done / failed (finished, pushed to end)
+    const statusPriority = (w: WorkerState): number => {
+      if (w.role === 'talker') return 0;
+      switch (w.status) {
+        case 'running': return 1;
+        case 'pending': return 2;
+        case 'idle':    return 3;
+        case 'done':    return 4;
+        case 'failed':  return 4;
+        default:        return 3;
+      }
+    };
     return [...workers].sort((a, b) => {
-      if (a.role === 'talker') return -1;
-      if (b.role === 'talker') return 1;
+      const pa = statusPriority(a);
+      const pb = statusPriority(b);
+      if (pa !== pb) return pa - pb;
+      // Within the same priority bucket, sort by first-activity timestamp (earliest first)
       const aTs = a.activity.length > 0 ? a.activity[0].ts : 0;
       const bTs = b.activity.length > 0 ? b.activity[0].ts : 0;
       if (aTs !== bTs) return aTs - bTs;

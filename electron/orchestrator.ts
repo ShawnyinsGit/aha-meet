@@ -106,11 +106,19 @@ const WORKER_PROMPT = `你是 vibe-meet 视频会议里的"执行 agent"。可�
 
 You are a doer in a live voice meeting; multiple workers may run in parallel on the same project. Prefer dispatching the user's installed subagents under \`~/.claude/agents/\` and skills under \`~/.claude/skills/\`. When done call task_done({summary}) so the orchestrator releases workers waiting on you. Keep summary to one short sentence — no code, no file dumps.`;
 
+type SessionFactory = (
+  opts: ConstructorParameters<typeof ClaudeSession>[0],
+) => ClaudeSession;
+
 interface OrchestratorOpts {
   emit: (e: OrchestratorEvent) => void;
   cwd: string;
   autoApprove?: boolean;
   workerEnv?: NodeJS.ProcessEnv;
+  /** Optional override for ClaudeSession construction. Production code leaves
+   *  this unset; tests inject a stub so cleanup paths can run without
+   *  spawning the real Claude CLI subprocess. */
+  sessionFactory?: SessionFactory;
 }
 
 interface WorkerLiveStatus {
@@ -240,6 +248,30 @@ export class Orchestrator {
   // Haiku continued to chew through the transcript.
   private recapQuery: ReturnType<typeof query> | null = null;
   private recapAborted = false;
+  private sessionFactory: SessionFactory;
+
+  // Process-level fallback: if main.ts forgets (or crashes) before its own
+  // before-quit / window-all-closed hooks fire, `process.exit` still gives us
+  // one synchronous chance to release native resources held by live workers.
+  private static liveInstances: Set<Orchestrator> = new Set();
+  private static shutdownHookInstalled = false;
+
+  private static ensureShutdownHook() {
+    if (Orchestrator.shutdownHookInstalled) return;
+    Orchestrator.shutdownHookInstalled = true;
+    const handler = () => {
+      for (const inst of Orchestrator.liveInstances) {
+        try { inst.end(); } catch { /* ignore */ }
+      }
+      Orchestrator.liveInstances.clear();
+    };
+    // 'exit' is sync-only and last-ditch; that's the right shape for "kill
+    // anything still alive on the way out". We deliberately don't grab
+    // SIGINT/SIGTERM — Electron owns those and would route them through its
+    // own quit lifecycle, where main.ts's before-quit handler runs end()
+    // for us via the normal path.
+    process.once('exit', handler);
+  }
 
   constructor(opts: OrchestratorOpts) {
     this.emit = opts.emit;
@@ -248,6 +280,9 @@ export class Orchestrator {
     this.workerEnv = opts.workerEnv;
     this.projectId = computeProjectId(this.cwd);
     this.meetingId = randomUUID();
+    this.sessionFactory = opts.sessionFactory ?? ((o) => new ClaudeSession(o));
+    Orchestrator.liveInstances.add(this);
+    Orchestrator.ensureShutdownHook();
   }
 
   setAutoApprove(on: boolean) {
@@ -282,7 +317,7 @@ export class Orchestrator {
       console.warn('[memory] failed to load memory for system prompt:', err);
     }
 
-    this.talker = new ClaudeSession({
+    this.talker = this.sessionFactory({
       cwd: this.cwd,
       autoApprove: this.autoApprove,
       envOverride: this.workerEnv,
@@ -396,14 +431,18 @@ export class Orchestrator {
     this.closed = true;
 
     for (const handle of this.workers.values()) {
-      if (handle.flushTimer) clearTimeout(handle.flushTimer);
-      handle.flushTimer = null;
-      handle.session?.end();
-      handle.session = null;
+      // Anything still 'running' at end-of-session is treated as failed —
+      // the user ended the meeting before it reported task_done.
+      const finalStatus: WorkerStatusKind =
+        handle.status === 'running' || handle.status === 'pending'
+          ? 'failed'
+          : handle.status;
+      this.disposeWorker(handle, finalStatus, handle.summary);
     }
     this.workers.clear();
     this.talker?.end();
     this.talker = null;
+    Orchestrator.liveInstances.delete(this);
   }
 
   /** Manual entry point: renderer-side "Plan meeting" button. */
@@ -670,7 +709,7 @@ export class Orchestrator {
 
   private spawnWorker(handle: WorkerHandle) {
     const workerMcp = this.buildWorkerMcp(handle.id);
-    handle.session = new ClaudeSession({
+    handle.session = this.sessionFactory({
       cwd: this.cwd,
       autoApprove: this.autoApprove,
       envOverride: this.workerEnv,
@@ -730,9 +769,6 @@ export class Orchestrator {
   private markTaskDone(workerId: string, summary: string) {
     const handle = this.workers.get(workerId);
     if (!handle) return;
-    handle.status = 'done';
-    handle.summary = summary;
-    handle.live.busy = false;
     // Inform the talker so the user hears a clean completion line.
     if (this.talker) {
       const condensed = summary.length > 180 ? `${summary.slice(0, 178)}…` : summary;
@@ -742,8 +778,52 @@ export class Orchestrator {
       source: 'talker',
       event: { kind: 'worker-ended', workerId, status: 'done', summary },
     });
+    // Tombstone the handle: status flips to 'done' and the SDK subprocess +
+    // flush timer + buffers are released. We keep the entry in `workers` so
+    // dependents can still see `status === 'done'` when spawnReadyWorkers
+    // walks the graph below.
+    this.disposeWorker(handle, 'done', summary);
     this.emitPlanUpdate();
     this.spawnReadyWorkers();
+  }
+
+  /** Release the heavy per-worker resources (SDK subprocess, flush timer,
+   *  buffered updates, queued addenda, recent-edits entries) and stamp a
+   *  terminal status onto the handle. We intentionally retain the handle in
+   *  `this.workers` so that dependent workers' status checks
+   *  (`workers.get(d)?.status === 'done'`) and cascadeFailure's reverse walk
+   *  still resolve correctly — the actual leak was the subprocess and
+   *  listener handles, not the small handle object itself. The entries are
+   *  flushed wholesale when `end()` calls `workers.clear()`.
+   *
+   *  Idempotent: safe to call again on an already-disposed handle. */
+  private disposeWorker(handle: WorkerHandle, finalStatus: WorkerStatusKind, summary?: string) {
+    if (handle.flushTimer) {
+      clearTimeout(handle.flushTimer);
+      handle.flushTimer = null;
+    }
+    if (handle.session) {
+      try {
+        handle.session.end();
+      } catch (err) {
+        console.warn(`[orchestrator] worker.end() threw for ${handle.id}:`, err);
+      }
+      handle.session = null;
+    }
+    handle.bufferedUpdates = [];
+    handle.queuedAddenda = [];
+    handle.pendingDelegateAck = false;
+    handle.live.busy = false;
+    handle.live.currentTool = null;
+    handle.live.currentToolInput = null;
+    handle.status = finalStatus;
+    if (typeof summary === 'string') handle.summary = summary;
+    // Drop any file-collision tracking pointing at this worker — without this
+    // the recentEdits map keeps a stale workerId reference for up to
+    // FILE_COLLISION_WINDOW_MS that can't fire anyway (worker is gone).
+    for (const [path, edit] of this.recentEdits) {
+      if (edit.workerId === handle.id) this.recentEdits.delete(path);
+    }
   }
 
   private activeWorkerIds(): string[] {
@@ -961,20 +1041,24 @@ export class Orchestrator {
         this.queueWorkerUpdate(handle, `[${handle.id}] turn complete`);
       }
     } else if (e.kind === 'ended') {
-      handle.live.busy = false;
-      handle.pendingDelegateAck = false;
-      handle.queuedAddenda = [];
-      // If the session ended without task_done, mark the handle as failed so
-      // dependent workers don't wait forever.
+      // SDK stream ended. Two paths land here:
+      //   1. Worker reported task_done → markTaskDone already disposed the
+      //      handle and called `session.end()`; this event is the SDK
+      //      acknowledging that. handle.status is 'done', skip further work.
+      //   2. Worker died / errored / exited a turn without task_done → status
+      //      is still 'running'. Treat as failure: emit, dispose, cascade.
       if (handle.status === 'running') {
-        handle.status = 'failed';
         this.safeEmit({
           source: 'talker',
           event: { kind: 'worker-ended', workerId, status: 'failed' },
         });
+        this.disposeWorker(handle, 'failed');
         this.emitPlanUpdate();
-        // Mark all transitive dependents as failed too — they can't run.
         this.cascadeFailure(workerId);
+      } else {
+        // Defensive re-dispose in case the session leaked back here after a
+        // direct end() — disposeWorker is idempotent.
+        this.disposeWorker(handle, handle.status, handle.summary);
       }
     }
   }
@@ -986,7 +1070,10 @@ export class Orchestrator {
       for (const handle of this.workers.values()) {
         if (handle.status !== 'pending') continue;
         if (handle.deps.some((d) => this.workers.get(d)?.status === 'failed')) {
-          handle.status = 'failed';
+          // Pending nodes have no live session, but disposeWorker normalises
+          // any stragglers (queued addenda, ad-hoc flush timers from
+          // pre-spawn steering attempts) along with stamping the status.
+          this.disposeWorker(handle, 'failed');
           changed = true;
           this.safeEmit({
             source: 'talker',

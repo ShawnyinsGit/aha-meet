@@ -6,12 +6,14 @@
   "type": "module",
   "main": "dist-electron/main.js",
   "scripts": {
+    "postinstall": "node node_modules/electron/install.js",
     "dev": "vite",
     "dev:electron": "tsc -p tsconfig.electron.json && electron .",
     "build:renderer": "vite build",
     "build:electron": "tsc -p tsconfig.electron.json && cp electron/preload.cjs dist-electron/preload.cjs",
     "build": "npm run build:renderer && npm run build:electron",
     "start": "npm run build && electron .",
+    "test": "npm run build:electron && node --import \"data:text/javascript,import { register } from 'node:module'; import { pathToFileURL } from 'node:url'; register('./tests/electron-stub.mjs', pathToFileURL('./'));\" --test tests/*.test.mjs",
     "prebuild:whisper": "node scripts/fetch-whisper.mjs",
     "prebuild:claude-defaults": "node scripts/bundle-claude-defaults.mjs",
     "dist": "npm run prebuild:whisper && npm run prebuild:claude-defaults && npm run build && electron-builder --mac --arm64",
@@ -31,7 +33,7 @@
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.4",
-    "electron": "^33.2.0",
+    "electron": "^42.0.0",
     "electron-builder": "^25.1.8",
     "typescript": "^5.7.2",
     "vite": "^6.0.3"
