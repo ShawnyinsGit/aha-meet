@@ -1760,18 +1760,28 @@ button:disabled {
   border-radius: var(--radius-md, 10px);
   padding: 10px;
   display: flex; flex-direction: column;
+  position: relative;
   gap: 8px;
   transition: border-color var(--transition), box-shadow var(--transition), transform 150ms ease;
   text-align: left;
 }
 
 .worker-card-gallery {
-  cursor: default;
+  cursor: pointer;
   padding: 0;
   overflow: hidden;
   gap: 0;
   min-width: 0;
   text-align: center;
+  /* Match .tile shell exactly so agent and user tiles read as one row. */
+  background: var(--bg-tile);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-lg);
+  position: relative;
+}
+.worker-card-gallery.worker-card-selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent), 0 8px 24px -8px var(--accent-glow);
 }
 
 /* gallery mode: same vertical structure as .tile */
@@ -1790,14 +1800,22 @@ button:disabled {
   display: flex; align-items: center; gap: 4px;
   background: rgba(0,0,0,0.4); padding: 2px 8px; border-radius: 999px;
   backdrop-filter: blur(6px);
+  font-size: 11px; color: var(--text-secondary);
+  white-space: nowrap;
 }
 
+/* Avatar parity with .tile (64px circle, centered) */
 .worker-card-gallery .worker-card-avatar {
-  width: 56px; height: 56px;
+  width: 64px; height: 64px;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 50%;
+  font-weight: 600; font-size: 18px; color: white;
 }
 .worker-card-gallery .worker-card-avatar-worker {
-  border-radius: 50%;
-  font-size: 18px;
+  background: linear-gradient(135deg, #3370ff, #00b6ff);
+}
+.worker-card-gallery .worker-card-avatar-talker {
+  background: transparent;
 }
 
 .worker-card-footer {
