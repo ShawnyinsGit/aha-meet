@@ -82,6 +82,7 @@ export function ParticipantPanel({
     <aside className="tiles tiles--stack">
       <div className={`tiles-bar ${barCollapsed ? 'tiles-bar-collapsed' : ''}`}>
         <div className="tiles-bar-scroll">
+          <div className="tiles-bar-self">{selfTile}</div>
           {sortedWorkers.map((w) => (
             <WorkerCard
               key={w.id}
@@ -94,7 +95,6 @@ export function ParticipantPanel({
               onResolvePermission={onResolvePermission}
             />
           ))}
-          <div className="tiles-bar-self">{selfTile}</div>
         </div>
         <button
           type="button"
