@@ -1,5 +1,4 @@
 import { ReactNode, RefObject } from 'react';
-import { MonitorUp } from 'lucide-react';
 import type { ScreenShareState } from '../hooks/useScreenShare';
 
 interface ScreenStageProps {
@@ -10,7 +9,7 @@ interface ScreenStageProps {
   defaultContent: ReactNode;
 }
 
-export function ScreenStage({ share, videoRef, onPickSource, onStopShare, defaultContent }: ScreenStageProps) {
+export function ScreenStage({ share, videoRef, onPickSource: _onPickSource, onStopShare, defaultContent }: ScreenStageProps) {
   return (
     <div className={`stage ${share.active ? 'stage-sharing' : 'stage-default'}`}>
       {!share.active && <div className="stage-default-content">{defaultContent}</div>}
@@ -30,13 +29,6 @@ export function ScreenStage({ share, videoRef, onPickSource, onStopShare, defaul
             <button className="stage-banner-stop" onClick={onStopShare}>Stop</button>
           </div>
         </>
-      )}
-
-      {!share.active && (
-        <button className="stage-share-pill" onClick={onPickSource} title="Share my screen with Claude">
-          <MonitorUp size={16} aria-hidden="true" />
-          <span>Share my screen</span>
-        </button>
       )}
 
       {share.error && !share.active && (

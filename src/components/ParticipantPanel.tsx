@@ -147,17 +147,13 @@ export function ParticipantPanel({
             hideHero
             task={
               selectedWorker.role === 'talker'
-                ? undefined
-                : (selectedWorker.status === 'running' || selectedWorker.status === 'pending') && selectedWorker.title
-                  ? selectedWorker.title
-                  : null
+                ? (selectedWorker.lastText || 'Ready')
+                : selectedWorker.title
             }
             taskStatus={
               selectedWorker.role === 'talker'
-                ? undefined
-                : (selectedWorker.role === 'worker' && aiSpeaking
-                    ? 'speaking'
-                    : selectedWorker.status)
+                ? (aiSpeaking ? 'speaking' : running ? 'running' : 'idle')
+                : (selectedWorker.role === 'worker' && aiSpeaking ? 'speaking' : selectedWorker.status)
             }
             taskSpecialty={selectedWorker.role === 'talker' ? undefined : selectedWorker.specialty}
             taskDeps={selectedWorker.role === 'talker' ? undefined : selectedWorker.deps}

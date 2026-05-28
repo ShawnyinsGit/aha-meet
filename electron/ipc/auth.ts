@@ -2,13 +2,61 @@ import { ipcMain } from 'electron';
 import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { homedir } from 'node:os';
 import { spawn } from 'node:child_process';
 import { getSettings, updateSettings } from '../store.js';
 import { mergedSubprocessEnv } from '../settings-loader.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
+
+function unpackify(p: string): string {
+  return p.includes('/app.asar/') ? p.replace('/app.asar/', '/app.asar.unpacked/') : p;
+}
+
+/** Resolve the bundled claude binary. Tries multiple strategies so both dev
+ *  (node_modules on disk) and production (app.asar.unpacked) work. */
+async function resolveClaudeBin(): Promise<string | undefined> {
+  const arch = process.arch === 'x64' ? 'darwin-x64' : 'darwin-arm64';
+  const relPath = `node_modules/@anthropic-ai/claude-agent-sdk/node_modules/@anthropic-ai/claude-agent-sdk-${arch}/claude`;
+  const relPathFlat = `node_modules/@anthropic-ai/claude-agent-sdk-${arch}/claude`;
+
+  // 1. Packaged app: resources/app.asar.unpacked/node_modules/...
+  if (process.resourcesPath) {
+    const candidates = [
+      join(process.resourcesPath, 'app.asar.unpacked', relPath),
+      join(process.resourcesPath, 'app.asar.unpacked', relPathFlat),
+    ];
+    for (const c of candidates) {
+      if (existsSync(c)) return c;
+    }
+  }
+
+  // 2. Dev / unpackaged: resolve from project root next to main.js
+  const projectRoot = join(__dirname, '..', '..');
+  const candidates = [
+    join(projectRoot, relPath),
+    join(projectRoot, relPathFlat),
+  ];
+  for (const c of candidates) {
+    if (existsSync(c)) return c;
+  }
+
+  // 3. Try require.resolve as last resort
+  try {
+    const { createRequire } = await import('node:module');
+    const require_ = createRequire(import.meta.url);
+    const subpkg = `@anthropic-ai/claude-agent-sdk-${arch}/claude`;
+    try {
+      const sdkPkg = require_.resolve('@anthropic-ai/claude-agent-sdk/package.json');
+      const p = unpackify(createRequire(sdkPkg).resolve(subpkg));
+      if (existsSync(p)) return p;
+    } catch { /* fall through */ }
+    const p = unpackify(require_.resolve(subpkg));
+    if (existsSync(p)) return p;
+  } catch { /* fall through */ }
+
+  return undefined;
+}
 
 export function registerAuthIpc(): void {
   ipcMain.handle('auth:get-config', async () => {
@@ -44,65 +92,14 @@ export function registerAuthIpc(): void {
   /** Run `claude auth login` in a child process.
    *  The claude CLI opens a browser for OAuth; we wait for it to exit. */
   ipcMain.handle('auth:login-subscription', async () => {
-    // Resolve the bundled claude binary. Try multiple strategies so both dev
-    // (node_modules on disk) and production (app.asar.unpacked) work.
-    function unpackify(p: string): string {
-      return p.includes('/app.asar/') ? p.replace('/app.asar/', '/app.asar.unpacked/') : p;
-    }
-    const arch = process.arch === 'x64' ? 'darwin-x64' : 'darwin-arm64';
-    const relPath = `node_modules/@anthropic-ai/claude-agent-sdk/node_modules/@anthropic-ai/claude-agent-sdk-${arch}/claude`;
-    const relPathFlat = `node_modules/@anthropic-ai/claude-agent-sdk-${arch}/claude`;
-
-    let claudeBin: string | undefined;
-
-    // 1. Packaged app: resources/app.asar.unpacked/node_modules/...
-    if (process.resourcesPath) {
-      const candidates = [
-        join(process.resourcesPath, 'app.asar.unpacked', relPath),
-        join(process.resourcesPath, 'app.asar.unpacked', relPathFlat),
-      ];
-      for (const c of candidates) {
-        if (existsSync(c)) { claudeBin = c; break; }
-      }
-    }
-
-    // 2. Dev / unpackaged: resolve from project root next to main.js
-    if (!claudeBin) {
-      const projectRoot = join(__dirname, '..', '..');
-      const candidates = [
-        join(projectRoot, relPath),
-        join(projectRoot, relPathFlat),
-      ];
-      for (const c of candidates) {
-        if (existsSync(c)) { claudeBin = c; break; }
-      }
-    }
-
-    // 3. Try require.resolve as last resort
-    if (!claudeBin) {
-      try {
-        const { createRequire } = await import('node:module');
-        const require_ = createRequire(import.meta.url);
-        const subpkg = `@anthropic-ai/claude-agent-sdk-${arch}/claude`;
-        try {
-          const sdkPkg = require_.resolve('@anthropic-ai/claude-agent-sdk/package.json');
-          const p = unpackify(createRequire(sdkPkg).resolve(subpkg));
-          if (existsSync(p)) claudeBin = p;
-        } catch { /* fall through */ }
-        if (!claudeBin) {
-          const p = unpackify(require_.resolve(subpkg));
-          if (existsSync(p)) claudeBin = p;
-        }
-      } catch { /* fall through */ }
-    }
-
+    const claudeBin = await resolveClaudeBin();
     if (!claudeBin) {
       return { ok: false, error: 'claude binary not found' };
     }
 
     return new Promise<{ ok: boolean; error?: string }>((resolve) => {
       const env = mergedSubprocessEnv();
-      const proc = spawn(claudeBin!, ['auth', 'login'], {
+      const proc = spawn(claudeBin, ['auth', 'login'], {
         env,
         stdio: 'ignore',
         detached: false,
@@ -121,10 +118,46 @@ export function registerAuthIpc(): void {
     });
   });
 
-  /** Check if the user appears to be logged in via subscription (credentials file exists). */
+  /** Check subscription login status by asking the Claude CLI directly.
+   *  The CLI stores OAuth credentials in its own internal storage (Keychain on
+   *  macOS), not a plain JSON file, so we run `claude auth status --json`
+   *  rather than checking for a credentials file on disk. */
   ipcMain.handle('auth:check-subscription-status', async () => {
-    const credPath = join(homedir(), '.claude', '.credentials.json');
-    const hasCredentials = existsSync(credPath);
-    return { loggedIn: hasCredentials };
+    const claudeBin = await resolveClaudeBin();
+    if (!claudeBin) {
+      return { loggedIn: false };
+    }
+
+    return new Promise<{ loggedIn: boolean }>((resolve) => {
+      const env = mergedSubprocessEnv();
+      let stdout = '';
+      let stderr = '';
+      const proc = spawn(claudeBin, ['auth', 'status', '--json'], {
+        env,
+        stdio: 'pipe',
+        detached: false,
+      });
+      proc.stdout.on('data', (data: Buffer) => {
+        stdout += data.toString('utf8');
+      });
+      proc.stderr.on('data', (data: Buffer) => {
+        stderr += data.toString('utf8');
+      });
+      proc.on('error', () => {
+        resolve({ loggedIn: false });
+      });
+      proc.on('close', (code: number | null) => {
+        if (code !== 0) {
+          resolve({ loggedIn: false });
+          return;
+        }
+        try {
+          const parsed = JSON.parse(stdout.trim());
+          resolve({ loggedIn: Boolean(parsed?.loggedIn) });
+        } catch {
+          resolve({ loggedIn: false });
+        }
+      });
+    });
   });
 }

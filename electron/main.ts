@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, shell } from 'electron';
+import { app, BrowserWindow, dialog, shell, systemPreferences } from 'electron';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { Orchestrator, type OrchestratorEvent } from './orchestrator.js';
@@ -299,6 +299,16 @@ app.whenReady().then(() => {
     claudeShadowHome = null;
   }
   createWindow();
+
+  // Prompt for microphone access at launch. On macOS this shows the native
+  // system dialog when the status is 'not-determined'; on already-granted or
+  // denied systems it returns immediately without re-prompting.
+  if (process.platform === 'darwin') {
+    void systemPreferences.askForMediaAccess('microphone').then((granted) => {
+      console.log('[mic-permission] launch-time request result:', granted);
+    });
+  }
+
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });

@@ -169,6 +169,19 @@ export function useVoiceCapture({
 
     (async () => {
       try {
+        // Ask the OS for microphone access via the native system dialog before
+        // attempting getUserMedia. On macOS this shows the native permission
+        // popup when status is 'not-determined'; returns false immediately if
+        // the user previously denied (they must re-enable in System Settings).
+        // On non-macOS the IPC handler returns true unconditionally.
+        const granted = await window.vibeMeet.requestMicPermission();
+        if (!granted) {
+          setPermissionDenied(true);
+          setLastError('Microphone permission denied — please enable in System Settings');
+          setActive(false);
+          return;
+        }
+
         const vad = await MicVAD.new({
           model: 'v5',
           baseAssetPath: VAD_ASSET_BASE,

@@ -21,6 +21,7 @@ const api = {
   getDesktopSources: () => ipcRenderer.invoke('desktop:get-sources'),
   checkScreenPermission: () => ipcRenderer.invoke('desktop:check-permission'),
   openScreenSettings: () => ipcRenderer.invoke('desktop:open-settings'),
+  requestMicPermission: () => ipcRenderer.invoke('mic:request-permission'),
   relaunchApp: () => ipcRenderer.invoke('app:relaunch'),
   asrAvailable: () => ipcRenderer.invoke('asr:available'),
   transcribePcm: (pcmBuffer, lang) => ipcRenderer.invoke('asr:transcribe', pcmBuffer, lang),

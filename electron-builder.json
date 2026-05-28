@@ -25,9 +25,11 @@
     "target": [
       { "target": "dmg", "arch": ["arm64"] }
     ],
-    "hardenedRuntime": false,
+    "hardenedRuntime": true,
     "gatekeeperAssess": false,
-    "identity": null
+    "identity": "Xinyang Zhang (P2VFVRZK7P)",
+    "entitlements": "build/entitlements.mac.plist",
+    "entitlementsInherit": "build/entitlements.mac.plist"
   },
   "dmg": {
     "title": "AhaMeet ${version}",

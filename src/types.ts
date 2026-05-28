@@ -127,6 +127,7 @@ export interface VibeMeetApi {
   checkScreenPermission: () => Promise<'not-determined' | 'granted' | 'denied' | 'restricted' | 'unknown'>;
   openScreenSettings: () => Promise<{ ok: boolean }>;
   relaunchApp: () => Promise<void>;
+  requestMicPermission: () => Promise<boolean>;
   asrAvailable: () => Promise<{ ok: boolean; available: boolean }>;
   transcribePcm: (
     pcm: ArrayBuffer,

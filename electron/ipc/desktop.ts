@@ -58,4 +58,12 @@ export function registerDesktopIpc(): void {
     await shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture');
     return { ok: true };
   });
+
+  ipcMain.handle('mic:request-permission', async () => {
+    if (process.platform !== 'darwin') return true;
+    // askForMediaAccess shows the macOS native permission dialog when status is
+    // 'not-determined', and returns false immediately if already denied (the user
+    // must change it in System Settings). Returns true if already granted.
+    return systemPreferences.askForMediaAccess('microphone');
+  });
 }

@@ -275,12 +275,6 @@ export function ClaudeWorkspace({
                     <span className="workspace-task-detail-value">{pendingPermissionTool}</span>
                   </div>
                 )}
-                {taskSpecialty && (
-                  <div className="workspace-task-detail-row">
-                    <span className="workspace-task-detail-label">Specialty</span>
-                    <span className="workspace-task-detail-value">{taskSpecialty}</span>
-                  </div>
-                )}
                 {taskDeps && taskDeps.length > 0 && (
                   <div className="workspace-task-detail-row">
                     <span className="workspace-task-detail-label">Deps</span>

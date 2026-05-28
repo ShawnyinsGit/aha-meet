@@ -23,17 +23,6 @@ const statusTone: Record<WorkerState['status'], 'idle' | 'waiting' | 'working' |
   failed: 'failed',
 };
 
-const specialtyLabels: Record<WorkerSpecialty, string> = {
-  general: 'General',
-  frontend: 'Frontend',
-  backend: 'Backend',
-  electron: 'Electron',
-  devops: 'DevOps',
-  test: 'Test',
-  docs: 'Docs',
-  review: 'Review',
-};
-
 function avatarInitial(title: string): string {
   const trim = title.trim();
   if (!trim) return '?';
@@ -129,13 +118,6 @@ export function WorkerCard({
             )}
           </div>
         </div>
-
-        {/* Specialty badge — bottom-left chip */}
-        {!isTalker && (
-          <div className={`tile-specialty-badge tile-specialty-${worker.specialty}`}>
-            {specialtyLabels[worker.specialty]}
-          </div>
-        )}
 
         {/* Permission approval inline */}
         {worker.pendingPermission && (
