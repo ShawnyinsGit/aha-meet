@@ -29,14 +29,36 @@ export class SpeechController {
     this.filterMode = mode;
   }
 
-  cancel(): void {
+  // `silent` — when true, suppress the active session's onAllDone callback.
+  // Used by speakConversational's internal supersede path so the OLD session's
+  // onDone doesn't race-clear flags the NEW session is about to set.
+  // External callers (barge-in, leave, enrollment start) leave silent=false so
+  // their onAllDone fires and downstream state (aiSpeaking, mic suppression)
+  // can reset — without that fire, cancel left aiSpeaking pinned true forever
+  // and every subsequent narration was silently dropped.
+  cancel(silent = false): void {
     if (!('speechSynthesis' in window)) return;
-    if (this.activeSession) {
-      this.activeSession.cancelled = true;
-      this.activeSession.current = null;
+    const session = this.activeSession;
+    if (session) {
+      session.cancelled = true;
+      session.current = null;
     }
-    try { window.speechSynthesis.cancel(); } catch { /* ignore */ }
+    try { window.speechSynthesis.cancel(); } catch (err) {
+      console.warn('[speech] window.speechSynthesis.cancel threw:', err);
+    }
     this.activeSession = null;
+    if (session && !silent && session.onAllDone) {
+      try { session.onAllDone(); } catch (err) {
+        console.warn('[speech] onAllDone (after cancel) threw:', err);
+      }
+    }
+  }
+
+  /** True when an utterance is queued or in flight. Safety-net consumers use
+   *  this to detect "speak state thinks AI is talking but the controller is
+   *  actually idle" (cancel never fired onAllDone, watchdog missed, etc.). */
+  isActive(): boolean {
+    return this.activeSession !== null;
   }
 
   speakConversational(raw: string, onDone?: SpeechCallback): void {
@@ -44,7 +66,9 @@ export class SpeechController {
     const chunks = prepareForSpeech(raw, this.filterMode);
     if (chunks.length === 0) { onDone?.(); return; }
 
-    this.cancel();
+    // Silent supersede: the previous session's onAllDone must NOT fire here,
+    // or it'd reset aiSpeaking=false right before the new session sets it true.
+    this.cancel(true);
 
     const session: SpeakSession = {
       cancelled: false,
@@ -144,8 +168,12 @@ export function setSpeechFilterMode(mode: SpeechFilterMode): void {
   defaultController.setFilterMode(mode);
 }
 
-export function cancelSpeech(): void {
-  defaultController.cancel();
+export function cancelSpeech(silent = false): void {
+  defaultController.cancel(silent);
+}
+
+export function isSpeechActive(): boolean {
+  return defaultController.isActive();
 }
 
 export function speakConversational(raw: string, onDone?: SpeechCallback): void {

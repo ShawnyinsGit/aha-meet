@@ -4,6 +4,7 @@ import { loadVoices } from '../lib/voice-registry';
 export { setSelectedVoiceName } from '../lib/voice-registry';
 export {
   cancelSpeech,
+  isSpeechActive,
   setSpeechFilterMode,
   speak,
   speakConversational,

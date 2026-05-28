@@ -34,16 +34,26 @@ export interface MeetingPlan {
   nodes: MeetingPlanNode[];
 }
 
+/** One file delivered by a worker turn. Path is absolute; the renderer
+ *  fetches contents via `documents.read`. */
+export interface WorkerDeliveryFile {
+  path: string;
+}
+
+/** Every event from main is tagged with the sessionId of the slot that
+ *  emitted it. Renderer's multi-slot store routes the event to the right
+ *  MeetingState by id; absent or unknown ids are dropped. */
 export type RendererEvent =
-  | { kind: 'message'; message: any; source?: AgentSource }
-  | { kind: 'permission-request'; id: string; toolName: string; input: Record<string, unknown>; toolUseID: string; source?: AgentSource }
-  | { kind: 'error'; error: string; source?: AgentSource }
-  | { kind: 'ended'; source?: AgentSource }
-  | { kind: 'worker-spawned'; workerId: string; title: string; deps: string[]; specialty: WorkerSpecialty; source?: AgentSource }
-  | { kind: 'worker-ended'; workerId: string; status: WorkerStatus; summary?: string; source?: AgentSource }
-  | { kind: 'plan-updated'; plan: MeetingPlan; source?: AgentSource }
-  | { kind: 'decision-pending'; decisionId: string; question: string; path: string; recommendedTitle: string; calendarOk: boolean; remindersOk: boolean; source?: AgentSource }
-  | { kind: 'decision-resolved'; decisionId: string; question: string; path: string; conclusion: string; source?: AgentSource };
+  | { kind: 'message'; message: any; source?: AgentSource; sessionId?: string }
+  | { kind: 'permission-request'; id: string; toolName: string; input: Record<string, unknown>; toolUseID: string; source?: AgentSource; sessionId?: string }
+  | { kind: 'error'; error: string; source?: AgentSource; sessionId?: string }
+  | { kind: 'ended'; source?: AgentSource; sessionId?: string }
+  | { kind: 'worker-spawned'; workerId: string; title: string; deps: string[]; specialty: WorkerSpecialty; source?: AgentSource; sessionId?: string }
+  | { kind: 'worker-ended'; workerId: string; status: WorkerStatus; summary?: string; source?: AgentSource; sessionId?: string }
+  | { kind: 'worker-delivery'; workerId: string; title: string; summary: string; taskId: string; files: WorkerDeliveryFile[]; source?: AgentSource; sessionId?: string }
+  | { kind: 'plan-updated'; plan: MeetingPlan; source?: AgentSource; sessionId?: string }
+  | { kind: 'decision-pending'; decisionId: string; question: string; path: string; recommendedTitle: string; calendarOk: boolean; remindersOk: boolean; source?: AgentSource; sessionId?: string }
+  | { kind: 'decision-resolved'; decisionId: string; question: string; path: string; conclusion: string; source?: AgentSource; sessionId?: string };
 
 export interface DesktopSource {
   id: string;
@@ -92,7 +102,7 @@ export interface MemoryApi {
     patch: MemoryUpdatePatch,
   ) => Promise<{ ok: true; entry: MemoryEntry } | { ok: false; error: string }>;
   delete: (id: string) => Promise<{ ok: boolean; error?: string }>;
-  currentProjectId: () => Promise<string | null>;
+  currentProjectId: (sessionId?: string | null) => Promise<string | null>;
 }
 
 export interface AuthApi {
@@ -103,17 +113,84 @@ export interface AuthApi {
   checkSubscriptionStatus: () => Promise<{ loggedIn: boolean }>;
 }
 
+export type AttachmentKind = 'text' | 'image' | 'word' | 'pdf';
+
+export interface StagedAttachment {
+  id: string;
+  name: string;
+  mime: string;
+  sizeBytes: number;
+  kind: AttachmentKind;
+  /** Base64 payload sent across IPC; cleared after send. */
+  dataBase64: string;
+}
+
+export interface AttachmentMeta {
+  name: string;
+  kind: AttachmentKind;
+  sizeBytes: number;
+}
+
+export interface AttachmentSendWire {
+  name: string;
+  mime: string;
+  sizeBytes: number;
+  dataBase64: string;
+}
+
+/** Tab/meeting metadata describing one open slot. Returned by sessions:list. */
+export interface SessionMeta {
+  id: string;
+  cwd: string;
+  openedAt: number;
+  lastActivityAt: number;
+}
+
+export interface RecentCwdMeta {
+  path: string;
+  lastOpenedAt: number;
+}
+
+export interface OpenTabMeta {
+  cwd: string;
+  openedAt: number;
+}
+
+export interface SessionsApi {
+  open: (
+    cwd: string,
+    greeting?: string,
+  ) => Promise<
+    | { ok: true; sessionId: string; cwd: string }
+    | { ok: false; error: 'duplicate'; sessionId: string; cwd?: string }
+    | { ok: false; error: string }
+  >;
+  close: (id: string) => Promise<{ ok: boolean; activeId?: string | null; error?: string }>;
+  setActive: (id: string) => Promise<{ ok: boolean; error?: string }>;
+  list: () => Promise<{ ok: true; sessions: SessionMeta[]; activeId: string | null }>;
+  listRestore: () => Promise<{
+    ok: true;
+    openTabs: OpenTabMeta[];
+    recentCwds: RecentCwdMeta[];
+    lastActiveCwd: string | null;
+  }>;
+}
+
 export interface VibeMeetApi {
-  startSession: (cwd: string, greeting?: string) => Promise<{ ok: boolean; cwd?: string; error?: string }>;
-  sendUserText: (text: string) => Promise<{ ok: boolean; error?: string }>;
-  sendUserImage: (dataUrl: string, caption: string) => Promise<{ ok: boolean; error?: string }>;
-  resolvePermission: (id: string, decision: 'allow' | 'deny', message?: string) => Promise<{ ok: boolean }>;
-  interrupt: () => Promise<{ ok: boolean }>;
-  setPermissionMode: (mode: string) => Promise<{ ok: boolean }>;
+  sessions: SessionsApi;
+  sendUserText: (sessionId: string | null, text: string) => Promise<{ ok: boolean; error?: string }>;
+  sendUserImage: (sessionId: string | null, dataUrl: string, caption: string) => Promise<{ ok: boolean; error?: string }>;
+  sendUserAttachments: (
+    sessionId: string | null,
+    items: AttachmentSendWire[],
+    caption: string,
+  ) => Promise<{ ok: boolean; error?: string; inlinedCount?: number; workspaceCount?: number }>;
+  resolvePermission: (sessionId: string | null, id: string, decision: 'allow' | 'deny', message?: string) => Promise<{ ok: boolean }>;
+  interrupt: (sessionId: string | null) => Promise<{ ok: boolean }>;
+  setPermissionMode: (sessionId: string | null, mode: string) => Promise<{ ok: boolean }>;
   setAutoApprove: (scope: AutoApproveScope) => Promise<{ ok: boolean; autoApproveScope?: AutoApproveScope }>;
-  endSession: () => Promise<{ ok: boolean }>;
+  endSession: (sessionId: string | null) => Promise<{ ok: boolean }>;
   pickCwd: () => Promise<string | null>;
-  getLastCwd: () => Promise<string | null>;
   getVoiceConfig: () => Promise<{ enabled: boolean; voicePrint: VoicePrint | null }>;
   setVoiceLockEnabled: (on: boolean) => Promise<{ ok: boolean }>;
   setVoicePrint: (vp: VoicePrint | null) => Promise<{ ok: boolean }>;
@@ -138,7 +215,51 @@ export interface VibeMeetApi {
   decisions: {
     open: (path: string) => Promise<{ ok: boolean; error?: string }>;
   };
+  documents: DocumentsApi;
+  transcripts: TranscriptsApi;
+  steerWorker: (
+    sessionId: string | null,
+    workerId: string,
+    addendum: string,
+  ) => Promise<{ ok: true; queued: boolean } | { ok: false; error: string; reason?: string }>;
   onEvent: (cb: (e: RendererEvent) => void) => () => void;
+}
+
+export interface TranscriptsApi {
+  load: (
+    cwd: string,
+  ) => Promise<{ ok: true; entries: TranscriptEntry[] } | { ok: false; error: string }>;
+  append: (
+    cwd: string,
+    entry: TranscriptEntry,
+  ) => Promise<{ ok: true } | { ok: false; error: string }>;
+  clear: (cwd: string) => Promise<{ ok: true } | { ok: false; error: string }>;
+}
+
+export type DeliveryFileKind = AttachmentKind | 'video' | 'binary' | 'missing';
+
+export interface DocumentReadOk {
+  ok: true;
+  path: string;
+  name: string;
+  sizeBytes: number;
+  kind: DeliveryFileKind;
+  text?: string;
+  truncated?: boolean;
+  dataBase64?: string;
+  mediaType?: string;
+}
+
+export interface DocumentReadErr {
+  ok: false;
+  error: string;
+  code?: 'not-in-cwd' | 'no-session' | 'missing' | 'too-large' | 'read-failed' | 'invalid-path';
+}
+
+export type DocumentReadResult = DocumentReadOk | DocumentReadErr;
+
+export interface DocumentsApi {
+  read: (sessionId: string | null, path: string) => Promise<DocumentReadResult>;
 }
 
 declare global {
@@ -153,6 +274,7 @@ export interface TranscriptEntry {
   text: string;
   ts: number;
   imageUrl?: string;
+  attachments?: AttachmentMeta[];
 }
 
 export interface ActivityEntry {

@@ -1,7 +1,8 @@
 // store.ts — tiny JSON settings store backed by userData/settings.json.
 //
 // Used for things that should survive app restarts but aren't worth a full DB:
-// last working directory, voice-print enrollment, voice-lock toggle, etc.
+// recent cwds for the Lobby, open tab list for cold-restart, voice-print
+// enrollment, voice-lock toggle, etc.
 //
 // Reads are synchronous and cached after first hit. Writes go through an
 // atomic temp+rename so a crash mid-write won't leave a half-truncated file.
@@ -20,8 +21,29 @@ export interface VoicePrint {
   enrolledAt: number;
 }
 
+export interface RecentCwdEntry {
+  path: string;
+  lastOpenedAt: number;
+}
+
+export interface OpenTabEntry {
+  cwd: string;
+  openedAt: number;
+}
+
 export interface Settings {
+  /** @deprecated Migrated into recentCwds + lastActiveCwd at first load. Kept
+   *  in the type so JSON files written by old versions parse without warnings. */
   lastCwd?: string;
+  /** LRU of directories the user has ever opened a meeting in. Newest first.
+   *  Capped at RECENT_CWDS_MAX to keep settings.json bounded. */
+  recentCwds?: RecentCwdEntry[];
+  /** Tabs that were open last time the app quit. The renderer uses this on
+   *  cold start to draw placeholder tabs without spawning Orchestrators. */
+  openTabs?: OpenTabEntry[];
+  /** The cwd of the focused tab at last quit, so cold restart can auto-focus
+   *  the right placeholder. */
+  lastActiveCwd?: string | null;
   voiceLockEnabled?: boolean;
   voicePrint?: VoicePrint;
   // null = "auto" (let rankVoice pick). A string overrides the picker with
@@ -41,6 +63,8 @@ export interface Settings {
   // Stored as plain text in the settings file (userData/settings.json).
   anthropicApiKey?: string;
 }
+
+const RECENT_CWDS_MAX = 10;
 
 let cached: Settings | null = null;
 let cachedPath: string | null = null;
@@ -66,6 +90,21 @@ function load(): Settings {
     // Corrupt file — log and start fresh rather than crash the app.
     console.error('[store] failed to parse settings.json, starting fresh:', err);
     cached = {};
+  }
+  // One-shot migration: pre-multi-tab versions only kept lastCwd. Promote it
+  // into recentCwds so the Lobby has something to show, then drop the field
+  // (recentCwds + lastActiveCwd subsume it). Idempotent: if recentCwds is
+  // already populated the migration is a no-op.
+  if (cached.lastCwd && (!cached.recentCwds || cached.recentCwds.length === 0)) {
+    cached = {
+      ...cached,
+      recentCwds: [{ path: cached.lastCwd, lastOpenedAt: Date.now() }],
+      lastActiveCwd: cached.lastCwd,
+    };
+    delete cached.lastCwd;
+    try { persist(cached); } catch (err) {
+      console.error('[store] migration write failed:', err);
+    }
   }
   return cached;
 }
@@ -94,4 +133,32 @@ export function clearVoicePrint(): Settings {
   const { voicePrint: _vp, ...rest } = current;
   persist(rest);
   return { ...rest };
+}
+
+/** Upsert a cwd into the LRU. Bumps existing entries to the top instead of
+ *  duplicating. Cap at RECENT_CWDS_MAX to keep the file bounded — only the
+ *  Lobby renders this list, no one needs an unbounded scroll. */
+export function pushRecentCwd(cwd: string): Settings {
+  const current = load();
+  const now = Date.now();
+  const existing = (current.recentCwds ?? []).filter((r) => r.path !== cwd);
+  const next: Settings = {
+    ...current,
+    recentCwds: [{ path: cwd, lastOpenedAt: now }, ...existing].slice(0, RECENT_CWDS_MAX),
+  };
+  persist(next);
+  return { ...next };
+}
+
+/** Replace the openTabs + lastActiveCwd atomically. Called on every tab
+ *  open/close/setActive so a sudden quit still restores accurately. */
+export function setOpenTabs(tabs: OpenTabEntry[], activeCwd: string | null): Settings {
+  const current = load();
+  const next: Settings = {
+    ...current,
+    openTabs: tabs.map((t) => ({ cwd: t.cwd, openedAt: t.openedAt })),
+    lastActiveCwd: activeCwd,
+  };
+  persist(next);
+  return { ...next };
 }

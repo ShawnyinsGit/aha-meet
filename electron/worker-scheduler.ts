@@ -79,6 +79,13 @@ export interface WorkerSchedulerOpts {
   /** Reports orchestrator shutdown. Scheduler uses it to short-circuit
    *  queued setTimeout callbacks that fire after end(). */
   isClosed: () => boolean;
+  /** Live read of the user's "播报过滤" toggle. When 'strict', the bursty
+   *  per-tool-call worker→talker update stream is dropped before it reaches
+   *  the talker session — task_done summaries, failures, file collisions,
+   *  and plan updates still flow through their own direct paths. Returns
+   *  'off' if the caller wants the raw stream. Read on each flush so a live
+   *  toggle takes effect on the next batch without restarting the meeting. */
+  getSpeechFilterMode: () => 'strict' | 'off';
 }
 
 const QUEUED_UPDATE_FLUSH_MS = 1200;
@@ -265,7 +272,22 @@ export class WorkerScheduler {
 
   markTaskDone(workerId: string, summary: string): void {
     const handle = this.workers.get(workerId);
-    if (!handle) return;
+    if (!handle) {
+      // V0.7.4 MEDIUM: A worker may legitimately call task_done after the
+      // scheduler has already cleaned it up — spawn-time failure, SDK 'ended'
+      // before task_done landed, DAG-cascade failure from an upstream worker,
+      // or a race with endAll() on session teardown. Silently returning hides
+      // the lost completion (Talker never hears about it and the user has no
+      // signal that the work the worker thought it finished went nowhere).
+      // Warn so the case is visible in logs, and DO NOT throw / cascade —
+      // the MCP tool handler's success-shaped reply keeps the worker
+      // subprocess from retrying into a no-op loop.
+      console.warn('[scheduler] task_done from unknown worker', {
+        workerId,
+        summary: summary.slice(0, 200),
+      });
+      return;
+    }
     // Inform the talker so the user hears a clean completion line.
     const talker = this.opts.getTalker();
     if (talker) {
@@ -274,10 +296,30 @@ export class WorkerScheduler {
         : summary;
       talker.sendUserText(`(worker ${workerId} done) ${condensed}`);
     }
+    // Snapshot the deliverables BEFORE disposeWorker resets the handle, so
+    // the renderer's "delivery acceptance" panel sees the same file list the
+    // user expects from the just-completed turn. Snapshot to an array; the
+    // Set is cleared as part of the snapshot to avoid leaking into the next
+    // task if this handle is reassigned.
+    const deliveredPaths = Array.from(handle.deliveries);
+    handle.deliveries.clear();
     this.opts.emit({
       source: 'talker',
       event: { kind: 'worker-ended', workerId, status: 'done', summary },
     });
+    if (deliveredPaths.length > 0) {
+      this.opts.emit({
+        source: 'talker',
+        event: {
+          kind: 'worker-delivery',
+          workerId,
+          title: handle.title,
+          summary,
+          taskId: handle.currentTaskId,
+          files: deliveredPaths.map((p) => ({ path: p })),
+        },
+      });
+    }
     // Tombstone the handle: status flips to 'done' and the SDK subprocess +
     // flush timer + buffers are released. We keep the entry in `workers` so
     // dependents can still see `status === 'done'` when spawnReadyWorkers
@@ -342,11 +384,18 @@ export class WorkerScheduler {
               handle,
               `[${handle.id}] started ${t.name}${handle.live.currentToolInput ? `: ${handle.live.currentToolInput}` : ''}`,
             );
-            // Track file edits for collision advisory.
+            // Track file edits for collision advisory + delivery snapshot.
+            // recordFileEdit drives the cross-worker collision warning; the
+            // handle.deliveries Set is the per-task list that markTaskDone
+            // snapshots into a `worker-delivery` event for the renderer
+            // ScreenStage acceptance panel.
             for (const t2 of tools) {
               if (FILE_EDIT_TOOLS.has(t2.name)) {
                 const p = extractFilePath(t2.input);
-                if (p) this.recordFileEdit(workerId, p);
+                if (p) {
+                  this.recordFileEdit(workerId, p);
+                  handle.deliveries.add(p);
+                }
               }
             }
           }
@@ -360,7 +409,11 @@ export class WorkerScheduler {
               handle.live.currentTool = null;
               handle.live.currentToolInput = null;
             }
-          } catch { /* ignore */ }
+          } catch (err) {
+            // SDK shape drift would silently leak tool-result clearing here.
+            // Warn so we notice rather than ship a half-broken status line.
+            console.warn('[worker-scheduler] tool_result parse failed', { workerId: handle.id, err });
+          }
         } else if (msg?.type === 'result') {
           handle.live.busy = false;
           // If the worker ended a turn WITHOUT calling task_done, we don't
@@ -435,6 +488,7 @@ export class WorkerScheduler {
       currentTaskId: `${spec.id}-task-1`,
       taskSeq: 1,
       taskHistory: [],
+      deliveries: new Set<string>(),
     };
     this.workers.set(spec.id, handle);
   }
@@ -486,6 +540,7 @@ export class WorkerScheduler {
     handle.bufferedUpdates = [];
     handle.queuedAddenda = [];
     handle.pendingDelegateAck = false;
+    handle.deliveries.clear();
     if (handle.flushTimer) {
       clearTimeout(handle.flushTimer);
       handle.flushTimer = null;
@@ -683,7 +738,17 @@ export class WorkerScheduler {
 
   // Coalesce a burst of per-worker events into ONE injected user message to
   // Talker so we don't flood its context.
+  //
+  // When the user has 播报过滤 set to 'strict' we skip this entire pipeline:
+  // the tool-call play-by-play (`[id] started Read: /path`, `[id] finished
+  // Bash`, `[id] thought: ...`, `[id] turn complete`) is exactly the noise
+  // the toggle promises to silence, and it's also what was leaking into the
+  // talker's context and getting echoed back to the user. The high-signal
+  // talker notifications (task_done summaries, failures, file collisions,
+  // plan updates) all take their own direct sendUserText paths, so dropping
+  // queueWorkerUpdate doesn't blind the talker — it just stops the chatter.
   private queueWorkerUpdate(handle: WorkerHandle, line: string): void {
+    if (this.opts.getSpeechFilterMode() === 'strict') return;
     handle.bufferedUpdates.push(line);
     if (handle.bufferedUpdates.length > QUEUED_UPDATE_MAX) {
       handle.bufferedUpdates.splice(0, handle.bufferedUpdates.length - QUEUED_UPDATE_MAX);
@@ -696,6 +761,9 @@ export class WorkerScheduler {
       handle.bufferedUpdates = [];
       const talker = this.opts.getTalker();
       if (batch.length === 0 || !talker) return;
+      // Re-check at flush time: if the user flipped on strict during the
+      // 1.2s debounce, honour it instead of shipping a stale batch.
+      if (this.opts.getSpeechFilterMode() === 'strict') return;
       const text = `(worker ${handle.id} update)\n${batch.join('\n')}`;
       talker.sendUserText(text);
     }, QUEUED_UPDATE_FLUSH_MS);

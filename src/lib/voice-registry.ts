@@ -41,9 +41,17 @@ export class VoiceRegistry {
       if (!('speechSynthesis' in window)) { resolve([]); return; }
       const synth = window.speechSynthesis;
       const settled = { done: false };
+      // B4: the timeout path used to resolve without detaching onChanged,
+      // leaving a dangling 'voiceschanged' subscription if voices arrived
+      // late. Centralise removal in finish() so every exit path cleans up.
+      let onChanged: (() => void) | null = null;
       const finish = (voices: SpeechSynthesisVoice[]) => {
         if (settled.done) return;
         settled.done = true;
+        if (onChanged) {
+          synth.removeEventListener('voiceschanged', onChanged);
+          onChanged = null;
+        }
         resolve(voices);
       };
       const tryNow = () => {
@@ -55,9 +63,7 @@ export class VoiceRegistry {
         return false;
       };
       if (tryNow()) return;
-      const onChanged = () => {
-        if (tryNow()) synth.removeEventListener('voiceschanged', onChanged);
-      };
+      onChanged = () => { tryNow(); };
       synth.addEventListener('voiceschanged', onChanged);
       // Hard timeout — some platforms never fire voiceschanged. Resolve with
       // whatever we have so speech still attempts to play.

@@ -4,9 +4,14 @@
 
 export type Locale = 'zh' | 'en';
 
-// Strict mode drops any chunk with zero CJK characters; off mode passes
-// everything through unchanged. Default is strict because the worker's
-// English thinking + tool noise was the original complaint.
+// Strict mode drops chunks that match the worker-tool-event shape (e.g.
+// "(worker abc update) ...", "[worker-3] ...", "worker started/finished/turn
+// complete/thought ..."), leaving normal assistant replies — including pure
+// English and mixed CJK+EN narrations — untouched. Off mode passes everything
+// through unchanged. Default is strict so worker chatter that slipped past
+// the source-level filter in worker-scheduler.ts doesn't reach the speech
+// queue. B1 fix: the old strict-drops-all-English heuristic killed normal
+// English/mixed replies — narrowed to noise-pattern detection only.
 export type SpeechFilterMode = 'strict' | 'off';
 
 const ZH_CODE_NARRATIONS = [
@@ -196,10 +201,18 @@ function zhVerbForTool(tool: string, phase: 'start' | 'finish'): string {
   return '工具完成';
 }
 
-function hasCjk(text: string): boolean {
-  for (let i = 0; i < text.length; i++) {
-    const c = text.charCodeAt(i);
-    if (c >= 0x4e00 && c <= 0x9fff) return true;
+// Worker-tool-event signatures — anything matching these is chatter the user
+// asked to not hear. Conservative on purpose: we'd rather miss one noise line
+// than swallow real content. See speech-format header for the B1 rationale.
+const WORKER_NOISE_PATTERNS: RegExp[] = [
+  /\(worker\s+\S+\s+update\)/i,
+  /\[worker-\d+\]/i,
+  /^\s*worker\s+(started|finished|turn\s+complete|thought)\b/i,
+];
+
+function isWorkerNoise(text: string): boolean {
+  for (const p of WORKER_NOISE_PATTERNS) {
+    if (p.test(text)) return true;
   }
   return false;
 }
@@ -209,22 +222,14 @@ export function filterByMode(
   mode: SpeechFilterMode,
 ): Array<{ text: string; locale: Locale }> {
   if (mode === 'off') return chunks;
-  // Strict mode's goal: when a Chinese-dominant reply contains stray English
-  // (worker tool noise, untranslated identifiers), drop the English chunks
-  // so the user only hears the Chinese narration.
-  //
-  // BUT if the WHOLE reply has no CJK at all, it's a real English reply (user
-  // asked in English, talker followed suit). Silencing it entirely was the
-  // bug the user reported as "回复给我的没有播报声音". In that case fall
-  // back to playing everything — better to hear an English reply than nothing.
-  const anyCjk = chunks.some((c) => hasCjk(c.text));
-  if (!anyCjk) {
-    return chunks.filter((c) => c.text.replace(/[\s\p{P}]/gu, '').length >= 2);
-  }
-  // Mixed-language reply: keep CJK chunks; require ≥2 meaningful chars so
-  // single-punctuation or single-char residue doesn't surface.
+  // B1: strict mode now drops only chunks that look like worker tool events
+  // ("(worker xxx update) ...", "[worker-N] ...", "worker started/finished/
+  // turn complete/thought ..."). Everything else — pure English replies,
+  // mixed CJK+EN narrations, moderator summaries — passes through. The
+  // previous heuristic ("no CJK → drop") silenced legitimate replies, which
+  // is what the user reported as "回复给我的没有播报声音".
   return chunks.filter((c) => {
-    if (!hasCjk(c.text)) return false;
+    if (isWorkerNoise(c.text)) return false;
     const meaningful = c.text.replace(/[\s\p{P}]/gu, '');
     return meaningful.length >= 2;
   });

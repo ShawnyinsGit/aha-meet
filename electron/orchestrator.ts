@@ -38,6 +38,7 @@ import {
   selectRelevant,
   type MemoryCategory,
 } from './memory.js';
+import { getSettings } from './store.js';
 import { TALKER_PROMPT } from './orchestrator-prompts.js';
 import {
   MEMORY_TOKEN_BUDGET,
@@ -115,6 +116,12 @@ export class Orchestrator implements OrchestratorBridge {
   private decisions: DecisionWatcher = new DecisionWatcher();
   private decisionMeta: Map<string, { question: string; path: string }> = new Map();
 
+  // Cached in-flight `end()` Promise. Subsequent calls return the same Promise
+  // so callers can `await orchestrator.end()` repeatedly without re-running
+  // teardown. Distinct from `this.closed` so we can both gate the work AND
+  // surface the async cleanup tail (recap) to a waiting before-quit handler.
+  private endPromise: Promise<void> | null = null;
+
   // Process-level fallback: if main.ts forgets (or crashes) before its own
   // before-quit / window-all-closed hooks fire, `process.exit` still gives us
   // one synchronous chance to release native resources held by live workers.
@@ -157,6 +164,11 @@ export class Orchestrator implements OrchestratorBridge {
       buildWorkerMcp: (workerId) => buildWorkerMcp(this, workerId),
       getTalker: () => this.talker,
       isClosed: () => this.closed,
+      // Live read from the settings store so the user's "播报过滤" toggle in
+      // the side drawer reaches every active orchestrator without an IPC
+      // fanout — getSettings() is backed by an in-process cache that
+      // updateSettings() refreshes in place.
+      getSpeechFilterMode: () => (getSettings().speechFilterMode === 'off' ? 'off' : 'strict'),
     });
     Orchestrator.liveInstances.add(this);
     Orchestrator.ensureShutdownHook();
@@ -261,13 +273,14 @@ export class Orchestrator implements OrchestratorBridge {
     await Promise.all(tasks);
   }
 
-  end() {
-    if (this.closed) return;
+  end(): Promise<void> {
+    if (this.endPromise) return this.endPromise;
 
     // Snapshot the talker transcript and kick off a recap pass against Haiku
-    // BEFORE we tear down. Fire-and-forget — leaving the meeting is instant
-    // for the user; the recap calls appendEntry() (filesystem only) and never
-    // touches the orchestrator instance after this point.
+    // BEFORE we tear down. Recap runs in the background; the returned Promise
+    // resolves once recap (the only truly async cleanup) finishes so a
+    // before-quit handler can `await` end() and reap the SDK subprocesses
+    // cleanly instead of getting SIGKILL'd mid-stream.
     const transcriptSnapshot = [...this.talkerTranscript];
     this.recapHandle = startRecap({
       transcript: transcriptSnapshot,
@@ -276,10 +289,6 @@ export class Orchestrator implements OrchestratorBridge {
       projectId: this.projectId,
       meetingId: this.meetingId,
     });
-    if (this.recapHandle) {
-      // `done` never rejects (recap swallows its own errors), so no .catch needed.
-      void this.recapHandle.done;
-    }
 
     // Flush any unfinished worker progress into one final talker line so the
     // user isn't left wondering what happened. Done BEFORE closing the gate.
@@ -308,6 +317,15 @@ export class Orchestrator implements OrchestratorBridge {
     this.talker?.end();
     this.talker = null;
     Orchestrator.liveInstances.delete(this);
+
+    // Currently only recap.done is async; talker.end() / scheduler.endAll() /
+    // decisions.dispose() all return void. If any of those grow async cleanup
+    // later, push their Promises into this array.
+    const cleanupPromises: Promise<void>[] = [];
+    if (this.recapHandle) cleanupPromises.push(this.recapHandle.done);
+
+    this.endPromise = Promise.all(cleanupPromises).then(() => undefined);
+    return this.endPromise;
   }
 
   /** Manual entry point: renderer-side "Plan meeting" button. */
@@ -434,10 +452,41 @@ export class Orchestrator implements OrchestratorBridge {
     this.talker?.sendUserText(
       `(decision update) 用户对"${question}"给出了结论：${condensed}\n\n如果这跟你之前推进的方向不一致，请马上调整：可以 delegate_to 现有 worker 让他改，或开新 worker 走另一条路；并简短告诉用户你怎么调整。`,
     );
+    // Resolved → drop both the metadata entry and the fs.watch handle.
+    // Without this, a 2hr meeting with 30 decisions leaves 30 stale watchers
+    // until end() runs. DecisionWatcher.unwatch is keyed by path, not id;
+    // ResolvedDecision carries the path directly so no map lookup needed.
+    this.decisionMeta.delete(r.id);
+    this.decisions.unwatch(r.path);
   }
 
   private onTalkerEvent(e: SessionEvent) {
     this.safeEmit({ source: 'talker', event: e });
+
+    // ClaudeSession emits 'ended' both for our own teardown (this.closed is
+    // already true by then, see end()) and for unexpected subprocess death
+    // (OOM, external kill, crash). The second case used to silently break
+    // sendUserText — the user kept talking, nothing reached the model, no UI
+    // feedback. Surface it via a synthetic assistant message and tear down
+    // so the slot ends cleanly. void: end() returns a Promise we don't await
+    // here (we're inside an event callback).
+    if (e.kind === 'ended' && !this.closed) {
+      this.safeEmit({
+        source: 'talker',
+        event: {
+          kind: 'message',
+          message: {
+            type: 'assistant',
+            message: { role: 'assistant', content: [{ type: 'text', text: '（Talker 进程意外退出，会议自动结束。如需继续请重新打开会议。）' }] },
+            parent_tool_use_id: null,
+            session_id: 'orchestrator-talker-exit',
+          } as unknown as SDKMessage,
+        },
+      });
+      void this.end();
+      return;
+    }
+
     // Capture talker turns into a private transcript so end-of-meeting recap
     // has something to feed Haiku. We grab user + assistant text only, never
     // tool-use blobs (those are noisy and recap should focus on conversation).

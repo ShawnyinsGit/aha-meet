@@ -1,12 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useClaude } from './hooks/useClaude';
 import { useWorkers } from './hooks/useWorkers';
+import { useTabs } from './hooks/useTabs';
 import { useScreenShare } from './hooks/useScreenShare';
 import { useElapsedSeconds } from './hooks/useTimer';
-import { cancelSpeech, setSelectedVoiceName, setSpeechFilterMode, speakConversational, useVoices } from './hooks/useSpeech';
+import { cancelSpeech, isSpeechActive, setSelectedVoiceName, setSpeechFilterMode, speakConversational, useVoices } from './hooks/useSpeech';
 import type { SpeechFilterMode } from './lib/speech-format';
 import { useAsr } from './hooks/useAsr';
-import { JoinScreen } from './components/JoinScreen';
+import { meetingStore } from './lib/meeting-store';
+import { Lobby } from './components/Lobby';
+import { TabStrip } from './components/TabStrip';
 import { MeetingHeader } from './components/MeetingHeader';
 import { ParticipantTile } from './components/ParticipantTile';
 import { ScreenStage } from './components/ScreenStage';
@@ -42,15 +45,23 @@ interface EnrollmentState {
   capturedSamples: number;
 }
 
-const GREETING = "You're joining a live screen-share meeting with your developer. Greet them in one or two sentences, ask what they want to work on today, and remind them they can share the current screen with the snapshot button when something needs your eyes. Keep it warm and short.";
-
 export function App() {
-  const { state, startSession, restartSession, sendText, sendImage, resolvePermission, interrupt, endSession, setSpeakCallback } = useClaude();
+  const { state, restartSession, sendText, sendImage, sendAttachments, publishDroppedFiles, onDroppedFiles, resolvePermission, interrupt, setSpeakCallback } = useClaude();
   const workers = useWorkers();
+  const tabs = useTabs();
   const { state: share, start: startShare, stop: stopShare, captureFrame, videoRef } = useScreenShare();
 
-  const [joined, setJoined] = useState(false);
-  const [rememberedCwd, setRememberedCwd] = useState<string | null>(null);
+  // Derived UI predicates:
+  //   hasTabs       — any open tab (live or placeholder); drives Lobby vs Shell branch
+  //   hasLiveTab    — an active tab with a running Orchestrator; gates mic/send
+  //   activeOpenedAt — the active tab's openedAt, used for the elapsed timer.
+  //                    Switches as the user flips tabs so the timer reflects the
+  //                    currently-focused meeting, not a stale single-session start.
+  const activeTab = useMemo(() => tabs.find((t) => t.isActive) ?? null, [tabs]);
+  const hasTabs = tabs.length > 0;
+  const hasLiveTab = !!(activeTab && !activeTab.placeholder);
+  const activeOpenedAt = activeTab?.openedAt ?? null;
+
   const [drawerOpen, setDrawerOpen] = useState(true);
   const [ttsOn, setTtsOn] = useState(true);
   const [muted, setMuted] = useState(false);
@@ -58,8 +69,7 @@ export function App() {
   const [multiAgent, setMultiAgent] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [aiSpeaking, setAiSpeaking] = useState(false);
-  const [startedAt, setStartedAt] = useState<number | null>(null);
-  const elapsed = useElapsedSeconds(startedAt);
+  const elapsed = useElapsedSeconds(activeOpenedAt);
 
   // Voice lock state. `voicePrint` is the full persisted struct (for UI:
   // enrolledAt timestamp, model id), while `voicePrintEmbedding` is the
@@ -96,15 +106,11 @@ export function App() {
 
   const speakingRef = useRef(false);
 
-  // Load the last-used cwd from disk once on mount so the JoinScreen can
-  // pre-fill it. Main validates the path still exists before returning it,
-  // so we never default to a stale directory.
+  // Cold start: pull the persisted tab layout + recent cwds from main and
+  // hydrate the store. Placeholders for previously-open tabs land in the tab
+  // strip; clicking one resumes its Orchestrator. Cheap (just metadata).
   useEffect(() => {
-    let cancelled = false;
-    window.vibeMeet.getLastCwd().then((dir) => {
-      if (!cancelled) setRememberedCwd(dir);
-    }).catch(() => { /* ignore — JoinScreen will fall back to empty */ });
-    return () => { cancelled = true; };
+    void meetingStore.hydrateRestore();
   }, []);
 
   // Hydrate voice-lock state from disk on mount. We only restore the
@@ -360,16 +366,24 @@ export function App() {
     void window.vibeMeet.setVoiceLockEnabled(false);
   }, []);
 
-  // Keep mic always on once joined; barge-in handles overlap with Claude.
-  // Voice-print enrollment needs the mic too, and runs from the settings panel
-  // before the user has joined a meeting — keep the mic on whenever an
-  // enrollment is in flight so the VAD can deliver segments to tapSegment.
-  const micEnabled = (!muted && joined) || enrollment != null;
+  // Mic follows the active tab (per user's design choice B). Background tabs
+  // never capture audio — their transcript fills from text the Talker emits.
+  // Voice-print enrollment runs from the settings panel even with no tab open,
+  // so we keep the mic on whenever an enrollment is in flight.
+  const micEnabled = (!muted && hasLiveTab) || enrollment != null;
 
   const onVoiceFinal = useCallback((text: string) => {
-    if (!joined) return;
+    // Read the active id fresh inside the callback. Closing over hasLiveTab at
+    // render time races with rapid tab close: if the user speaks the instant
+    // a tab tears down, the captured value can be stale and either drop a
+    // legitimate utterance or route it through after the slot is gone.
+    const id = meetingStore.getActiveId();
+    if (!id) {
+      console.warn('[voice] dropped — no active session');
+      return;
+    }
     sendText(text);
-  }, [joined, sendText]);
+  }, [sendText]);
 
   // Barge-in: any time the VAD says we've started speaking, cut Claude off.
   const onBargeIn = useCallback(() => {
@@ -415,6 +429,15 @@ export function App() {
       return;
     }
     setSpeakCallback((text: string) => {
+      // Safety net: state thinks AI is mid-narration but the controller has
+      // actually drained (cancel never fired onDone, watchdog missed, etc.).
+      // Without this, the *next* speakConversational call would see the same
+      // stuck flag and the user-visible mic mute would persist indefinitely.
+      // Cheap belt-and-braces — most calls hit the false branch immediately.
+      if (speakingRef.current && !isSpeechActive()) {
+        speakingRef.current = false;
+        setAiSpeaking(false);
+      }
       speakingRef.current = true;
       setAiSpeaking(true);
       speakConversational(text, () => {
@@ -433,7 +456,12 @@ export function App() {
   useEffect(() => {
     void window.vibeMeet.setAutoApprove(autoApproveScope);
     if (!state.running) return;
+    // Apply to the currently-focused live session. Background tabs keep their
+    // existing mode; toggling here is a per-meeting decision tied to the tab
+    // the user is looking at.
+    const id = meetingStore.getActiveId();
     void window.vibeMeet.setPermissionMode(
+      id,
       autoApproveScope !== 'off' ? 'bypassPermissions' : 'default',
     );
   }, [autoApproveScope, state.running]);
@@ -446,24 +474,17 @@ export function App() {
     }
   }, [autoApproveScope, state.pendingPermission, resolvePermission]);
 
-  const join = useCallback(async (cwd: string) => {
-    setJoined(true);
-    setStartedAt(Date.now());
-    await startSession(cwd, GREETING);
-  }, [startSession]);
-
+  // "Leave" in the multi-tab world means "close the focused meeting". closeTab
+  // tears down the Orchestrator, removes the slot, switches focus to the next
+  // tab if any (or back to the Lobby if this was the last one).
   const leave = useCallback(async () => {
     cancelSpeech();
-    // cancelSpeech() doesn't fire the active session's onAllDone, so reset
-    // the speaking flag here too — otherwise a leave during TTS leaves
-    // aiSpeaking=true and the next session re-joins with the mic suppressed.
     speakingRef.current = false;
     setAiSpeaking(false);
     stopShare();
-    await endSession();
-    setJoined(false);
-    setStartedAt(null);
-  }, [endSession, stopShare]);
+    const id = meetingStore.getActiveId();
+    if (id) await meetingStore.closeTab(id);
+  }, [stopShare]);
 
   const handlePickSource = useCallback(async (src: DesktopSource) => {
     await startShare(src.id, src.name);
@@ -506,12 +527,67 @@ ${trimmed}`;
     await sendText(directive);
   }, [multiAgent, sendText]);
 
-  if (!joined) {
-    return <JoinScreen onJoin={join} defaultCwd={state.cwd ?? rememberedCwd ?? undefined} lastError={state.lastError} />;
+  const sendAttachmentsWithMode = useCallback(
+    async (staged: Parameters<typeof sendAttachments>[0], raw: string) => {
+      const trimmed = raw.trim();
+      if (!multiAgent) {
+        return sendAttachments(staged, trimmed);
+      }
+      const directive = trimmed.length > 0
+        ? `请把下面这段需求和附带文档一起当作"多 Agent 并行"模式处理：评估依赖，拆任务，**调用 plan_meeting 工具**派发多个 worker 并行执行。
+
+需求：
+${trimmed}`
+        : '请阅读附带的文档，按"多 Agent 并行"模式拆解：评估依赖，调用 plan_meeting 派发 worker。';
+      return sendAttachments(staged, directive);
+    },
+    [multiAgent, sendAttachments],
+  );
+
+  // Window-level drag-and-drop. We accept files anywhere on the meeting view
+  // and republish them through the meeting store so the SideDrawer can pick
+  // them up as staged chips — without App.tsx reaching into the drawer's
+  // local state.
+  const [dropActive, setDropActive] = useState(false);
+  const dragCounterRef = useRef(0);
+  const onDragEnter = useCallback((e: React.DragEvent<HTMLDivElement>) => {
+    if (!e.dataTransfer?.types?.includes('Files')) return;
+    e.preventDefault();
+    dragCounterRef.current += 1;
+    setDropActive(true);
+  }, []);
+  const onDragOver = useCallback((e: React.DragEvent<HTMLDivElement>) => {
+    if (!e.dataTransfer?.types?.includes('Files')) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+  }, []);
+  const onDragLeave = useCallback(() => {
+    dragCounterRef.current = Math.max(0, dragCounterRef.current - 1);
+    if (dragCounterRef.current === 0) setDropActive(false);
+  }, []);
+  const onDrop = useCallback((e: React.DragEvent<HTMLDivElement>) => {
+    if (!e.dataTransfer?.files || e.dataTransfer.files.length === 0) return;
+    e.preventDefault();
+    dragCounterRef.current = 0;
+    setDropActive(false);
+    publishDroppedFiles(Array.from(e.dataTransfer.files));
+    // Auto-open the drawer so the user sees the chips land.
+    setDrawerOpen(true);
+  }, [publishDroppedFiles]);
+
+  if (!hasTabs) {
+    return <Lobby lastError={state.lastError} />;
   }
 
   return (
-    <div className="mtg">
+    <div
+      className={`mtg${dropActive ? ' mtg-dropping' : ''}`}
+      onDragEnter={onDragEnter}
+      onDragOver={onDragOver}
+      onDragLeave={onDragLeave}
+      onDrop={onDrop}
+    >
+      <TabStrip tabs={tabs} />
       <MeetingHeader
         cwd={state.cwd}
         elapsed={elapsed}
@@ -561,6 +637,10 @@ ${trimmed}`;
             videoRef={videoRef}
             onPickSource={() => setPickerOpen(true)}
             onStopShare={stopShare}
+            delivery={workers.currentDelivery}
+            sessionId={activeTab?.id ?? null}
+            onAcceptDelivery={workers.acceptDelivery}
+            onReviseDelivery={workers.reviseDelivery}
             defaultContent={
               <ParticipantPanel
                 workers={workers.workerList}
@@ -592,6 +672,8 @@ ${trimmed}`;
           pending={state.pendingPermission}
           onResolve={resolvePermission}
           onSend={sendWithMode}
+          onSendAttachments={sendAttachmentsWithMode}
+          onSubscribeDroppedFiles={onDroppedFiles}
           multiAgent={multiAgent}
           disabled={!state.running}
         />

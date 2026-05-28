@@ -55,10 +55,12 @@ export function useClaude() {
 
   return {
     state,
-    startSession: w.startSession,
     restartSession: w.restartSession,
     sendText: w.sendText,
     sendImage: w.sendImage,
+    sendAttachments: w.sendAttachments,
+    publishDroppedFiles: w.publishDroppedFiles,
+    onDroppedFiles: w.onDroppedFiles,
     resolvePermission: w.resolvePermission,
     interrupt: w.interrupt,
     endSession: w.endSession,

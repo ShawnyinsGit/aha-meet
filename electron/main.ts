@@ -1,12 +1,13 @@
 import { app, BrowserWindow, dialog, shell, systemPreferences } from 'electron';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { Orchestrator, type OrchestratorEvent } from './orchestrator.js';
 import { disposeWhisper } from './whisper.js';
 import { buildClaudeShadowHome } from './claude-defaults.js';
 import type { AutoApproveScope } from './auto-approve-policy.js';
-import type { IpcContext } from './ipc/context.js';
+import { SessionRegistry } from './sessions.js';
+import type { IpcContext, IpcEmittedEvent } from './ipc/context.js';
 import { registerSessionIpc } from './ipc/session.js';
+import { registerSessionsIpc } from './ipc/sessions.js';
 import { registerAuthIpc } from './ipc/auth.js';
 import { registerDesktopIpc } from './ipc/desktop.js';
 import { registerAsrIpc } from './ipc/asr.js';
@@ -14,29 +15,28 @@ import { registerSettingsIpc } from './ipc/settings.js';
 import { registerMemoryIpc } from './ipc/memory.js';
 import { registerDecisionIpc } from './ipc/decision.js';
 import { registerDialogIpc } from './ipc/dialog.js';
+import { registerAttachmentsIpc } from './ipc/attachments.js';
+import { registerDocumentsIpc } from './ipc/documents.js';
+import { registerTranscriptsIpc } from './ipc/transcripts.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 let mainWindow: BrowserWindow | null = null;
-let orchestrator: Orchestrator | null = null;
-// B4: after the user leaves a meeting, the orchestrator kicks off a Haiku
-// recap to harvest memorable points. That recap runs detached from any
-// session, so `orchestrator` gets nulled while the Haiku call is still
-// burning tokens. We park the reference here so a follow-up
-// `session:interrupt` (or app shutdown) can still abort the recap.
-let recapPending: Orchestrator | null = null;
+// Multi-tab session store. Each slot owns one Orchestrator (= one Talker +
+// scheduler) tied to a single cwd. Replaces the prior global `orchestrator`
+// + `currentCwd` + `recapPending` triple — those now live per-slot inside
+// the registry. `recapPending` for a slot is tracked on the slot itself.
+const registry = new SessionRegistry();
 // Trust-mode scope — module-level so it survives between session start/stop
 // and isn't lost when the renderer reloads. Default OFF every launch; we
-// intentionally do NOT persist this to disk.
+// intentionally do NOT persist this to disk. Shared across all slots: see
+// the note in IpcContext for the rationale (avoid backgrounded-tab privilege
+// confusion).
 let autoApprove: AutoApproveScope = 'off';
 // Shadow HOME pointing at the merged bundled+user .claude tree, computed
 // once at app launch. `null` in dev mode → SDK uses real ~/.claude.
 let claudeShadowHome: string | null = null;
-// Last cwd we started a session against. Used by `memory:projectId` so the
-// renderer can ask "what's my current project memory scope?" without re-
-// computing the hash on its side.
-let currentCwd: string | null = null;
 
 const isDev = !app.isPackaged && !!process.env.VITE_DEV_SERVER_URL;
 
@@ -187,12 +187,14 @@ function createWindow() {
   });
 }
 
-function emitToRenderer(e: OrchestratorEvent) {
+function emitToRenderer(e: IpcEmittedEvent) {
   const win = liveWindow();
   if (!win) return;
   // Flatten { source, event } onto each event so the renderer's RendererEvent
-  // shape stays a single object with an extra `source` field.
-  win.webContents.send('session:event', { ...e.event, source: e.source });
+  // shape stays a single object with an extra `source` field. sessionId is
+  // pre-bound by the per-slot emit wrapper created in sessions:open so the
+  // renderer can route the event to the right MeetingState slot.
+  win.webContents.send('session:event', { ...e.event, source: e.source, sessionId: e.sessionId });
 }
 
 // S3: under auto-approve, render a short preview of the tool call for the
@@ -256,19 +258,18 @@ async function nativeConfirmDestructive(
 const ipcCtx: IpcContext = {
   liveWindow,
   emitToRenderer,
-  getOrchestrator: () => orchestrator,
-  setOrchestrator: (o) => { orchestrator = o; },
-  getRecapPending: () => recapPending,
-  setRecapPending: (o) => { recapPending = o; },
+  registry,
+  getOrchestrator: (id) => registry.resolve(id)?.orchestrator ?? null,
+  getCurrentCwd: (id) => registry.resolve(id)?.cwd ?? null,
+  getSlot: (id) => registry.resolve(id),
   getAutoApprove: () => autoApprove,
   setAutoApprove: (v) => { autoApprove = v; },
-  getCurrentCwd: () => currentCwd,
-  setCurrentCwd: (v) => { currentCwd = v; },
   getClaudeShadowHome: () => claudeShadowHome,
   nativeConfirmDestructive,
 };
 
 registerSessionIpc(ipcCtx);
+registerSessionsIpc(ipcCtx);
 registerAuthIpc();
 registerDesktopIpc();
 registerAsrIpc();
@@ -276,6 +277,9 @@ registerSettingsIpc();
 registerMemoryIpc(ipcCtx);
 registerDecisionIpc();
 registerDialogIpc(ipcCtx);
+registerAttachmentsIpc(ipcCtx);
+registerDocumentsIpc(ipcCtx);
+registerTranscriptsIpc();
 
 // ---- App lifecycle ----------------------------------------------------------
 
@@ -314,15 +318,35 @@ app.whenReady().then(() => {
   });
 });
 
+function sleepMs(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// Tears down every live slot. Orchestrator.end() returns a Promise that
+// resolves once async cleanup (recap, etc.) finishes — we collect those so
+// callers can await the whole fleet before letting Electron exit. Registry
+// entries are dropped synchronously up front; the async work continues to
+// run against detached orchestrator instances.
+function shutdownAllSlots(): Promise<void> {
+  const endPromises: Promise<void>[] = [];
+  for (const slot of registry.values()) {
+    try {
+      endPromises.push(slot.orchestrator.end());
+    } catch {
+      /* ignore — best-effort teardown */
+    }
+  }
+  for (const slot of [...registry.values()]) {
+    registry.close(slot.id);
+  }
+  return Promise.all(endPromises).then(() => undefined);
+}
+
 app.on('window-all-closed', () => {
-  if (orchestrator) {
-    orchestrator.end();
-    orchestrator = null;
-  }
-  if (recapPending) {
-    void recapPending.interrupt();
-    recapPending = null;
-  }
+  // Fire-and-forget on this path: the relevant subprocess kills land
+  // synchronously inside end() (scheduler.endAll + talker.end), so even
+  // without awaiting we don't strand zombies. Recap continues in background.
+  void shutdownAllSlots();
   // Reap any in-flight whisper-cli child so it doesn't strand a transcription
   // run past window close (B1).
   disposeWhisper();
@@ -332,14 +356,26 @@ app.on('window-all-closed', () => {
 // Final safety net: even on cmd-Q with the dock alive (macOS) the window-all-
 // closed handler doesn't fire. before-quit covers that path so whisper-cli
 // always gets SIGTERM'd.
-app.on('before-quit', () => {
-  if (orchestrator) {
-    orchestrator.end();
-    orchestrator = null;
+//
+// v0.7.3: Electron used to terminate this process the moment the handler
+// returned, killing recap + SDK subprocess teardown mid-flight and leaving
+// zombie children behind. Now we preventDefault, await teardown (capped at
+// 5s so a stuck recap can't block Cmd-Q indefinitely), then app.exit(0).
+let isQuitting = false;
+app.on('before-quit', (event) => {
+  if (isQuitting) {
+    // Re-entrant — let Electron actually quit this time.
+    return;
   }
-  if (recapPending) {
-    void recapPending.interrupt();
-    recapPending = null;
-  }
-  disposeWhisper();
+  isQuitting = true;
+  event.preventDefault();
+
+  void (async () => {
+    try {
+      await Promise.race([shutdownAllSlots(), sleepMs(5000)]);
+    } finally {
+      disposeWhisper();
+      app.exit(0);
+    }
+  })();
 });

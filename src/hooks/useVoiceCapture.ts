@@ -11,12 +11,13 @@ const MIN_SAMPLES_FOR_GATE = 8000;
 // real-world false-reject rate is too high.
 const VOICE_LOCK_THRESHOLD = 0.5;
 // Barge-in-during-playback gate: a speech segment that starts while TTS is
-// playing must reach this many samples (~480ms @ 16 kHz) before we treat it
+// playing must reach this many samples (~300ms @ 16 kHz) before we treat it
 // as a real user interruption. Below this we assume it's AEC residue, a
-// throat clear, or a cough and drop it silently. 480ms is empirically long
+// throat clear, or a cough and drop it silently. 300ms is empirically long
 // enough to filter common false positives without making real interruptions
-// feel laggy.
-const MIN_SAMPLES_FOR_BARGE_IN = 7680;
+// feel laggy — and short enough that brief replies ("OK", "嗯", "好的") that
+// land right at the tail of TTS don't get swallowed.
+const MIN_SAMPLES_FOR_BARGE_IN = 4800;
 // Average speech-probability needed across a suppressed segment before we
 // accept it as a barge-in. AEC residue and room noise tend to sit around
 // 0.45-0.55 (just at VAD's positiveSpeechThreshold); real speech runs
@@ -80,6 +81,13 @@ export function useVoiceCapture({
   const [asrAvailable, setAsrAvailable] = useState<boolean | null>(null);
 
   const vadRef = useRef<MicVAD | null>(null);
+  // Hold the MediaStream the VAD's getStream callback produced so we can
+  // explicitly stop its tracks on teardown. MicVAD.destroy() releases its own
+  // graph nodes but on some browsers does NOT stop the underlying mic tracks —
+  // the OS mic indicator stays lit and a subsequent getUserMedia can hit a
+  // "device busy" state until the page is reloaded. Walking getTracks() and
+  // calling stop() after destroy() resolves is what actually frees the device.
+  const micStreamRef = useRef<MediaStream | null>(null);
   const onTranscriptRef = useRef(onTranscript);
   const onBargeInRef = useRef(onBargeIn);
   const onVoiceLockRejectRef = useRef(onVoiceLockReject);
@@ -157,8 +165,27 @@ export function useVoiceCapture({
     if (!enabled) {
       // Tear down any existing VAD.
       const v = vadRef.current;
+      const stream = micStreamRef.current;
       vadRef.current = null;
-      if (v) v.destroy().catch(() => {});
+      micStreamRef.current = null;
+      if (v) {
+        v.destroy()
+          .catch(() => {})
+          .finally(() => {
+            // Explicitly stop every mic track AFTER destroy() resolves so the
+            // OS mic indicator turns off and the device is freed for the next
+            // getUserMedia call. See micStreamRef comment for rationale.
+            if (stream) {
+              for (const t of stream.getTracks()) {
+                try { t.stop(); } catch { /* ignore */ }
+              }
+            }
+          });
+      } else if (stream) {
+        for (const t of stream.getTracks()) {
+          try { t.stop(); } catch { /* ignore */ }
+        }
+      }
       setActive(false);
       setListening(false);
       return;
@@ -190,14 +217,20 @@ export function useVoiceCapture({
           // default these on for `{audio: true}`, but the lib's default
           // getStream doesn't pass them through, and without AEC the VAD
           // trips on Claude's own TTS output coming back through the mic.
-          getStream: () =>
-            navigator.mediaDevices.getUserMedia({
+          getStream: async () => {
+            const s = await navigator.mediaDevices.getUserMedia({
               audio: {
                 echoCancellation: true,
                 noiseSuppression: true,
                 autoGainControl: true,
               },
-            }),
+            });
+            // Stash the stream so the effect cleanup can stop its tracks
+            // after vad.destroy() — MicVAD.destroy() doesn't always release
+            // the underlying mic device on its own.
+            micStreamRef.current = s;
+            return s;
+          },
           // Sensitivity: keep defaults moderate; we'd rather miss a few
           // misfires than truncate words.
           positiveSpeechThreshold: 0.55,
@@ -250,30 +283,43 @@ export function useVoiceCapture({
             }
 
             if (segmentSuppressedRef.current) {
-              segmentSuppressedRef.current = false;
-              // Segment started during TTS playback. Apply the barge-in
-              // gate: enough audio AND sustained high speech probability →
-              // real interrupt; otherwise drop as echo/throat-clear/cough.
-              const frames = segmentFrameCountRef.current;
-              const avgProb = frames > 0 ? segmentProbSumRef.current / frames : 0;
-              segmentFrameCountRef.current = 0;
-              segmentProbSumRef.current = 0;
-              const longEnough = audio.length >= MIN_SAMPLES_FOR_BARGE_IN;
-              const confident = avgProb >= MIN_AVG_PROB_FOR_BARGE_IN;
-              console.info('[barge-in] suppressed-segment decision', {
-                durationSec: +(audio.length / 16000).toFixed(2),
-                minSec: +(MIN_SAMPLES_FOR_BARGE_IN / 16000).toFixed(2),
-                avgProb: +avgProb.toFixed(2),
-                minAvgProb: MIN_AVG_PROB_FOR_BARGE_IN,
-                decision: longEnough && confident ? 'INTERRUPT' : 'DROP',
-              });
-              if (!longEnough || !confident) {
-                return;
+              // Re-check suppression at speech-end. If TTS has already stopped
+              // by the time the user finished speaking (common when their
+              // reply starts mid-utterance and ends after playback finishes),
+              // don't apply the barge-in DROP gate — just clear the latch and
+              // fall through to the normal voice-lock + transcribe path so the
+              // short reply ("OK", "嗯", "好的") still reaches whisper.
+              if (!suppressedRef.current) {
+                segmentSuppressedRef.current = false;
+                segmentFrameCountRef.current = 0;
+                segmentProbSumRef.current = 0;
+              } else {
+                segmentSuppressedRef.current = false;
+                // Segment started during TTS playback AND TTS is still
+                // playing at speech-end. Apply the barge-in gate: enough
+                // audio AND sustained high speech probability → real
+                // interrupt; otherwise drop as echo/throat-clear/cough.
+                const frames = segmentFrameCountRef.current;
+                const avgProb = frames > 0 ? segmentProbSumRef.current / frames : 0;
+                segmentFrameCountRef.current = 0;
+                segmentProbSumRef.current = 0;
+                const longEnough = audio.length >= MIN_SAMPLES_FOR_BARGE_IN;
+                const confident = avgProb >= MIN_AVG_PROB_FOR_BARGE_IN;
+                console.info('[barge-in] suppressed-segment decision', {
+                  durationSec: +(audio.length / 16000).toFixed(2),
+                  minSec: +(MIN_SAMPLES_FOR_BARGE_IN / 16000).toFixed(2),
+                  avgProb: +avgProb.toFixed(2),
+                  minAvgProb: MIN_AVG_PROB_FOR_BARGE_IN,
+                  decision: longEnough && confident ? 'INTERRUPT' : 'DROP',
+                });
+                if (!longEnough || !confident) {
+                  return;
+                }
+                // Real interrupt: cut Claude off now so playback stops before
+                // the transcript even finishes. The transcript still flows
+                // through the normal voice-lock + send pipeline below.
+                onBargeInRef.current?.();
               }
-              // Real interrupt: cut Claude off now so playback stops before
-              // the transcript even finishes. The transcript still flows
-              // through the normal voice-lock + send pipeline below.
-              onBargeInRef.current?.();
             } else {
               // Reset stats for the next segment.
               segmentFrameCountRef.current = 0;
@@ -371,7 +417,17 @@ export function useVoiceCapture({
           },
         });
         if (cancelled) {
-          vad.destroy().catch(() => {});
+          const stream = micStreamRef.current;
+          micStreamRef.current = null;
+          vad.destroy()
+            .catch(() => {})
+            .finally(() => {
+              if (stream) {
+                for (const t of stream.getTracks()) {
+                  try { t.stop(); } catch { /* ignore */ }
+                }
+              }
+            });
           return;
         }
         createdVad = vad;
@@ -380,6 +436,17 @@ export function useVoiceCapture({
         setActive(true);
         setLastError(null);
       } catch (e) {
+        // Init failed after getStream may have already resolved (e.g. MicVAD
+        // worklet load threw). Release the mic track we grabbed so the OS
+        // indicator turns off and the device isn't held hostage by a failed
+        // session.
+        const stream = micStreamRef.current;
+        micStreamRef.current = null;
+        if (stream) {
+          for (const t of stream.getTracks()) {
+            try { t.stop(); } catch { /* ignore */ }
+          }
+        }
         const msg = String((e as Error)?.message ?? e);
         // B18: detect permission denial so the UI can show a targeted guide
         // instead of a generic error string.
@@ -394,8 +461,24 @@ export function useVoiceCapture({
 
     return () => {
       cancelled = true;
+      const stream = micStreamRef.current;
+      micStreamRef.current = null;
       if (createdVad) {
-        createdVad.destroy().catch(() => {});
+        createdVad.destroy()
+          .catch(() => {})
+          .finally(() => {
+            // Free the mic device after the VAD's audio graph is torn down.
+            // See micStreamRef comment for rationale.
+            if (stream) {
+              for (const t of stream.getTracks()) {
+                try { t.stop(); } catch { /* ignore */ }
+              }
+            }
+          });
+      } else if (stream) {
+        for (const t of stream.getTracks()) {
+          try { t.stop(); } catch { /* ignore */ }
+        }
       }
       if (vadRef.current === createdVad) vadRef.current = null;
       setActive(false);

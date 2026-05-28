@@ -1,17 +1,31 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
+// Most send* methods take an explicit sessionId so the renderer can target a
+// specific tab's Orchestrator. Passing `null` (or omitting it) lets main fall
+// back to the currently-active slot — used by legacy callsites that haven't
+// been threaded for tabs yet.
 const api = {
-  startSession: (cwd, greeting) => ipcRenderer.invoke('session:start', cwd, greeting),
-  sendUserText: (text) => ipcRenderer.invoke('session:user-text', text),
-  sendUserImage: (dataUrl, caption) => ipcRenderer.invoke('session:user-image', dataUrl, caption),
-  resolvePermission: (id, decision, message) =>
-    ipcRenderer.invoke('session:resolve-permission', id, decision, message),
-  interrupt: () => ipcRenderer.invoke('session:interrupt'),
-  setPermissionMode: (mode) => ipcRenderer.invoke('session:set-permission-mode', mode),
-  setAutoApprove: (on) => ipcRenderer.invoke('session:set-auto-approve', on),
-  endSession: () => ipcRenderer.invoke('session:end'),
+  sessions: {
+    open: (cwd, greeting) => ipcRenderer.invoke('sessions:open', { cwd, greeting }),
+    close: (id) => ipcRenderer.invoke('sessions:close', { id }),
+    setActive: (id) => ipcRenderer.invoke('sessions:set-active', { id }),
+    list: () => ipcRenderer.invoke('sessions:list'),
+    listRestore: () => ipcRenderer.invoke('sessions:list-restore'),
+  },
+  sendUserText: (sessionId, text) =>
+    ipcRenderer.invoke('session:user-text', { sessionId, text }),
+  sendUserImage: (sessionId, dataUrl, caption) =>
+    ipcRenderer.invoke('session:user-image', { sessionId, dataUrl, caption }),
+  sendUserAttachments: (sessionId, items, caption) =>
+    ipcRenderer.invoke('session:user-attachments', { sessionId, items, caption }),
+  resolvePermission: (sessionId, id, decision, message) =>
+    ipcRenderer.invoke('session:resolve-permission', { sessionId, id, decision, message }),
+  interrupt: (sessionId) => ipcRenderer.invoke('session:interrupt', { sessionId }),
+  setPermissionMode: (sessionId, mode) =>
+    ipcRenderer.invoke('session:set-permission-mode', { sessionId, mode }),
+  setAutoApprove: (scope) => ipcRenderer.invoke('session:set-auto-approve', { scope }),
+  endSession: (sessionId) => ipcRenderer.invoke('session:end', { sessionId }),
   pickCwd: () => ipcRenderer.invoke('dialog:pick-cwd'),
-  getLastCwd: () => ipcRenderer.invoke('settings:get-last-cwd'),
   getVoiceConfig: () => ipcRenderer.invoke('settings:get-voice-config'),
   setVoiceLockEnabled: (on) => ipcRenderer.invoke('settings:set-voice-lock-enabled', on),
   setVoicePrint: (vp) => ipcRenderer.invoke('settings:set-voice-print', vp),
@@ -36,11 +50,21 @@ const api = {
     list: (filter) => ipcRenderer.invoke('memory:list', filter ?? null),
     update: (id, patch) => ipcRenderer.invoke('memory:update', { id, patch }),
     delete: (id) => ipcRenderer.invoke('memory:delete', id),
-    currentProjectId: () => ipcRenderer.invoke('memory:projectId'),
+    currentProjectId: (sessionId) => ipcRenderer.invoke('memory:projectId', { sessionId }),
   },
   decisions: {
     open: (path) => ipcRenderer.invoke('decision:open', path),
   },
+  documents: {
+    read: (sessionId, path) => ipcRenderer.invoke('documents:read', { sessionId, path }),
+  },
+  transcripts: {
+    load: (cwd) => ipcRenderer.invoke('transcripts:load', { cwd }),
+    append: (cwd, entry) => ipcRenderer.invoke('transcripts:append', { cwd, entry }),
+    clear: (cwd) => ipcRenderer.invoke('transcripts:clear', { cwd }),
+  },
+  steerWorker: (sessionId, workerId, addendum) =>
+    ipcRenderer.invoke('session:steer-worker', { sessionId, workerId, addendum }),
   onEvent: (cb) => {
     const listener = (_, e) => cb(e);
     ipcRenderer.on('session:event', listener);
