@@ -17,12 +17,10 @@ import {
 } from 'node:crypto';
 import {
   existsSync,
-  mkdirSync,
   readFileSync,
   realpathSync,
-  renameSync,
-  writeFileSync,
 } from 'node:fs';
+import { mkdir, rename, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 
 export type MemoryCategory = 'point' | 'decision' | 'todo' | 'fact';
@@ -141,12 +139,14 @@ function isValidEntry(e: unknown): e is MemoryEntry {
   );
 }
 
-function persist(next: MemoryFile): void {
+async function persist(next: MemoryFile): Promise<void> {
   const p = memoryPath();
-  mkdirSync(dirname(p), { recursive: true });
+  await mkdir(dirname(p), { recursive: true });
   const tmp = `${p}.tmp`;
-  writeFileSync(tmp, JSON.stringify(next, null, 2), 'utf8');
-  renameSync(tmp, p);
+  await writeFile(tmp, JSON.stringify(next, null, 2), 'utf8');
+  await rename(tmp, p);
+  // Flip the cache after the rename so a failed write doesn't poison subsequent
+  // readFromDisk() callers with state that never made it to disk.
   cachedFile = next;
 }
 
@@ -197,9 +197,9 @@ export async function appendEntry(
     createdAt: now,
     updatedAt: now,
   };
-  return withWriteLock(() => {
+  return withWriteLock(async () => {
     const current = readFromDisk();
-    persist({ entries: [...current.entries, entry] });
+    await persist({ entries: [...current.entries, entry] });
     return { ok: true, entry };
   });
 }
@@ -208,7 +208,7 @@ export async function updateEntry(
   id: string,
   patch: Partial<Pick<MemoryEntry, 'category' | 'content' | 'tags'>>,
 ): Promise<MemoryEntry | null> {
-  return withWriteLock(() => {
+  return withWriteLock(async () => {
     const current = readFromDisk();
     const idx = current.entries.findIndex((e) => e.id === id);
     if (idx < 0) return null;
@@ -237,17 +237,17 @@ export async function updateEntry(
     };
     const nextEntries = [...current.entries];
     nextEntries[idx] = updated;
-    persist({ entries: nextEntries });
+    await persist({ entries: nextEntries });
     return updated;
   });
 }
 
 export async function deleteEntry(id: string): Promise<boolean> {
-  return withWriteLock(() => {
+  return withWriteLock(async () => {
     const current = readFromDisk();
     const next = current.entries.filter((e) => e.id !== id);
     if (next.length === current.entries.length) return false;
-    persist({ entries: next });
+    await persist({ entries: next });
     return true;
   });
 }

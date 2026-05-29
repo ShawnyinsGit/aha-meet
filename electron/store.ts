@@ -4,11 +4,20 @@
 // recent cwds for the Lobby, open tab list for cold-restart, voice-print
 // enrollment, voice-lock toggle, etc.
 //
-// Reads are synchronous and cached after first hit. Writes go through an
-// atomic temp+rename so a crash mid-write won't leave a half-truncated file.
+// Reads stay synchronous (cache hit after first load) so call sites that just
+// need to look up `selectedVoiceName` etc. don't have to thread async through
+// the world.
+//
+// Writes are async + atomic (`fs.promises.writeFile` to a temp file +
+// `fs.promises.rename`). All writes are funneled through a single tail-promise
+// queue so two concurrent updates can't race on the rename — same pattern as
+// memory.ts. Use `flushSettingsWrites()` on shutdown to wait for the queue
+// to drain so `before-quit` can't return before the last openTabs snapshot
+// hits disk.
 
 import { app } from 'electron';
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
+import { promises as fsp } from 'node:fs';
 import { dirname, join } from 'node:path';
 
 export interface VoicePrint {
@@ -69,6 +78,29 @@ const RECENT_CWDS_MAX = 10;
 let cached: Settings | null = null;
 let cachedPath: string | null = null;
 
+// Single tail-promise chain; mirrors the pattern in memory.ts. Errors are
+// swallowed locally so one bad write doesn't poison the chain — individual
+// write functions still get the original rejection via `next`.
+let writeQueue: Promise<unknown> = Promise.resolve();
+
+function withWriteLock<T>(fn: () => T | Promise<T>): Promise<T> {
+  const next = writeQueue.then(() => fn());
+  writeQueue = next.then(
+    () => undefined,
+    () => undefined,
+  );
+  return next;
+}
+
+/** Resolves once the in-flight write queue has drained. Call from
+ *  `before-quit` so the last openTabs snapshot is on disk before exit. */
+export function flushSettingsWrites(): Promise<void> {
+  return writeQueue.then(
+    () => undefined,
+    () => undefined,
+  );
+}
+
 function settingsPath(): string {
   if (cachedPath) return cachedPath;
   cachedPath = join(app.getPath('userData'), 'settings.json');
@@ -94,27 +126,31 @@ function load(): Settings {
   // One-shot migration: pre-multi-tab versions only kept lastCwd. Promote it
   // into recentCwds so the Lobby has something to show, then drop the field
   // (recentCwds + lastActiveCwd subsume it). Idempotent: if recentCwds is
-  // already populated the migration is a no-op.
+  // already populated the migration is a no-op. Fire-and-forget the persist
+  // — `load()` callers don't want to await migration on every cache miss.
   if (cached.lastCwd && (!cached.recentCwds || cached.recentCwds.length === 0)) {
-    cached = {
+    const migrated: Settings = {
       ...cached,
       recentCwds: [{ path: cached.lastCwd, lastOpenedAt: Date.now() }],
       lastActiveCwd: cached.lastCwd,
     };
-    delete cached.lastCwd;
-    try { persist(cached); } catch (err) {
+    delete migrated.lastCwd;
+    cached = migrated;
+    void persist(migrated).catch((err) => {
       console.error('[store] migration write failed:', err);
-    }
+    });
   }
   return cached;
 }
 
-function persist(next: Settings): void {
+async function persist(next: Settings): Promise<void> {
   const p = settingsPath();
-  mkdirSync(dirname(p), { recursive: true });
+  await fsp.mkdir(dirname(p), { recursive: true });
   const tmp = `${p}.tmp`;
-  writeFileSync(tmp, JSON.stringify(next, null, 2), 'utf8');
-  renameSync(tmp, p);
+  await fsp.writeFile(tmp, JSON.stringify(next, null, 2), 'utf8');
+  await fsp.rename(tmp, p);
+  // Cache flips only after the rename succeeds — if write/rename throws we
+  // keep the prior cache so the rest of the app sees a coherent value.
   cached = next;
 }
 
@@ -122,43 +158,51 @@ export function getSettings(): Settings {
   return { ...load() };
 }
 
-export function updateSettings(patch: Partial<Settings>): Settings {
-  const next = { ...load(), ...patch };
-  persist(next);
-  return { ...next };
+export function updateSettings(patch: Partial<Settings>): Promise<Settings> {
+  return withWriteLock(async () => {
+    const next = { ...load(), ...patch };
+    await persist(next);
+    return { ...next };
+  });
 }
 
-export function clearVoicePrint(): Settings {
-  const current = load();
-  const { voicePrint: _vp, ...rest } = current;
-  persist(rest);
-  return { ...rest };
+export function clearVoicePrint(): Promise<Settings> {
+  return withWriteLock(async () => {
+    const current = load();
+    const { voicePrint: _vp, ...rest } = current;
+    await persist(rest);
+    return { ...rest };
+  });
 }
 
 /** Upsert a cwd into the LRU. Bumps existing entries to the top instead of
  *  duplicating. Cap at RECENT_CWDS_MAX to keep the file bounded — only the
  *  Lobby renders this list, no one needs an unbounded scroll. */
-export function pushRecentCwd(cwd: string): Settings {
-  const current = load();
-  const now = Date.now();
-  const existing = (current.recentCwds ?? []).filter((r) => r.path !== cwd);
-  const next: Settings = {
-    ...current,
-    recentCwds: [{ path: cwd, lastOpenedAt: now }, ...existing].slice(0, RECENT_CWDS_MAX),
-  };
-  persist(next);
-  return { ...next };
+export function pushRecentCwd(cwd: string): Promise<Settings> {
+  return withWriteLock(async () => {
+    const current = load();
+    const now = Date.now();
+    const existing = (current.recentCwds ?? []).filter((r) => r.path !== cwd);
+    const next: Settings = {
+      ...current,
+      recentCwds: [{ path: cwd, lastOpenedAt: now }, ...existing].slice(0, RECENT_CWDS_MAX),
+    };
+    await persist(next);
+    return { ...next };
+  });
 }
 
 /** Replace the openTabs + lastActiveCwd atomically. Called on every tab
  *  open/close/setActive so a sudden quit still restores accurately. */
-export function setOpenTabs(tabs: OpenTabEntry[], activeCwd: string | null): Settings {
-  const current = load();
-  const next: Settings = {
-    ...current,
-    openTabs: tabs.map((t) => ({ cwd: t.cwd, openedAt: t.openedAt })),
-    lastActiveCwd: activeCwd,
-  };
-  persist(next);
-  return { ...next };
+export function setOpenTabs(tabs: OpenTabEntry[], activeCwd: string | null): Promise<Settings> {
+  return withWriteLock(async () => {
+    const current = load();
+    const next: Settings = {
+      ...current,
+      openTabs: tabs.map((t) => ({ cwd: t.cwd, openedAt: t.openedAt })),
+      lastActiveCwd: activeCwd,
+    };
+    await persist(next);
+    return { ...next };
+  });
 }

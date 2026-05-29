@@ -11,15 +11,32 @@ import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { app } from 'electron';
+import {
+  getWhisperServerPort,
+  isWhisperServerReady,
+  postInference,
+  stopWhisperServer,
+} from './whisper-server.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-type WhisperLang = 'auto' | 'zh' | 'en';
+export type WhisperLang = 'auto' | 'zh' | 'en';
 
-const MODEL_NAME = 'ggml-small-q5_1.bin';
+export const WHISPER_MODEL_NAME = 'ggml-small-q5_1.bin';
 
-let cachedPaths: { bin: string; model: string } | null = null;
+// Resolved asset paths. `bin` (whisper-cli) is required for the CLI fallback
+// path; `server` (whisper-server) is optional — when present, the long-lived
+// HTTP server bypasses per-call model load. Either path being usable is
+// enough to call ASR "available".
+export type WhisperPaths = {
+  bin: string | null;
+  server: string | null;
+  model: string;
+  dir: string;
+};
+
+let cachedPaths: WhisperPaths | null = null;
 let cachedAvailability: boolean | null = null;
 
 function candidateDirs(): string[] {
@@ -34,27 +51,36 @@ function candidateDirs(): string[] {
   return dirs;
 }
 
-function resolvePaths(): { bin: string; model: string } | null {
+export function resolveWhisperPaths(): WhisperPaths | null {
   if (cachedPaths) return cachedPaths;
   for (const dir of candidateDirs()) {
-    const bin = join(dir, 'whisper-cli');
-    const model = join(dir, MODEL_NAME);
-    if (existsSync(bin) && existsSync(model)) {
-      cachedPaths = { bin, model };
-      return cachedPaths;
-    }
+    const model = join(dir, WHISPER_MODEL_NAME);
+    if (!existsSync(model)) continue;
+    const cli = join(dir, 'whisper-cli');
+    const server = join(dir, 'whisper-server');
+    const hasCli = existsSync(cli);
+    const hasServer = existsSync(server);
+    if (!hasCli && !hasServer) continue;
+    cachedPaths = {
+      bin: hasCli ? cli : null,
+      server: hasServer ? server : null,
+      model,
+      dir,
+    };
+    return cachedPaths;
   }
   return null;
 }
 
 export function isWhisperAvailable(): boolean {
   if (cachedAvailability !== null) return cachedAvailability;
-  cachedAvailability = resolvePaths() !== null;
+  const p = resolveWhisperPaths();
+  cachedAvailability = !!p && !!(p.bin || p.server);
   return cachedAvailability;
 }
 
 // Build a 16 kHz mono PCM16 WAV from Float32 samples in [-1, 1].
-function encodeWavPcm16(samples: Float32Array, sampleRate = 16000): Buffer {
+export function encodeWavPcm16(samples: Float32Array, sampleRate = 16000): Buffer {
   const dataLen = samples.length * 2;
   const buf = Buffer.alloc(44 + dataLen);
   buf.write('RIFF', 0);
@@ -86,12 +112,25 @@ let currentChild: ChildProcess | null = null;
 // When set, every queued / in-flight call resolves to a cancellation result
 // instead of waiting in line. Cleared on the next transcribePcm() call.
 let cancelled = false;
+// Back-pressure cap: a stuck VAD or runaway segmenter could otherwise pile
+// up minutes of audio behind the single-flight serializer, all of it held in
+// memory until whisper drains. 8 = generous (≈40s of speech at ~5s/seg) but
+// finite — past this we reject immediately so the renderer surfaces it.
+let queueDepth = 0;
+const MAX_QUEUE_DEPTH = 8;
 
 export function transcribePcm(
   pcm: Float32Array,
   lang: WhisperLang = 'auto',
 ): Promise<{ ok: true; text: string } | { ok: false; error: string }> {
+  if (queueDepth >= MAX_QUEUE_DEPTH) {
+    return Promise.resolve({
+      ok: false as const,
+      error: `whisper queue saturated (${MAX_QUEUE_DEPTH} pending) — drop segment`,
+    });
+  }
   cancelled = false;
+  queueDepth += 1;
   // Serialize: whisper-cli is single-threaded and we don't want concurrent
   // model loads competing for memory.
   const next = inFlight.then(() => {
@@ -102,33 +141,63 @@ export function transcribePcm(
   }).catch((e) => ({
     ok: false as const,
     error: String((e as Error)?.message ?? e),
-  }));
+  })).finally(() => {
+    queueDepth -= 1;
+  });
   inFlight = next.catch(() => {});
   return next;
 }
 
-// SIGTERM the current whisper-cli child (if any) and mark the queue as
-// cancelled so anything still waiting in line short-circuits instead of
-// starting fresh. Safe to call any number of times.
-export function disposeWhisper(): void {
+// SIGTERM the current whisper-cli child (if any), tear down whisper-server,
+// and mark the queue as cancelled so anything still waiting in line
+// short-circuits instead of starting fresh. Safe to call any number of times.
+export function disposeWhisper(permanent = true): Promise<void> {
   cancelled = true;
   const child = currentChild;
   if (child && !child.killed) {
     try { child.kill('SIGTERM'); } catch { /* ignore */ }
   }
+  // Return the server-stop promise so the caller (main.ts before-quit) can
+  // await the full SIGTERM→SIGKILL grace (≤ 1.2 s end-to-end). Pass
+  // permanent=false on the macOS window-close path so the server can be
+  // revived on the next `activate` instead of being marked dead for good.
+  return stopWhisperServer(permanent);
 }
 
 async function runOnce(
   pcm: Float32Array,
   lang: WhisperLang,
 ): Promise<{ ok: true; text: string } | { ok: false; error: string }> {
-  const paths = resolvePaths();
-  if (!paths) {
-    return { ok: false, error: 'whisper-cli not bundled — run `npm run prebuild:whisper`' };
-  }
   if (!pcm || pcm.length < 1600) {
     // <100ms — likely VAD misfire; don't waste CPU.
     return { ok: true, text: '' };
+  }
+
+  // Fast path: long-lived server is up. On transport errors we fall through
+  // to the CLI so a wedged server doesn't drop the segment outright; the
+  // server's own exit handler will trigger a restart in parallel.
+  if (isWhisperServerReady()) {
+    const port = getWhisperServerPort();
+    if (port != null) {
+      try {
+        const text = await postInference(port, pcm, lang);
+        return { ok: true, text };
+      } catch (e) {
+        console.warn('[whisper] server call failed, falling back to CLI:', (e as Error)?.message ?? e);
+        // fall through to CLI below
+      }
+    }
+  }
+  return runOnCli(pcm, lang);
+}
+
+async function runOnCli(
+  pcm: Float32Array,
+  lang: WhisperLang,
+): Promise<{ ok: true; text: string } | { ok: false; error: string }> {
+  const paths = resolveWhisperPaths();
+  if (!paths || !paths.bin) {
+    return { ok: false, error: 'whisper-cli not bundled — run `npm run prebuild:whisper`' };
   }
 
   const dir = mkdtempSync(join(tmpdir(), 'vibe-asr-'));
@@ -136,17 +205,24 @@ async function runOnce(
   const outBase = join(dir, 'out');
   try {
     writeFileSync(wavPath, encodeWavPcm16(pcm));
+    // Greedy decode + no temperature fallback + suppress non-speech: matches
+    // the whisper-server args so behaviour (and accuracy trade-off) is the
+    // same whether the segment went through HTTP or per-call CLI.
     const args = [
       '-m', paths.model,
       '-f', wavPath,
       '-of', outBase,
       '-otxt',
-      '-nt',         // no timestamps in output
+      '-nt',           // no timestamps in output
       '-l', lang,
-      '-t', '4',     // 4 threads
-      '-bs', '5',    // beam size
-      '-bo', '5',    // best of
-      '--no-prints', // suppress informational stderr noise
+      '-t', '4',       // 4 threads
+      '-bs', '1',      // greedy: beam size 1
+      '-bo', '1',      // greedy: best-of 1
+      '-nf',           // no temperature fallback
+      '-tp', '0.0',    // explicit greedy temperature
+      '-sns',          // suppress non-speech tokens
+      '-fa',           // flash-attention (default true; explicit)
+      '--no-prints',   // suppress informational stderr noise
     ];
     const { code, stderr } = await spawnPromise(paths.bin, args, dir);
     if (code !== 0) {

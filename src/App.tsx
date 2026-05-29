@@ -4,7 +4,8 @@ import { useWorkers } from './hooks/useWorkers';
 import { useTabs } from './hooks/useTabs';
 import { useScreenShare } from './hooks/useScreenShare';
 import { useElapsedSeconds } from './hooks/useTimer';
-import { cancelSpeech, isSpeechActive, setSelectedVoiceName, setSpeechFilterMode, speakConversational, useVoices } from './hooks/useSpeech';
+import { cancelSpeech, enqueueConversational, isSpeechActive, markTurnComplete, setSelectedVoiceName, setSpeechFilterMode, speakConversational, useVoices, warmupTTS } from './hooks/useSpeech';
+import type { SpeakHandle } from './hooks/useSpeech';
 import type { SpeechFilterMode } from './lib/speech-format';
 import { useAsr } from './hooks/useAsr';
 import { meetingStore } from './lib/meeting-store';
@@ -170,6 +171,16 @@ export function App() {
     return () => { cancelled = true; };
   }, []);
 
+  // Warm the macOS Electron speech-synthesis engine as soon as voices are
+  // available. The first real speak() otherwise pays an 80–300ms cold-start
+  // tax (engine spin-up) on top of the model latency, which lands right when
+  // the user is waiting for the AI's first reply. Pushing a zero-volume
+  // utterance during idle UI time amortizes that cost.
+  useEffect(() => {
+    if (!voicesReady) return;
+    warmupTTS();
+  }, [voicesReady]);
+
   // One-shot guide trigger: only on macOS, only once voices have populated,
   // only when no premium Chinese voice is detected and the user hasn't
   // permanently dismissed. Auto-closes if a premium voice appears later
@@ -290,14 +301,12 @@ export function App() {
   const handleStartEnrollment = useCallback(() => {
     // Cut Claude off if he's mid-greeting — otherwise his TTS bleeds into
     // the user's own speakers and contaminates the enrollment sample.
+    // cancelSpeech() (silent=false) now fires onAllDone synchronously, which
+    // resets aiSpeaking via the speakConversational closure. The explicit
+    // reset below is belt-and-braces in case the active session's onAllDone
+    // isn't wired (e.g. setSpeakCallback was just nulled) — cheap insurance
+    // so suppressed=false propagates to useAsr before the next VAD segment.
     cancelSpeech();
-    // cancelSpeech() flips activeSession.cancelled but does NOT invoke the
-    // speakConversational onAllDone callback that resets aiSpeaking — so
-    // without this synchronous reset, `suppressed` stays true into the next
-    // render and useVoiceCapture's suppressedRef keeps swallowing user audio
-    // even though TTS playback is gone. Tear down the speaking flag locally
-    // so the next render of useAsr propagates suppressed=false to the VAD
-    // callbacks well before the user's first enrollment segment lands.
     speakingRef.current = false;
     setAiSpeaking(false);
     if (prevMutedRef.current === null) {
@@ -386,9 +395,12 @@ export function App() {
   }, [sendText]);
 
   // Barge-in: any time the VAD says we've started speaking, cut Claude off.
+  // markBargeIn() tags the active streaming turn so subsequent stream events
+  // and the eventual full-message terminal don't re-arm the speech queue.
   const onBargeIn = useCallback(() => {
     if (speakingRef.current) {
       cancelSpeech();
+      meetingStore.markBargeIn();
       speakingRef.current = false;
       setAiSpeaking(false);
     }
@@ -420,6 +432,21 @@ export function App() {
   });
 
   // Wire TTS to assistant messages, with a "speaking" flag so we mute the mic.
+  // The SpeakHandle is a single sink with three modes:
+  //   supersede(text)               — one-shot replace (used by full-message
+  //                                   path, pending-tab replay, and synthetic
+  //                                   talker narrations). aiSpeaking resets
+  //                                   when its onDone fires.
+  //   enqueue(chunk, turnId, opts)  — sentence-streaming append. The first
+  //                                   sentence plays the moment it crosses a
+  //                                   punctuation boundary so the user doesn't
+  //                                   wait for the full reply.
+  //   markTurnComplete(turnId)      — terminal flush; once the queue drains
+  //                                   the session fires onAllDone and clears
+  //                                   aiSpeaking.
+  //
+  // The onAllDone closure is registered on supersede() and on the first
+  // enqueue() of a turn — whichever lands first owns the reset.
   useEffect(() => {
     if (!ttsOn) {
       setSpeakCallback(null);
@@ -428,24 +455,46 @@ export function App() {
       setAiSpeaking(false);
       return;
     }
-    setSpeakCallback((text: string) => {
-      // Safety net: state thinks AI is mid-narration but the controller has
-      // actually drained (cancel never fired onDone, watchdog missed, etc.).
-      // Without this, the *next* speakConversational call would see the same
-      // stuck flag and the user-visible mic mute would persist indefinitely.
-      // Cheap belt-and-braces — most calls hit the false branch immediately.
+    // Safety net: state thinks AI is mid-narration but the controller has
+    // actually drained (cancel never fired onDone, watchdog missed, etc.).
+    // Without this, the *next* call would see the same stuck flag and the
+    // user-visible mic mute would persist indefinitely. Cheap belt-and-braces
+    // — most calls hit the false branch immediately.
+    const armSpeaking = () => {
       if (speakingRef.current && !isSpeechActive()) {
         speakingRef.current = false;
         setAiSpeaking(false);
       }
       speakingRef.current = true;
       setAiSpeaking(true);
-      speakConversational(text, () => {
-        speakingRef.current = false;
-        setAiSpeaking(false);
-      });
-    });
-    return () => setSpeakCallback(null);
+    };
+    const finishSpeaking = () => {
+      speakingRef.current = false;
+      setAiSpeaking(false);
+    };
+    const handle: SpeakHandle = {
+      supersede: (text, onDone) => {
+        armSpeaking();
+        speakConversational(text, () => {
+          finishSpeaking();
+          onDone?.();
+        });
+      },
+      enqueue: (text, turnId, opts, onDone) => {
+        if (text.trim().length > 0) armSpeaking();
+        enqueueConversational(text, turnId, opts, () => {
+          finishSpeaking();
+          onDone?.();
+        });
+      },
+      markTurnComplete: (turnId) => {
+        markTurnComplete(turnId);
+      },
+    };
+    setSpeakCallback(handle);
+    return () => {
+      setSpeakCallback(null);
+    };
   }, [setSpeakCallback, ttsOn]);
 
   // Push the trust-mode scope down to the main process. setAutoApprove flips

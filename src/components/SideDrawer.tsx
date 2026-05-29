@@ -1,6 +1,12 @@
-import { useEffect, useRef, useState } from 'react';
-import { Send } from 'lucide-react';
-import type { ActivityEntry, PendingPermission, TranscriptEntry } from '../types';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Send, Paperclip, X, FileText, FileType, Image as ImageIcon, FileWarning } from 'lucide-react';
+import type {
+  ActivityEntry,
+  AttachmentKind,
+  PendingPermission,
+  StagedAttachment,
+  TranscriptEntry,
+} from '../types';
 import { PermissionCard } from './PermissionCard';
 
 interface SideDrawerProps {
@@ -10,11 +16,34 @@ interface SideDrawerProps {
   pending: PendingPermission | null;
   onResolve: (id: string, decision: 'allow' | 'deny') => void;
   onSend: (text: string) => void;
+  onSendAttachments?: (
+    staged: StagedAttachment[],
+    text: string,
+  ) => Promise<{ ok: boolean; error?: string }>;
+  onSubscribeDroppedFiles?: (cb: (files: File[]) => void) => () => void;
   multiAgent?: boolean;
   disabled: boolean;
 }
 
 const TIME_TICK_MS = 30_000;
+const STAGED_MAX = 10;
+const PER_FILE_MAX = 25 * 1024 * 1024;
+const TOTAL_MAX = 50 * 1024 * 1024;
+
+const ACCEPT_ATTR = [
+  '.md', '.markdown', '.txt', '.log',
+  '.json', '.jsonc',
+  '.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs',
+  '.py', '.go', '.rs', '.java', '.kt', '.swift',
+  '.c', '.cc', '.cpp', '.h', '.hpp', '.cs', '.rb', '.php',
+  '.css', '.scss', '.less', '.html', '.htm', '.xml', '.svg',
+  '.yaml', '.yml', '.toml', '.ini', '.env',
+  '.sh', '.bash', '.zsh', '.fish',
+  '.sql', '.graphql', '.gql',
+  '.csv', '.tsv',
+  '.docx', '.pdf',
+  'image/png', 'image/jpeg', 'image/webp',
+].join(',');
 
 type Tab = 'chat' | 'activity';
 
@@ -40,6 +69,64 @@ function formatMessageTime(ts: number, now: number): string {
   return sameDay ? time : `${pad2(d.getMonth() + 1)}-${pad2(d.getDate())} ${time}`;
 }
 
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / 1024 / 1024).toFixed(2)} MB`;
+}
+
+const TEXT_EXTS = new Set([
+  'md', 'markdown', 'txt', 'log', 'json', 'jsonc',
+  'ts', 'tsx', 'js', 'jsx', 'mjs', 'cjs',
+  'py', 'go', 'rs', 'java', 'kt', 'swift',
+  'c', 'cc', 'cpp', 'h', 'hpp', 'cs', 'rb', 'php',
+  'css', 'scss', 'less', 'html', 'htm', 'xml', 'svg',
+  'yaml', 'yml', 'toml', 'ini', 'env',
+  'sh', 'bash', 'zsh', 'fish',
+  'sql', 'graphql', 'gql',
+  'csv', 'tsv',
+]);
+
+function classifyKind(name: string, mime: string): AttachmentKind | null {
+  const m = (mime || '').toLowerCase();
+  if (m === 'application/pdf') return 'pdf';
+  if (m === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') return 'word';
+  if (m === 'image/png' || m === 'image/jpeg' || m === 'image/jpg' || m === 'image/webp') return 'image';
+  if (m.startsWith('text/') || m.startsWith('application/json') || m.startsWith('application/xml')) return 'text';
+  const idx = name.lastIndexOf('.');
+  if (idx < 0) return null;
+  const ext = name.slice(idx + 1).toLowerCase();
+  if (ext === 'docx') return 'word';
+  if (ext === 'pdf') return 'pdf';
+  if (ext === 'png' || ext === 'jpg' || ext === 'jpeg' || ext === 'webp') return 'image';
+  if (TEXT_EXTS.has(ext)) return 'text';
+  return null;
+}
+
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = typeof reader.result === 'string' ? reader.result : '';
+      const idx = result.indexOf(',');
+      resolve(idx >= 0 ? result.slice(idx + 1) : result);
+    };
+    reader.onerror = () => reject(reader.error ?? new Error('FileReader failed'));
+    reader.readAsDataURL(file);
+  });
+}
+
+function uid(): string {
+  return Math.random().toString(36).slice(2, 10);
+}
+
+function iconFor(kind: AttachmentKind) {
+  if (kind === 'image') return <ImageIcon size={12} aria-hidden="true" />;
+  if (kind === 'pdf') return <FileType size={12} aria-hidden="true" />;
+  if (kind === 'word') return <FileType size={12} aria-hidden="true" />;
+  return <FileText size={12} aria-hidden="true" />;
+}
+
 export function SideDrawer({
   open,
   transcript,
@@ -47,6 +134,8 @@ export function SideDrawer({
   pending,
   onResolve,
   onSend,
+  onSendAttachments,
+  onSubscribeDroppedFiles,
   multiAgent = false,
   disabled,
 }: SideDrawerProps) {
@@ -54,7 +143,12 @@ export function SideDrawer({
   const [text, setText] = useState('');
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [now, setNow] = useState(() => Date.now());
+  const [staged, setStaged] = useState<StagedAttachment[]>([]);
+  const [rejected, setRejected] = useState<Array<{ id: string; name: string; reason: string }>>([]);
+  const [staging, setStaging] = useState(false);
   const endRef = useRef<HTMLDivElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
   useEffect(() => {
     if (tab !== 'chat') return;
@@ -76,18 +170,111 @@ export function SideDrawer({
     endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
   }, [transcript.length, tab, pending]);
 
-  const submit = () => {
+  const totalStagedBytes = useMemo(
+    () => staged.reduce((acc, a) => acc + a.sizeBytes, 0),
+    [staged],
+  );
+
+  const enqueueFiles = async (files: File[] | FileList) => {
+    if (disabled) return;
+    if (!onSendAttachments) return;
+    const list = Array.from(files);
+    if (list.length === 0) return;
+    setStaging(true);
+    try {
+      const accepted: StagedAttachment[] = [];
+      const rejects: Array<{ id: string; name: string; reason: string }> = [];
+      let runningTotal = totalStagedBytes + accepted.reduce((a, x) => a + x.sizeBytes, 0);
+      for (const f of list) {
+        if (staged.length + accepted.length >= STAGED_MAX) {
+          rejects.push({ id: uid(), name: f.name, reason: `已达 ${STAGED_MAX} 个附件上限` });
+          continue;
+        }
+        if (f.size > PER_FILE_MAX) {
+          rejects.push({ id: uid(), name: f.name, reason: `超过单文件 ${formatBytes(PER_FILE_MAX)} 上限` });
+          continue;
+        }
+        if (runningTotal + f.size > TOTAL_MAX) {
+          rejects.push({ id: uid(), name: f.name, reason: `本次合计将超过 ${formatBytes(TOTAL_MAX)} 上限` });
+          continue;
+        }
+        const kind = classifyKind(f.name, f.type);
+        if (!kind) {
+          rejects.push({ id: uid(), name: f.name, reason: '不支持的文件类型' });
+          continue;
+        }
+        try {
+          const dataBase64 = await fileToBase64(f);
+          accepted.push({
+            id: uid(),
+            name: f.name,
+            mime: f.type || '',
+            sizeBytes: f.size,
+            kind,
+            dataBase64,
+          });
+          runningTotal += f.size;
+        } catch {
+          rejects.push({ id: uid(), name: f.name, reason: '读取失败' });
+        }
+      }
+      if (accepted.length > 0) setStaged((prev) => [...prev, ...accepted]);
+      if (rejects.length > 0) setRejected((prev) => [...prev, ...rejects]);
+    } finally {
+      setStaging(false);
+    }
+  };
+
+  // Subscribe to window-level drops published by App.tsx.
+  useEffect(() => {
+    if (!onSubscribeDroppedFiles) return;
+    const unsub = onSubscribeDroppedFiles((files) => {
+      void enqueueFiles(files);
+    });
+    return unsub;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [onSubscribeDroppedFiles, disabled, totalStagedBytes, staged.length, onSendAttachments]);
+
+  const removeStaged = (id: string) => {
+    setStaged((prev) => prev.filter((a) => a.id !== id));
+  };
+
+  const dismissRejected = (id: string) => {
+    setRejected((prev) => prev.filter((r) => r.id !== id));
+  };
+
+  const submit = async () => {
     const trimmed = text.trim();
+    if (staged.length > 0 && onSendAttachments) {
+      const res = await onSendAttachments(staged, trimmed);
+      if (res.ok) {
+        setStaged([]);
+        setText('');
+        setRejected([]);
+      }
+      return;
+    }
     if (!trimmed) return;
     onSend(trimmed);
     setText('');
   };
 
+  const onPaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    if (!onSendAttachments) return;
+    const files = Array.from(e.clipboardData.files ?? []);
+    if (files.length > 0) {
+      e.preventDefault();
+      void enqueueFiles(files);
+    }
+  };
+
   const placeholder = disabled
     ? 'Join a meeting to chat'
     : multiAgent
-      ? '多 Agent 并行 · Enter 发送 · Shift+Enter 换行'
-      : 'Type a message · Enter 发送 · Shift+Enter 换行';
+      ? '多 Agent 并行 · Enter 发送 · Shift+Enter 换行 · 📎/拖放/粘贴可附文件'
+      : 'Type a message · Enter 发送 · 📎 附件 / 拖放 / 粘贴均可';
+
+  const sendDisabled = disabled || staging || (staged.length === 0 && !text.trim());
 
   return (
     <aside className={`drawer ${open ? 'drawer-open' : ''}`}>
@@ -124,6 +311,17 @@ export function SideDrawer({
                   {e.imageUrl && (
                     <img className="msg-image" src={e.imageUrl} alt={e.text || 'Shared screenshot'} />
                   )}
+                  {e.attachments && e.attachments.length > 0 && (
+                    <div className="msg-attachments">
+                      {e.attachments.map((a, idx) => (
+                        <span key={`${e.id}-att-${idx}`} className={`attachment-chip attachment-chip-${a.kind} attachment-chip-sent`}>
+                          <span className="attachment-icon">{iconFor(a.kind)}</span>
+                          <span className="attachment-name">{a.name}</span>
+                          <span className="attachment-size">{formatBytes(a.sizeBytes)}</span>
+                        </span>
+                      ))}
+                    </div>
+                  )}
                   {e.text && <div className="msg-body">{e.text}</div>}
                 </div>
               );
@@ -132,17 +330,80 @@ export function SideDrawer({
             <div ref={endRef} />
           </div>
           <div className="drawer-composer">
+            {(staged.length > 0 || rejected.length > 0) && (
+              <div className="attachment-strip">
+                {staged.map((a) => (
+                  <span key={a.id} className={`attachment-chip attachment-chip-${a.kind}`}>
+                    <span className="attachment-icon">{iconFor(a.kind)}</span>
+                    <span className="attachment-name" title={a.name}>{a.name}</span>
+                    <span className="attachment-size">{formatBytes(a.sizeBytes)}</span>
+                    <button
+                      type="button"
+                      className="attachment-chip-remove"
+                      onClick={() => removeStaged(a.id)}
+                      aria-label={`移除 ${a.name}`}
+                      title="移除"
+                    >
+                      <X size={10} aria-hidden="true" />
+                    </button>
+                  </span>
+                ))}
+                {rejected.map((r) => (
+                  <span key={r.id} className="attachment-chip attachment-chip-rejected" title={r.reason}>
+                    <span className="attachment-icon"><FileWarning size={12} aria-hidden="true" /></span>
+                    <span className="attachment-name">{r.name}</span>
+                    <span className="attachment-size">{r.reason}</span>
+                    <button
+                      type="button"
+                      className="attachment-chip-remove"
+                      onClick={() => dismissRejected(r.id)}
+                      aria-label={`关闭 ${r.name}`}
+                      title="关闭"
+                    >
+                      <X size={10} aria-hidden="true" />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
             <div className="drawer-input-wrap">
+              <input
+                ref={fileInputRef}
+                type="file"
+                hidden
+                multiple
+                accept={ACCEPT_ATTR}
+                onChange={(e) => {
+                  const files = e.target.files;
+                  if (files && files.length > 0) void enqueueFiles(files);
+                  // Reset so picking the same file twice still fires onChange.
+                  e.target.value = '';
+                }}
+              />
+              {onSendAttachments && (
+                <button
+                  type="button"
+                  className="drawer-attach-icon"
+                  disabled={disabled || staging}
+                  onClick={() => fileInputRef.current?.click()}
+                  aria-label="添加附件"
+                  title="添加附件 (.md, .docx, .pdf, 图片…)"
+                >
+                  <Paperclip size={16} aria-hidden="true" />
+                </button>
+              )}
               <textarea
+                ref={textareaRef}
                 className="drawer-input"
                 value={text}
                 disabled={disabled}
                 placeholder={placeholder}
                 onChange={(e) => setText(e.target.value)}
+                onPaste={onPaste}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
                     e.preventDefault();
-                    submit();
+                    void submit();
                   }
                 }}
                 rows={2}
@@ -150,8 +411,8 @@ export function SideDrawer({
               <button
                 type="button"
                 className="drawer-send-icon"
-                disabled={disabled || !text.trim()}
-                onClick={submit}
+                disabled={sendDisabled}
+                onClick={() => void submit()}
                 aria-label="发送"
                 title="发送 · Enter"
               >

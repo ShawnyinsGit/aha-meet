@@ -23,10 +23,16 @@ const MODEL_MIRRORS = [
   `https://huggingface.co/ggerganov/whisper.cpp/resolve/main/${MODEL_NAME}`,
 ];
 
-const BREW_CANDIDATES = [
-  '/opt/homebrew/opt/whisper-cpp/bin/whisper-cli',
-  '/usr/local/opt/whisper-cpp/bin/whisper-cli',
-];
+const BREW_CANDIDATES = {
+  'whisper-cli': [
+    '/opt/homebrew/opt/whisper-cpp/bin/whisper-cli',
+    '/usr/local/opt/whisper-cpp/bin/whisper-cli',
+  ],
+  'whisper-server': [
+    '/opt/homebrew/opt/whisper-cpp/bin/whisper-server',
+    '/usr/local/opt/whisper-cpp/bin/whisper-server',
+  ],
+};
 
 function log(msg) {
   process.stdout.write(`[fetch-whisper] ${msg}\n`);
@@ -120,27 +126,37 @@ async function ensureModel() {
   );
 }
 
-function findInstalledWhisperCli() {
+function findInstalledBinary(name) {
   // explicit candidates
-  for (const c of BREW_CANDIDATES) {
+  const candidates = BREW_CANDIDATES[name] || [];
+  for (const c of candidates) {
     if (existsSync(c)) return c;
   }
   // PATH
-  const onPath = which('whisper-cli');
+  const onPath = which(name);
   if (onPath) return onPath;
   return null;
 }
 
-function copyBinaryAndDylibs(srcBin, destDir) {
-  const destBin = join(destDir, 'whisper-cli');
+// Resolve the brew Cellar lib/ for whichever whisper-cpp binary we're staging,
+// so @rpath/... references can be turned into absolute paths.
+function brewLibDirFor(srcBin) {
+  if (!srcBin.includes('/whisper-cpp/')) return null;
+  const root = srcBin.replace(/\/bin\/[^/]+$/, '');
+  const lib = join(root, 'lib');
+  return existsSync(lib) ? lib : null;
+}
+
+function copyOneBinary(srcBin, destDir, name) {
+  const destBin = join(destDir, name);
   copyFileSync(srcBin, destBin);
   chmodSync(destBin, 0o755);
-  log(`copied whisper-cli → ${destBin}`);
+  log(`copied ${name} → ${destBin}`);
 
   // Inspect the binary's dylib references; copy any @rpath libs we own.
   const otool = spawnSync('otool', ['-L', srcBin], { encoding: 'utf8' });
   if (otool.status !== 0) {
-    log('otool unavailable; binary copied as-is (system libs only assumed)');
+    log(`otool unavailable for ${name}; binary copied as-is (system libs only assumed)`);
     return;
   }
   const lines = otool.stdout.split('\n').slice(1);
@@ -148,15 +164,7 @@ function copyBinaryAndDylibs(srcBin, destDir) {
     .map((l) => l.trim().split(' ')[0])
     .filter((p) => p && (p.startsWith('@rpath/') || p.startsWith('/opt/homebrew/') || p.startsWith('/usr/local/')));
 
-  // Resolve @rpath libs against the brew Cellar (sibling lib/ dir).
-  const brewLib = (() => {
-    if (srcBin.includes('/whisper-cpp/')) {
-      const root = srcBin.replace(/\/bin\/whisper-cli$/, '');
-      const lib = join(root, 'lib');
-      return existsSync(lib) ? lib : null;
-    }
-    return null;
-  })();
+  const brewLib = brewLibDirFor(srcBin);
 
   for (const ref of ourLibs) {
     let abs = ref;
@@ -165,14 +173,14 @@ function copyBinaryAndDylibs(srcBin, destDir) {
       abs = join(brewLib, ref.slice('@rpath/'.length));
     }
     if (!existsSync(abs)) continue;
-    const name = abs.split('/').pop();
-    const out = join(destDir, name);
+    const libName = abs.split('/').pop();
+    const out = join(destDir, libName);
     if (!existsSync(out)) {
       copyFileSync(abs, out);
       chmodSync(out, 0o644);
-      log(`copied dep ${name}`);
+      log(`copied dep ${libName}`);
     } else {
-      log(`dep ${name} already present — skip`);
+      log(`dep ${libName} already present — skip`);
     }
 
     // Recursively copy that dylib's deps too (one level deep is usually enough).
@@ -195,10 +203,11 @@ function copyBinaryAndDylibs(srcBin, destDir) {
       }
     }
   }
+}
 
-  // Copy ggml backend .so files (BLAS, Metal, per-CPU-arch). Without these,
-  // whisper.cpp falls back to the slow generic backend or fails outright on a
-  // clean machine that has no /opt/homebrew/Cellar.
+// Copy ggml backend .so files (BLAS, Metal, per-CPU-arch) into destDir.
+// Idempotent: skips files already present.
+function copyGgmlBackends(destDir) {
   const ggmlLibexec = (() => {
     const r = spawnSync('sh', ['-c', 'ls -d /opt/homebrew/Cellar/ggml/*/libexec 2>/dev/null | head -1'], { encoding: 'utf8' });
     return r.status === 0 ? r.stdout.trim() : '';
@@ -217,10 +226,16 @@ function copyBinaryAndDylibs(srcBin, destDir) {
   } else {
     log('warn: ggml libexec dir not found; backends will not be bundled');
   }
+}
 
-  // Rewrite all @rpath/... references inside the copied binary + dylibs to
-  // @loader_path/... so they resolve against the same directory at runtime.
-  const allBins = readdirSync(destDir).filter((f) => f === 'whisper-cli' || f.endsWith('.dylib') || f.endsWith('.so'));
+// Rewrite @rpath/absolute brew paths inside every binary/dylib/so in destDir
+// to @loader_path so they resolve against the colocated files at runtime.
+// Then ad-hoc re-sign — install_name_tool invalidates the existing signature
+// and macOS Gatekeeper SIGKILLs unsigned mach-o on exec.
+function relinkAndSign(destDir, binaryNames) {
+  const allBins = readdirSync(destDir).filter(
+    (f) => binaryNames.includes(f) || f.endsWith('.dylib') || f.endsWith('.so'),
+  );
   for (const f of allBins) {
     const fp = join(destDir, f);
     const ins = spawnSync('otool', ['-L', fp], { encoding: 'utf8' });
@@ -232,22 +247,18 @@ function copyBinaryAndDylibs(srcBin, destDir) {
         const newRef = `@loader_path/${ref.slice('@rpath/'.length)}`;
         spawnSync('install_name_tool', ['-change', ref, newRef, fp]);
       } else if (ref.startsWith('/opt/homebrew/') || ref.startsWith('/usr/local/')) {
-        const name = ref.split('/').pop();
-        if (existsSync(join(destDir, name))) {
-          spawnSync('install_name_tool', ['-change', ref, `@loader_path/${name}`, fp]);
+        const libName = ref.split('/').pop();
+        if (existsSync(join(destDir, libName))) {
+          spawnSync('install_name_tool', ['-change', ref, `@loader_path/${libName}`, fp]);
         }
       }
     }
-    // Also set the dylib's own install name to @loader_path so re-linking is stable.
     if (f.endsWith('.dylib') || f.endsWith('.so')) {
       spawnSync('install_name_tool', ['-id', `@loader_path/${f}`, fp]);
     }
   }
   log('dylib paths rewritten to @loader_path');
 
-  // install_name_tool invalidates the existing ad-hoc signature; macOS
-  // Gatekeeper kills any unsigned mach-o with SIGKILL at exec time. Re-sign
-  // ad-hoc so the binary can actually run.
   for (const f of allBins) {
     const fp = join(destDir, f);
     const r = spawnSync('codesign', ['--force', '--sign', '-', fp]);
@@ -257,30 +268,50 @@ function copyBinaryAndDylibs(srcBin, destDir) {
 }
 
 async function ensureBinary() {
-  const destBin = join(outDir, 'whisper-cli');
-  if (existsSync(destBin)) {
-    log('whisper-cli already present — skip');
-    return;
+  const targets = ['whisper-cli', 'whisper-server'];
+  const copied = [];
+  let anyCopied = false;
+
+  for (const name of targets) {
+    const destBin = join(outDir, name);
+    if (existsSync(destBin)) {
+      log(`${name} already present — skip`);
+      copied.push(name);
+      continue;
+    }
+    const src = findInstalledBinary(name);
+    if (!src) {
+      if (name === 'whisper-server') {
+        // Not fatal: server mode is an optimization. The app falls back to
+        // per-call whisper-cli, which is also bundled.
+        log('warn: whisper-server not found — server mode will be disabled, falling back to per-call whisper-cli');
+        continue;
+      }
+      // whisper-cli is mandatory; print the manual-install banner and bail.
+      log('');
+      log('whisper-cli not found. Install one of:');
+      log('  1) brew install whisper-cpp        (recommended; this script will copy it on next run)');
+      log('  2) Build from source: https://github.com/ggml-org/whisper.cpp');
+      log('');
+      log(`Then re-run: node scripts/fetch-whisper.mjs`);
+      log('The app will fall back to webkitSpeechRecognition until whisper-cli is available.');
+      // Exit 0 — missing binary should NOT fail the wider build pipeline during
+      // development. Packaging will check separately.
+      return;
+    }
+    log(`found system ${name} at ${src}`);
+    copyOneBinary(src, outDir, name);
+    copied.push(name);
+    anyCopied = true;
   }
 
-  const src = findInstalledWhisperCli();
-  if (src) {
-    log(`found system whisper-cli at ${src}`);
-    copyBinaryAndDylibs(src, outDir);
-    return;
+  // Backends + relink + sign only need running when at least one binary was
+  // freshly placed (otherwise everything is already in @loader_path form and
+  // re-signing is harmless but wastes a few seconds).
+  if (anyCopied) {
+    copyGgmlBackends(outDir);
+    relinkAndSign(outDir, copied);
   }
-
-  // Last-resort: print clear manual instructions and exit non-fatally so
-  // the rest of the build can proceed in dev environments.
-  log('');
-  log('whisper-cli not found. Install one of:');
-  log('  1) brew install whisper-cpp        (recommended; this script will copy it on next run)');
-  log('  2) Build from source: https://github.com/ggml-org/whisper.cpp');
-  log('');
-  log(`Then re-run: node scripts/fetch-whisper.mjs`);
-  log('The app will fall back to webkitSpeechRecognition until whisper-cli is available.');
-  // Exit 0 — missing binary should NOT fail the wider build pipeline during
-  // development. Packaging will check separately.
 }
 
 async function main() {

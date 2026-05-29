@@ -29,7 +29,8 @@ export function MeetingHeader({
   onToggleMultiAgent,
   settingsSlot,
 }: MeetingHeaderProps) {
-  const folder = cwd?.split('/').filter(Boolean).slice(-1)[0] ?? 'No folder';
+  // Folder name + status dot live on the TabStrip above; the header only
+  // surfaces the full cwd path so there is exactly one identity per surface.
   const isOn = autoApproveScope !== 'off';
   const multiAgentTitle = multiAgent
     ? '多 Agent 并行已开启 · 所有需求会先评估依赖再拆解并行 · 点击关闭'
@@ -77,11 +78,7 @@ export function MeetingHeader({
   return (
     <header className="mtg-header">
       <div className="mtg-header-left">
-        <div className="mtg-dot" />
-        <div className="mtg-title">
-          <div className="mtg-title-name">{folder}</div>
-          <div className="mtg-title-sub" title={cwd ?? ''}>{cwd ?? ''}</div>
-        </div>
+        <div className="mtg-title-path" title={cwd ?? ''}>{cwd ?? 'No folder'}</div>
       </div>
       <div className="mtg-header-center">
         <span className="mtg-timer-dot" />

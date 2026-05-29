@@ -13,7 +13,7 @@ import { promises as fs } from 'node:fs';
 import { basename, isAbsolute, resolve as pathResolve, sep } from 'node:path';
 import { formatError } from '../format-error.js';
 import type { IpcContext } from './context.js';
-import { classifyKind, parseAttachment, type AttachmentKind } from '../attachments/parse.js';
+import { classifyKind, parseAttachmentBuffer, type AttachmentKind } from '../attachments/parse.js';
 
 // Cap any single deliverable we'll fetch into the renderer. 8 MB on disk
 // covers code files, generated PDFs, screenshots, and short videos; anything
@@ -45,8 +45,14 @@ export interface DocumentReadResult {
   text?: string;
   /** True if `text` was sliced by MAX_TEXT_BYTES. */
   truncated?: boolean;
-  /** base64 payload for image/video kinds. Word/pdf NOT base64-shipped —
-   *  they are parsed to text on the main side. */
+  /** Raw bytes for image/video kinds — passed via Electron's structured-clone
+   *  IPC, so this is a zero-copy transfer in practice (no base64 encode on
+   *  send + no atob on the renderer). Word/pdf NOT byte-shipped — they are
+   *  parsed to text on the main side. */
+  data?: Uint8Array;
+  /** Legacy base64 payload, kept for one transition release so any old
+   *  renderer build that still references `dataBase64` keeps working. New
+   *  callers should read `data` instead. */
   dataBase64?: string;
   /** Media type for image/video kinds. */
   mediaType?: string;
@@ -113,6 +119,26 @@ export function registerDocumentsIpc(ctx: IpcContext): void {
       return { ok: false, error: 'Path is not inside the session workspace', code: 'not-in-cwd' };
     }
 
+    // String-level isUnderCwd only collapses `../`; it cannot see through a
+    // symlink whose target escapes cwd. Resolve symlinks to the real on-disk
+    // path (and resolve cwd too, in case cwd itself is a symlink) and re-check
+    // containment before any stat/read follows the link off the workspace.
+    let realPath: string;
+    try {
+      realPath = await fs.realpath(rawPath);
+    } catch {
+      return { ok: false, error: `File not found: ${basename(rawPath)}`, code: 'missing' };
+    }
+    let realCwd: string;
+    try {
+      realCwd = await fs.realpath(cwd);
+    } catch {
+      realCwd = cwd;
+    }
+    if (!isUnderCwd(realPath, realCwd)) {
+      return { ok: false, error: 'Path is not inside the session workspace', code: 'not-in-cwd' };
+    }
+
     let stat: Awaited<ReturnType<typeof fs.stat>>;
     try {
       stat = await fs.stat(rawPath);
@@ -169,7 +195,11 @@ export function registerDocumentsIpc(ctx: IpcContext): void {
           name,
           sizeBytes,
           kind: 'image',
-          dataBase64: buffer.toString('base64'),
+          // Hand the bytes over as a Uint8Array view of the underlying
+          // ArrayBuffer — Electron's structured-clone IPC ships ArrayBuffers
+          // by reference, so this avoids the base64 encode + atob round-trip
+          // and the ~33% size inflation of a data URL.
+          data: new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength),
           mediaType,
         };
       }
@@ -184,21 +214,23 @@ export function registerDocumentsIpc(ctx: IpcContext): void {
           name,
           sizeBytes,
           kind: 'video',
-          dataBase64: buffer.toString('base64'),
+          data: new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength),
           mediaType,
         };
       }
 
       if (kind === 'word' || kind === 'pdf') {
         // Reuse the same parser used for inbound attachments: returns text.
+        // Buffer-native variant skips the base64 encode/decode round-trip
+        // we used to do via parseAttachment.
         const buffer = await fs.readFile(rawPath);
-        const parsed = await parseAttachment({
+        const parsed = await parseAttachmentBuffer({
           name,
           mime: kind === 'word'
             ? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
             : 'application/pdf',
           sizeBytes,
-          dataBase64: buffer.toString('base64'),
+          buffer,
         });
         return {
           ok: true,

@@ -263,7 +263,15 @@ export class WorkerScheduler {
       } catch (err) {
         console.error(`[scheduler] worker.interrupt() failed steering ${workerId}:`, err);
       }
-      handle.session?.sendUserText(`(plan update) ${addendum}`);
+      // M1: the worker may have task_done'd during the await, nulling the
+      // session via disposeWorker. A bare optional-chain send would drop the
+      // steer silently; re-route it back to Talker through harvest instead.
+      if (!handle.session || handle.status !== 'running') {
+        handle.queuedAddenda.push(addendum);
+        this.harvestUnresolvedAddenda(handle);
+        return;
+      }
+      handle.session.sendUserText(`(plan update) ${addendum}`);
     })();
     handle.live.busy = true;
     handle.live.lastUpdateTs = Date.now();
@@ -294,7 +302,7 @@ export class WorkerScheduler {
       const condensed = summary.length > TASK_DONE_LINE_MAX
         ? `${summary.slice(0, TASK_DONE_LINE_MAX - 2)}…`
         : summary;
-      talker.sendUserText(`(worker ${workerId} done) ${condensed}`);
+      talker.sendUserText(`(worker ${workerId} done) ${condensed}`, 'low');
     }
     // Snapshot the deliverables BEFORE disposeWorker resets the handle, so
     // the renderer's "delivery acceptance" panel sees the same file list the
@@ -635,6 +643,7 @@ export class WorkerScheduler {
     const joined = lost.map((a, i) => `  ${i + 1}. ${a}`).join('\n');
     talker.sendUserText(
       `(worker ${handle.id} failed with ${lost.length} unresolved instruction${lost.length === 1 ? '' : 's'} you previously queued via delegate_to/update:\n${joined}\nDecide whether to re-delegate, fold into a new task, or surface to the user.)`,
+      'low',
     );
   }
 
@@ -717,7 +726,7 @@ export class WorkerScheduler {
     }
     const talker = this.opts.getTalker();
     if (talker) {
-      talker.sendUserText(`(worker ${rootId} ended without task_done — downstream tasks marked failed)`);
+      talker.sendUserText(`(worker ${rootId} ended without task_done — downstream tasks marked failed)`, 'low');
     }
     this.emitPlanUpdate();
   }
@@ -732,7 +741,15 @@ export class WorkerScheduler {
       } catch (err) {
         console.error(`[scheduler] worker.interrupt() failed flushing addenda for ${handle.id}:`, err);
       }
-      handle.session?.sendUserText(`(plan update) ${batch.join('\n')}`);
+      // M1: same race as steerWorker — if the worker disposed during the
+      // await, return the whole batch to Talker via harvest rather than
+      // letting the optional-chain send no-op it away.
+      if (!handle.session || handle.status !== 'running') {
+        handle.queuedAddenda.push(...batch);
+        this.harvestUnresolvedAddenda(handle);
+        return;
+      }
+      handle.session.sendUserText(`(plan update) ${batch.join('\n')}`);
     })();
   }
 
@@ -765,7 +782,7 @@ export class WorkerScheduler {
       // 1.2s debounce, honour it instead of shipping a stale batch.
       if (this.opts.getSpeechFilterMode() === 'strict') return;
       const text = `(worker ${handle.id} update)\n${batch.join('\n')}`;
-      talker.sendUserText(text);
+      talker.sendUserText(text, 'low');
     }, QUEUED_UPDATE_FLUSH_MS);
   }
 
@@ -781,6 +798,7 @@ export class WorkerScheduler {
       if (talker) {
         talker.sendUserText(
           `(file collision) worker ${workerId} and worker ${prior.workerId} both touched ${path} within ${Math.round((now - prior.ts) / 1000)}s. 提醒用户可能有冲突。`,
+          'low',
         );
       }
     }

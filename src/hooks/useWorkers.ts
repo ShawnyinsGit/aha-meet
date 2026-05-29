@@ -1,5 +1,6 @@
 import { useCallback, useSyncExternalStore } from 'react';
 import { meetingStore, type DeliverySnapshot, type WorkerState } from '../lib/meeting-store';
+import type { SpeakHandle } from '../lib/speech-session';
 import type { MeetingPlan, StagedAttachment } from '../types';
 
 export interface UseWorkersResult {
@@ -19,7 +20,7 @@ export interface UseWorkersResult {
   resolvePermission: (id: string, decision: 'allow' | 'deny') => Promise<void>;
   interrupt: () => Promise<void>;
   endSession: () => Promise<void>;
-  setSpeakCallback: (cb: ((text: string) => void) | null) => void;
+  setSpeakCallback: (cb: SpeakHandle | null) => void;
   acceptDelivery: () => void;
   reviseDelivery: (feedback: string) => Promise<
     | { ok: true; route: 'worker' | 'talker'; queued?: boolean }
@@ -34,7 +35,7 @@ export function useWorkers(): UseWorkersResult {
   // active-slot state shape.
   const cwd = useSyncExternalStore(meetingStore.subscribeTabs, meetingStore.getActiveCwd);
 
-  const setSpeakCallback = useCallback((cb: ((text: string) => void) | null) => {
+  const setSpeakCallback = useCallback((cb: SpeakHandle | null) => {
     meetingStore.setSpeakCallback(cb);
   }, []);
 

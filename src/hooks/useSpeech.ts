@@ -8,7 +8,11 @@ export {
   setSpeechFilterMode,
   speak,
   speakConversational,
+  enqueueConversational,
+  markTurnComplete,
+  warmupTTS,
 } from '../lib/speech-session';
+export type { SpeakHandle, EnqueueOptions } from '../lib/speech-session';
 
 type SR = any;
 

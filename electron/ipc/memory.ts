@@ -83,8 +83,11 @@ export function registerMemoryIpc(ctx: IpcContext): void {
     }
   });
 
-  ipcMain.handle('memory:projectId', async () => {
-    const cwd = ctx.getCurrentCwd();
+  ipcMain.handle('memory:projectId', async (_e, payload?: { sessionId?: string }) => {
+    const id = typeof payload?.sessionId === 'string' && payload.sessionId.length > 0
+      ? payload.sessionId
+      : undefined;
+    const cwd = ctx.getCurrentCwd(id);
     if (!cwd) return null;
     try {
       return computeProjectId(cwd);

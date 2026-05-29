@@ -16,6 +16,7 @@ import type {
 } from '../types';
 import { MEETING_TOOL_NAMES } from '../../electron/meeting-tools';
 import { extractText, extractToolUses, uid } from './sdk-message';
+import type { SpeakHandle } from './speech-session';
 
 const MAX_TRANSCRIPT = 500;
 const MAX_ACTIVITY = 500;
@@ -28,6 +29,63 @@ function appendCapped<T>(arr: T[], items: T[], max: number): T[] {
     return arr.slice(arr.length + items.length - max).concat(items);
   }
   return arr.concat(items);
+}
+
+const SENTENCE_TERMINATORS = ['。', '！', '？', '!', '?', '\n'];
+const COMMA_BREAKS = ['，', ',', '；', ';'];
+const STREAM_LONG_BUFFER_THRESHOLD = 80;
+
+/** Carve a "ready" prefix off the streaming buffer, leaving any trailing
+ *  partial sentence in `tail` for the next delta. We prefer sentence
+ *  terminators (period / 。/ ！/ ？/ newline); for `.` we require the next
+ *  character be whitespace, end-of-buffer, or an uppercase letter so we don't
+ *  cleave decimals or abbreviations. When the buffer balloons past the
+ *  long-buffer threshold without a terminator, fall back to the latest comma
+ *  so the user starts hearing audio instead of staring at silence. */
+function takeReadySentences(buf: string): { ready: string; tail: string } {
+  if (!buf) return { ready: '', tail: '' };
+  let lastIdx = -1;
+  for (const ch of SENTENCE_TERMINATORS) {
+    const i = buf.lastIndexOf(ch);
+    if (i > lastIdx) lastIdx = i;
+  }
+  // '.' followed by a space, end-of-buffer, or uppercase. Match all to find
+  // the latest qualifying position so we don't release the buffer prematurely
+  // on "v1.0" or "e.g." style strings.
+  const dotRe = /\.(?=\s|$|[A-Z])/g;
+  let m: RegExpExecArray | null;
+  while ((m = dotRe.exec(buf)) !== null) {
+    if (m.index > lastIdx) lastIdx = m.index;
+  }
+  if (lastIdx >= 0) {
+    return { ready: buf.slice(0, lastIdx + 1), tail: buf.slice(lastIdx + 1) };
+  }
+  if (buf.length > STREAM_LONG_BUFFER_THRESHOLD) {
+    let commaIdx = -1;
+    for (const ch of COMMA_BREAKS) {
+      const i = buf.lastIndexOf(ch);
+      if (i > commaIdx) commaIdx = i;
+    }
+    if (commaIdx >= 0) {
+      return { ready: buf.slice(0, commaIdx + 1), tail: buf.slice(commaIdx + 1) };
+    }
+  }
+  return { ready: '', tail: buf };
+}
+
+/** Pull text out of a partial-message stream_event delta. The Anthropic SDK
+ *  shape we care about is `event.delta.text` (content_block_delta with a
+ *  text_delta). Anything else (input_json_delta, signature_delta, etc.) is
+ *  ignored — those don't represent spoken content. */
+function extractStreamDeltaText(streamEvent: unknown): string {
+  if (!streamEvent || typeof streamEvent !== 'object') return '';
+  const ev = streamEvent as { type?: unknown; delta?: unknown };
+  if (ev.type !== 'content_block_delta') return '';
+  const delta = ev.delta;
+  if (!delta || typeof delta !== 'object') return '';
+  const d = delta as { type?: unknown; text?: unknown };
+  if (d.type !== 'text_delta') return '';
+  return typeof d.text === 'string' ? d.text : '';
 }
 
 export interface WorkerState {
@@ -80,11 +138,23 @@ export interface TabMeta {
   /** placeholder = restored from settings but Orchestrator not yet spawned.
    *  Clicking the tab calls resumePlaceholder() which kicks off sessions:open. */
   placeholder: boolean;
-  status: 'idle' | 'running' | 'error';
+  /** 'starting' = sessions:open returned but session-ready hasn't arrived yet
+   *  (SDK subprocess still spawning). User input is buffered in pendingInput
+   *  during this state and replayed on ready.
+   *  'failed' = session-start-failed landed; user can retry from the tab UI. */
+  status: 'idle' | 'running' | 'error' | 'starting' | 'failed';
   unreadCount: number;
   isActive: boolean;
   openedAt: number;
 }
+
+/** Buffered user input held while a slot is in 'starting' status. Replayed
+ *  in order once 'session-ready' arrives. Dropped silently if the slot fails
+ *  before becoming ready (the renderer will show the failed-tab UI instead). */
+type PendingInputItem =
+  | { kind: 'text'; text: string }
+  | { kind: 'image'; dataUrl: string; caption: string }
+  | { kind: 'attachments'; staged: StagedAttachment[]; text: string };
 
 /** Returned by getLobbyData() so the Lobby can render Active + Recent without
  *  reaching into store internals. */
@@ -100,6 +170,17 @@ interface SlotInternal {
   openedAt: number;
   state: MeetingState;
   unreadCount: number;
+  /** Lifecycle of the underlying SDK session.
+   *  'starting' → sessions:open returned but session-ready hasn't arrived;
+   *  'ready'    → SDK is up, talker input flows directly;
+   *  'failed'   → session-start-failed landed; pending buffer is dropped and
+   *               the tab shows a retry affordance.
+   *  Placeholder slots leave this at 'starting' since they have no live
+   *  Orchestrator until resumePlaceholder runs. */
+  status: 'starting' | 'ready' | 'failed';
+  /** User input that arrived while status !== 'ready'. Replayed in order
+   *  when session-ready lands. Dropped on failure. */
+  pendingInput: PendingInputItem[];
   // Per-slot scratch
   lastSpoken: string;
   endedSources: Set<AgentSource>;
@@ -115,6 +196,26 @@ interface SlotInternal {
    *  Single-entry latching (most recent wins) keeps a long-ignored tab from
    *  dumping a backlog when the user finally clicks in. */
   pendingSpeak: { text: string; ts: number } | null;
+  /** Sentence-streaming buffer for the talker. Each `stream_event` delta is
+   *  appended to `pendingTail`; whenever a sentence boundary is reached, the
+   *  ready prefix is enqueued on the SpeakHandle and the tail keeps growing
+   *  for the next sentence. `messageId` doubles as the turnId for the
+   *  SpeakHandle so subsequent enqueues recognise the same turn (append) vs.
+   *  a different turn (supersede). It also lets the eventual full-assistant
+   *  message recognise that streaming already spoke this reply and skip the
+   *  one-shot supersede (otherwise the user hears the same text twice).
+   *  `hasEmitted` flips on the first emit so we only suppress the duplicate
+   *  full-message speak when streaming actually fired — if the SDK emitted
+   *  no deltas (flag off), we fall back to the one-shot path.
+   *  `cancelledByBarge` flips when the user talks over the AI mid-stream;
+   *  subsequent stream events and the eventual full-message supersede are
+   *  both suppressed so we don't restart the speech queue after a barge. */
+  streamBuffer: {
+    messageId: string | null;
+    pendingTail: string;
+    hasEmitted: boolean;
+    cancelledByBarge: boolean;
+  };
 }
 
 /** B3 — drop a pending replay older than this so a long-backgrounded tab
@@ -164,12 +265,15 @@ function emptySlot(id: string, cwd: string): SlotInternal {
     openedAt: Date.now(),
     state: emptyState(),
     unreadCount: 0,
+    status: 'starting',
+    pendingInput: [],
     lastSpoken: '',
     endedSources: new Set(),
     intendedExit: false,
     greeting: undefined,
     historyLoaded: false,
     pendingSpeak: null,
+    streamBuffer: { messageId: null, pendingTail: '', hasEmitted: false, cancelledByBarge: false },
   };
 }
 
@@ -200,7 +304,12 @@ class MeetingStore {
 
   private listeners = new Set<Listener>();
   private tabListeners = new Set<Listener>();
-  private speakCallback: ((text: string) => void) | null = null;
+  /** Unified TTS sink. supersede() replaces in-flight playback (one-shot);
+   *  enqueue(text, turnId) appends to a streaming turn (or supersedes if no
+   *  active session matches turnId); markTurnComplete(turnId) signals the end
+   *  of a streaming turn so the queue can drain its onAllDone. The renderer
+   *  wires all three; meeting-store calls whichever matches the event source. */
+  private speakCallback: SpeakHandle | null = null;
   private subscribed = false;
   private unsubscribeEvents: (() => void) | null = null;
 
@@ -225,17 +334,29 @@ class MeetingStore {
     if (this.cachedTabs) return this.cachedTabs;
     const tabs: TabMeta[] = [];
     for (const slot of this.slots.values()) {
+      // Status precedence (most informative wins):
+      //   placeholder (not yet spawned)         → idle
+      //   starting   (SDK still spawning)       → starting
+      //   failed     (start failed)             → failed
+      //   lastError  (mid-session error)        → error
+      //   running    (talker actively working)  → running
+      //   else                                  → idle
+      const status: TabMeta['status'] = slot.placeholder
+        ? 'idle'
+        : slot.status === 'starting'
+          ? 'starting'
+          : slot.status === 'failed'
+            ? 'failed'
+            : slot.state.lastError
+              ? 'error'
+              : slot.state.running
+                ? 'running'
+                : 'idle';
       tabs.push({
         id: slot.id,
         cwd: slot.cwd,
         placeholder: slot.placeholder,
-        status: slot.placeholder
-          ? 'idle'
-          : slot.state.lastError
-            ? 'error'
-            : slot.state.running
-              ? 'running'
-              : 'idle',
+        status,
         unreadCount: slot.unreadCount,
         isActive: slot.id === this.activeId,
         openedAt: slot.openedAt,
@@ -283,8 +404,20 @@ class MeetingStore {
     return this.cachedLobbyData;
   };
 
-  setSpeakCallback(cb: ((text: string) => void) | null) {
+  setSpeakCallback(cb: SpeakHandle | null) {
     this.speakCallback = cb;
+  }
+
+  /** VAD detected the user talking over the AI. Tag the active turn so any
+   *  in-flight stream events (and the eventual full-message terminal) are
+   *  suppressed — without this, the cancelled queue would restart on the
+   *  next delta or supersede on full-message arrival. The renderer is
+   *  responsible for the actual cancelSpeech() call; this only updates the
+   *  dedup state. */
+  markBargeIn(): void {
+    const slot = this.activeId ? this.slots.get(this.activeId) : null;
+    if (!slot) return;
+    slot.streamBuffer.cancelledByBarge = true;
   }
 
   private ensureSubscribed() {
@@ -346,6 +479,12 @@ class MeetingStore {
    *  open / placeholder promotion. Always sets historyLoaded=true (even on
    *  error) so subsequent appends start persisting. */
   private async loadHistoryForSlot(slot: SlotInternal): Promise<void> {
+    // Entries that landed in the in-memory transcript during this async load
+    // window were suppressed by persistTalkerEntry (historyLoaded still false),
+    // so they live only in memory and vanish on restart. Capture the pre-merge
+    // window entries here and flush them once the gate flips. Restored history
+    // is never in this list, so there is no double-write.
+    let pendingFlush: TranscriptEntry[] | null = null;
     try {
       const r = await window.vibeMeet.transcripts.load(slot.cwd);
       if (r.ok && r.entries.length > 0) {
@@ -356,6 +495,7 @@ class MeetingStore {
           // Prepend restored; the slot is fresh so existing transcript is
           // typically empty, but if any events landed between slot insert
           // and load resolve we keep them after the restored history.
+          pendingFlush = talker.transcript;
           const merged = [...restored, ...talker.transcript].slice(-MAX_TRANSCRIPT);
           workers.set('talker', { ...talker, transcript: merged });
           return { ...s, workers };
@@ -367,6 +507,12 @@ class MeetingStore {
       console.warn('[meeting-store] transcript load threw:', err);
     } finally {
       slot.historyLoaded = true;
+      // No merge happened (no history / error): the in-memory transcript holds
+      // only window entries, so flush all of them.
+      if (pendingFlush === null) {
+        pendingFlush = this.slots.get(slot.id)?.state.workers.get('talker')?.transcript ?? [];
+      }
+      for (const entry of pendingFlush) this.persistTalkerEntry(slot, entry);
     }
   }
 
@@ -519,7 +665,7 @@ class MeetingStore {
       this.speakCallback
     ) {
       slot.lastSpoken = pending.text;
-      try { this.speakCallback(pending.text); } catch (err) {
+      try { this.speakCallback.supersede(pending.text); } catch (err) {
         console.warn('[meeting-store] pendingSpeak replay threw', err);
       }
     }
@@ -581,6 +727,32 @@ class MeetingStore {
 
   private handleEventForSlot(slot: SlotInternal, e: RendererEvent) {
     const source: AgentSource = e.source ?? 'talker';
+    if (e.kind === 'session-ready') {
+      slot.status = 'ready';
+      this.mutateSlot(slot.id, (s) => ({ ...s, running: true, lastError: null }));
+      const pending = slot.pendingInput;
+      slot.pendingInput = [];
+      if (pending.length > 0) {
+        void (async () => {
+          for (const item of pending) {
+            try {
+              if (item.kind === 'text') await this.sendText(item.text);
+              else if (item.kind === 'image') await this.sendImage(item.dataUrl, item.caption);
+              else if (item.kind === 'attachments') await this.sendAttachments(item.staged, item.text);
+            } catch (err) {
+              console.warn('[meeting-store] pendingInput replay threw', err);
+            }
+          }
+        })();
+      }
+      return;
+    }
+    if (e.kind === 'session-start-failed') {
+      slot.status = 'failed';
+      slot.pendingInput = [];
+      this.mutateSlot(slot.id, (s) => ({ ...s, running: false, lastError: e.error }));
+      return;
+    }
     if (e.kind === 'worker-spawned') {
       this.mutateSlot(slot.id, (s) => {
         const workers = new Map(s.workers);
@@ -846,6 +1018,15 @@ class MeetingStore {
 
   private handleMessage(slot: SlotInternal, source: AgentSource, msg: any) {
     const type = msg?.type;
+    // Sentence-streaming path: only the talker has a streaming TTS sink; for
+    // workers we ignore stream_events entirely (their narration is already
+    // suppressed at the talker level). The flag `includePartialMessages` may
+    // be off in current builds — in that case no stream_event will ever land
+    // here and we fall back to the one-shot `assistant` path below.
+    if (type === 'stream_event' && source === 'talker') {
+      this.handleTalkerStreamEvent(slot, msg);
+      return;
+    }
     if (type === 'assistant') {
       if (typeof msg?.error === 'string' && msg.error.length > 0) {
         this.handleAgentApiError(slot, source, msg.error as string);
@@ -858,12 +1039,66 @@ class MeetingStore {
       // tabs we stash the most recent talker text in pendingSpeak so setActive
       // can replay it on switch-in (B3 — previously the gate dropped these
       // messages entirely once activeId drifted off mid-reply).
+      //
+      // Streaming dedupe: when sentence-streaming already covered this reply
+      // (stream_event deltas + message_stop fired streamCallback for every
+      // sentence), the eventual full-message `assistant` payload arrives with
+      // the same message.id. Speak again here would say the whole thing twice
+      // — so we let the transcript update but suppress speakCallback.
       const isTalkerText = source === 'talker' && text.trim().length > 0;
+      const fullMessageId = typeof msg?.message?.id === 'string' ? msg.message.id : null;
+      const alreadyStreamed =
+        isTalkerText &&
+        slot.streamBuffer.hasEmitted &&
+        fullMessageId !== null &&
+        fullMessageId === slot.streamBuffer.messageId;
+      // Barge-in dedupe: if the user talked over the AI mid-stream, the
+      // playback queue is already cancelled. The full message arrives
+      // anyway — speak again would restart the speech we just killed.
+      const bargedThisTurn =
+        isTalkerText &&
+        slot.streamBuffer.cancelledByBarge &&
+        fullMessageId !== null &&
+        fullMessageId === slot.streamBuffer.messageId;
+      // Id-independent dedupe defense: the checks above assume the partial
+      // stream's `message_start` id equals the full `assistant` message id. If
+      // a future SDK lets them diverge, alreadyStreamed/bargedThisTurn both
+      // fall through and the whole reply gets re-spoken via supersede. Guard
+      // against that with a signal that does NOT depend on id equality: if THIS
+      // turn already drove the streaming sink (hasEmitted) or was barged, and
+      // there is a live stream turn (messageId set) whose id does not match the
+      // full message, it is the same reply — suppress the duplicate speak.
+      const streamTurnActive =
+        isTalkerText &&
+        slot.streamBuffer.messageId !== null &&
+        (slot.streamBuffer.hasEmitted || slot.streamBuffer.cancelledByBarge);
+      const streamedIdDrift =
+        streamTurnActive && fullMessageId !== slot.streamBuffer.messageId;
+      if (streamedIdDrift) {
+        console.warn(
+          '[meeting-store] talker message.id drift — streamed turn',
+          slot.streamBuffer.messageId,
+          'vs full message',
+          fullMessageId,
+          '; suppressing duplicate speak',
+        );
+      }
       const shouldSpeak =
         isTalkerText &&
         text !== slot.lastSpoken &&
-        slot.id === this.activeId;
+        slot.id === this.activeId &&
+        !alreadyStreamed &&
+        !bargedThisTurn &&
+        !streamedIdDrift;
       if (shouldSpeak) slot.lastSpoken = text;
+      // Once the full message lands, the streaming-side state for THIS reply
+      // is consumed — reset it so the next reply (which may not be streamed)
+      // doesn't accidentally inherit the flag. Also pin lastSpoken so a
+      // subsequent activate-on-tab pendingSpeak replay doesn't repeat it.
+      if (alreadyStreamed || bargedThisTurn || streamedIdDrift) {
+        slot.lastSpoken = text;
+        slot.streamBuffer = { messageId: null, pendingTail: '', hasEmitted: false, cancelledByBarge: false };
+      }
       if (isTalkerText && slot.id !== this.activeId && text !== slot.lastSpoken) {
         slot.pendingSpeak = { text, ts: Date.now() };
       }
@@ -938,7 +1173,7 @@ class MeetingStore {
         return next;
       });
       if (talkerEntry) this.persistTalkerEntry(slot, talkerEntry);
-      if (shouldSpeak) this.speakCallback?.(text);
+      if (shouldSpeak) this.speakCallback?.supersede(text);
       if (source === 'talker' && text.trim().length > 0) this.bumpUnread(slot);
       return;
     }
@@ -992,6 +1227,86 @@ class MeetingStore {
     }
   }
 
+  /** Drive sentence-streaming TTS off the talker's partial-message stream.
+   *
+   *  The Anthropic SDK emits one `stream_event` per low-level Anthropic stream
+   *  frame; we only react to text-delta and message-stop. Anything else
+   *  (signature_delta, input_json_delta, content_block_start, ping, etc.)
+   *  passes through as a no-op so we don't churn state on every frame.
+   *
+   *  Background tabs (`slot.id !== activeId`) skip the speak path entirely —
+   *  switching tabs mid-stream would otherwise interleave two reply streams
+   *  on the same speech queue. Their fallback path (full assistant message →
+   *  pendingSpeak replay) still works on tab switch-in. */
+  private handleTalkerStreamEvent(slot: SlotInternal, msg: any) {
+    if (slot.id !== this.activeId) return;
+    const cb = this.speakCallback;
+    if (!cb) return;
+    const event = msg?.event;
+    const eventType = event?.type;
+
+    if (eventType === 'message_start') {
+      // New reply boundary — reset the buffer so a previous reply's tail
+      // doesn't bleed into this one. Capture the message id; it doubles as
+      // the turnId for the SpeakHandle so subsequent enqueues for the same
+      // reply are routed to the same in-flight session (append, not
+      // supersede).
+      const id = typeof event?.message?.id === 'string' ? event.message.id : null;
+      slot.streamBuffer = { messageId: id, pendingTail: '', hasEmitted: false, cancelledByBarge: false };
+      return;
+    }
+
+    // Barge-in: drop any further stream events for this turn. The playback
+    // queue has already been cancelled by the renderer; we just need to not
+    // re-arm it on the next delta.
+    if (slot.streamBuffer.cancelledByBarge) return;
+
+    if (eventType === 'content_block_delta') {
+      const delta = extractStreamDeltaText(event);
+      if (!delta) return;
+      const turnId = slot.streamBuffer.messageId;
+      if (!turnId) return;
+      slot.streamBuffer.pendingTail += delta;
+      const { ready, tail } = takeReadySentences(slot.streamBuffer.pendingTail);
+      if (!ready) return;
+      slot.streamBuffer.pendingTail = tail;
+      const wasFirst = !slot.streamBuffer.hasEmitted;
+      slot.streamBuffer.hasEmitted = true;
+      try { cb.enqueue(ready, turnId, { isFirstChunk: wasFirst }); } catch (err) {
+        console.warn('[meeting-store] speakCallback.enqueue threw:', err);
+      }
+      return;
+    }
+
+    if (eventType === 'message_stop' || eventType === 'message_delta') {
+      // message_stop is the only guaranteed terminal frame; message_delta
+      // with stop_reason set is its precursor on some SDK versions. Either
+      // way we flush the trailing partial as the final chunk, then close
+      // the turn so the SpeakHandle can drain onAllDone.
+      const stopReason = event?.delta?.stop_reason ?? event?.stop_reason ?? null;
+      if (eventType === 'message_delta' && !stopReason) return;
+      const tail = slot.streamBuffer.pendingTail;
+      slot.streamBuffer.pendingTail = '';
+      const hasEmitted = slot.streamBuffer.hasEmitted;
+      const turnId = slot.streamBuffer.messageId;
+      // No-op if we never emitted AND have no tail — nothing to speak. This
+      // protects App.tsx from a dangling onAllDone for a reply that never
+      // started its speech queue.
+      if (!hasEmitted && !tail.trim()) return;
+      if (!turnId) return;
+      try {
+        if (tail.trim().length > 0) {
+          cb.enqueue(tail, turnId, { isFinal: true });
+        } else {
+          cb.markTurnComplete(turnId);
+        }
+      } catch (err) {
+        console.warn('[meeting-store] speakCallback (final) threw:', err);
+      }
+      return;
+    }
+  }
+
   // --- Active-slot send API (back-compat for components/hooks) --------------
 
   async restartSession() {
@@ -1014,26 +1329,55 @@ class MeetingStore {
     await this.openSession(cwd, greeting);
   }
 
+  /** Retry a failed slot: drop the dead slot and re-open the same cwd. The
+   *  TabStrip exposes this on tabs whose status is 'failed'. */
+  async retryFailedTab(id: string): Promise<{ ok: boolean; error?: string }> {
+    const slot = this.slots.get(id);
+    if (!slot || slot.placeholder) return { ok: false, error: 'not-found' };
+    if (slot.status !== 'failed') return { ok: false, error: 'not-failed' };
+    const cwd = slot.cwd;
+    const greeting = slot.greeting;
+    try { await window.vibeMeet.sessions.close(id); } catch (err) {
+      console.warn('[meeting-store] sessions.close (retry) failed', { id, err });
+    }
+    this.slots.delete(id);
+    if (this.activeId === id) this.activeId = null;
+    this.notifyTabsOnly();
+    return this.openSession(cwd, greeting);
+  }
+
+  /** Returns the active live (non-placeholder) slot regardless of ready
+   *  state, so sendText/sendImage/sendAttachments can buffer to pendingInput
+   *  while the SDK is still spawning. */
+  private activeLiveSlot(): SlotInternal | null {
+    if (!this.activeId) return null;
+    const slot = this.slots.get(this.activeId);
+    if (!slot || slot.placeholder) return null;
+    return slot;
+  }
+
   async sendText(text: string) {
     if (!text.trim()) return;
-    const id = this.effectiveSessionId();
-    if (!id) return;
-    const slot = this.slots.get(id);
+    const slot = this.activeLiveSlot();
     if (!slot) return;
+    if (slot.status === 'failed') return;
     const entry: TranscriptEntry = { id: uid(), role: 'user', text, ts: Date.now() };
     this.updateWorker(slot, 'talker', (w) => ({
       ...w,
       transcript: appendCapped(w.transcript, [entry], MAX_TRANSCRIPT),
     }));
     this.persistTalkerEntry(slot, entry);
-    await window.vibeMeet.sendUserText(id, text);
+    if (slot.status !== 'ready') {
+      slot.pendingInput.push({ kind: 'text', text });
+      return;
+    }
+    await window.vibeMeet.sendUserText(slot.id, text);
   }
 
   async sendImage(dataUrl: string, caption: string) {
-    const id = this.effectiveSessionId();
-    if (!id) return;
-    const slot = this.slots.get(id);
+    const slot = this.activeLiveSlot();
     if (!slot) return;
+    if (slot.status === 'failed') return;
     const entry: TranscriptEntry = {
       id: uid(),
       role: 'user',
@@ -1046,7 +1390,11 @@ class MeetingStore {
       transcript: appendCapped(w.transcript, [entry], MAX_TRANSCRIPT),
     }));
     this.persistTalkerEntry(slot, entry);
-    await window.vibeMeet.sendUserImage(id, dataUrl, caption);
+    if (slot.status !== 'ready') {
+      slot.pendingInput.push({ kind: 'image', dataUrl, caption });
+      return;
+    }
+    await window.vibeMeet.sendUserImage(slot.id, dataUrl, caption);
   }
 
   async sendAttachments(
@@ -1054,10 +1402,9 @@ class MeetingStore {
     text: string,
   ): Promise<{ ok: boolean; error?: string }> {
     if (staged.length === 0 && !text.trim()) return { ok: false, error: 'Nothing to send' };
-    const id = this.effectiveSessionId();
-    if (!id) return { ok: false, error: 'No active session' };
-    const slot = this.slots.get(id);
+    const slot = this.activeLiveSlot();
     if (!slot) return { ok: false, error: 'No active session' };
+    if (slot.status === 'failed') return { ok: false, error: 'Session failed to start' };
     const meta: AttachmentMeta[] = staged.map((a) => ({ name: a.name, kind: a.kind, sizeBytes: a.sizeBytes }));
     const transcriptText = text.trim().length > 0 ? text : `Sent ${staged.length} file${staged.length === 1 ? '' : 's'}`;
     const entryId = uid();
@@ -1073,6 +1420,10 @@ class MeetingStore {
       transcript: appendCapped(w.transcript, [entry], MAX_TRANSCRIPT),
     }));
     this.persistTalkerEntry(slot, entry);
+    if (slot.status !== 'ready') {
+      slot.pendingInput.push({ kind: 'attachments', staged, text });
+      return { ok: true };
+    }
     const wire = staged.map((a) => ({
       name: a.name,
       mime: a.mime,
@@ -1080,7 +1431,7 @@ class MeetingStore {
       dataBase64: a.dataBase64,
     }));
     try {
-      const res = await window.vibeMeet.sendUserAttachments(id, wire, text);
+      const res = await window.vibeMeet.sendUserAttachments(slot.id, wire, text);
       if (!res.ok) {
         this.updateWorker(slot, 'talker', (w) => ({
           ...w,

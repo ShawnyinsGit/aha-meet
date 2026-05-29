@@ -41,13 +41,19 @@ export interface WorkerDeliveryFile {
 }
 
 // Orchestrator-only events (alongside session events emitted from a worker/talker).
+// `session-ready` / `session-start-failed` are emitted by the IPC layer (not the
+// orchestrator itself) once the background `orch.start()` settles, so the
+// renderer can flip the slot's status from 'starting' → 'ready' or 'failed' and
+// replay any queued input.
 export type OrchestratorOnlyEvent =
   | { kind: 'worker-spawned'; workerId: string; title: string; deps: string[]; specialty: WorkerSpecialtyKind }
   | { kind: 'worker-ended'; workerId: string; status: WorkerStatusKind; summary?: string }
   | { kind: 'worker-delivery'; workerId: string; title: string; summary: string; taskId: string; files: WorkerDeliveryFile[] }
   | { kind: 'plan-updated'; plan: MeetingPlan }
   | { kind: 'decision-pending'; decisionId: string; question: string; path: string; recommendedTitle: string; calendarOk: boolean; remindersOk: boolean }
-  | { kind: 'decision-resolved'; decisionId: string; question: string; path: string; conclusion: string };
+  | { kind: 'decision-resolved'; decisionId: string; question: string; path: string; conclusion: string }
+  | { kind: 'session-ready' }
+  | { kind: 'session-start-failed'; error: string };
 
 export type EmittedEvent = SessionEvent | OrchestratorOnlyEvent;
 

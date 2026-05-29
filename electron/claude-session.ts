@@ -54,6 +54,16 @@ export type SessionEvent =
   | { kind: 'error'; error: string }
   | { kind: 'ended' };
 
+/** Priority for input messages handed to the talker.
+ *   high   → real user voice / typed text from the renderer
+ *   normal → system-synthesised lines (greetings, narrate, decision updates)
+ *   low    → worker progress / collision / task_done broadcasts
+ *
+ *  The session drains all 'high' messages before any 'normal', and all
+ *  'normal' before any 'low'. This way a long burst of worker chatter cannot
+ *  push the user's next utterance to the back of the queue. */
+export type InputPriority = 'high' | 'normal' | 'low';
+
 /** Native confirmer for destructive tool calls when auto-approve is on. The
  *  Electron implementation lives in main.ts and calls dialog.showMessageBox;
  *  resolves true on Allow, false on Deny. */
@@ -64,7 +74,11 @@ export type ConfirmDestructive = (
 
 export class ClaudeSession {
   private q: Query | null = null;
-  private inputQueue: SDKUserMessage[] = [];
+  // Three FIFO buckets, drained strictly high → normal → low so worker
+  // progress can never starve a user utterance. See InputPriority for why.
+  private highQueue: SDKUserMessage[] = [];
+  private normalQueue: SDKUserMessage[] = [];
+  private lowQueue: SDKUserMessage[] = [];
   private inputResolvers: Array<(v: IteratorResult<SDKUserMessage>) => void> = [];
   private closed = false;
   private pendingPerms = new Map<string, PermissionPending>();
@@ -193,22 +207,22 @@ export class ClaudeSession {
     })();
   }
 
-  sendUserText(text: string) {
+  sendUserText(text: string, priority: InputPriority = 'normal') {
     const msg: SDKUserMessage = {
       type: 'user',
       message: { role: 'user', content: text },
       parent_tool_use_id: null,
     };
-    this.pushInput(msg);
+    this.pushInput(msg, priority);
   }
 
-  sendUserContent(content: SDKUserMessage['message']['content']) {
+  sendUserContent(content: SDKUserMessage['message']['content'], priority: InputPriority = 'normal') {
     const msg: SDKUserMessage = {
       type: 'user',
       message: { role: 'user', content },
       parent_tool_use_id: null,
     };
-    this.pushInput(msg);
+    this.pushInput(msg, priority);
   }
 
   resolvePermission(id: string, decision: 'allow' | 'deny', message?: string) {
@@ -258,14 +272,29 @@ export class ClaudeSession {
     }
   }
 
-  private pushInput(m: SDKUserMessage) {
+  private pushInput(m: SDKUserMessage, priority: InputPriority) {
     if (this.closed) return;
-    const r = this.inputResolvers.shift();
-    if (r) {
-      r({ value: m, done: false });
-    } else {
-      this.inputQueue.push(m);
+    // A waiting resolver always wins over queueing — but only when there's
+    // nothing already buffered ahead of this priority. The picker below is
+    // strict (high → normal → low), so for a fresh resolver we can hand the
+    // message off directly regardless of priority since all queues are empty.
+    if (this.highQueue.length === 0 && this.normalQueue.length === 0 && this.lowQueue.length === 0) {
+      const r = this.inputResolvers.shift();
+      if (r) {
+        r({ value: m, done: false });
+        return;
+      }
     }
+    if (priority === 'high') this.highQueue.push(m);
+    else if (priority === 'low') this.lowQueue.push(m);
+    else this.normalQueue.push(m);
+  }
+
+  private dequeueNext(): SDKUserMessage | undefined {
+    if (this.highQueue.length > 0) return this.highQueue.shift();
+    if (this.normalQueue.length > 0) return this.normalQueue.shift();
+    if (this.lowQueue.length > 0) return this.lowQueue.shift();
+    return undefined;
   }
 
   private createInputIterable(): AsyncIterable<SDKUserMessage> {
@@ -274,8 +303,9 @@ export class ClaudeSession {
       [Symbol.asyncIterator](): AsyncIterator<SDKUserMessage> {
         return {
           next(): Promise<IteratorResult<SDKUserMessage>> {
-            if (self.inputQueue.length > 0) {
-              return Promise.resolve({ value: self.inputQueue.shift()!, done: false });
+            const next = self.dequeueNext();
+            if (next !== undefined) {
+              return Promise.resolve({ value: next, done: false });
             }
             if (self.closed) {
               return Promise.resolve({ value: undefined as any, done: true });

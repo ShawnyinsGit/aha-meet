@@ -232,11 +232,19 @@ export function useVoiceCapture({
             return s;
           },
           // Sensitivity: keep defaults moderate; we'd rather miss a few
-          // misfires than truncate words.
+          // misfires than truncate words. The positive threshold stays at
+          // 0.55 to avoid being re-triggered by TTS echo (barge-in false
+          // positives regress hard below ~0.5). The negative threshold was
+          // tightened from 0.4 → 0.35 so end-of-speech is declared more
+          // decisively; combined with the shorter redemptionMs below this is
+          // the bulk of the ASR end-to-end latency cut.
           positiveSpeechThreshold: 0.55,
-          negativeSpeechThreshold: 0.4,
+          negativeSpeechThreshold: 0.35,
           // Grace period before declaring speech-end ("did they pause or stop?").
-          redemptionMs: 384,
+          // 384 → 240 ms: 240 ms still covers natural mid-utterance pauses
+          // (typical Mandarin gap is 200–250 ms) but stops burning the extra
+          // 144 ms of wallclock on every segment.
+          redemptionMs: 240,
           // Drop sub-128ms segments as VAD misfires (clicks, breaths).
           minSpeechMs: 128,
           // Prepend ~256ms of audio so word onsets aren't clipped.

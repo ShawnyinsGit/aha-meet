@@ -2,12 +2,14 @@ import { app, BrowserWindow, dialog, shell, systemPreferences } from 'electron';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { disposeWhisper } from './whisper.js';
+import { startWhisperServer } from './whisper-server.js';
 import { buildClaudeShadowHome } from './claude-defaults.js';
 import type { AutoApproveScope } from './auto-approve-policy.js';
 import { SessionRegistry } from './sessions.js';
+import { flushSettingsWrites } from './store.js';
 import type { IpcContext, IpcEmittedEvent } from './ipc/context.js';
 import { registerSessionIpc } from './ipc/session.js';
-import { registerSessionsIpc } from './ipc/sessions.js';
+import { registerSessionsIpc, flushOpenTabsNow } from './ipc/sessions.js';
 import { registerAuthIpc } from './ipc/auth.js';
 import { registerDesktopIpc } from './ipc/desktop.js';
 import { registerAsrIpc } from './ipc/asr.js';
@@ -36,7 +38,17 @@ const registry = new SessionRegistry();
 let autoApprove: AutoApproveScope = 'off';
 // Shadow HOME pointing at the merged bundled+user .claude tree, computed
 // once at app launch. `null` in dev mode → SDK uses real ~/.claude.
+//
+// We kick the build off the launch critical path: createWindow() runs
+// immediately, the shadow tree resolves in the background, and sessions:open
+// awaits this promise the first time it actually needs HOME (typically
+// 1–3 s after launch when the user clicks "Open"). Callers should use
+// `awaitClaudeShadowHome` rather than peek at `claudeShadowHome` directly.
 let claudeShadowHome: string | null = null;
+let claudeShadowHomeReady: Promise<string | null> = Promise.resolve(null);
+function awaitClaudeShadowHome(): Promise<string | null> {
+  return claudeShadowHomeReady;
+}
 
 const isDev = !app.isPackaged && !!process.env.VITE_DEV_SERVER_URL;
 
@@ -265,6 +277,7 @@ const ipcCtx: IpcContext = {
   getAutoApprove: () => autoApprove,
   setAutoApprove: (v) => { autoApprove = v; },
   getClaudeShadowHome: () => claudeShadowHome,
+  awaitClaudeShadowHome,
   nativeConfirmDestructive,
 };
 
@@ -284,25 +297,40 @@ registerTranscriptsIpc();
 // ---- App lifecycle ----------------------------------------------------------
 
 app.whenReady().then(() => {
-  // Build the merged bundled+user .claude shadow tree once per launch so the
-  // worker subprocess sees both the bundled ECC defaults and the user's own
-  // `~/.claude` entries (user wins on same names). Cheap (just symlinks).
-  try {
-    const result = buildClaudeShadowHome();
-    claudeShadowHome = result.home;
-    if (claudeShadowHome) {
-      console.log(
-        `[claude-defaults] shadow home at ${claudeShadowHome} ` +
-          `(bundled=${result.stats.bundled} userOverrides=${result.stats.userOverrides} passthrough=${result.stats.passthrough})`,
-      );
-    } else {
-      console.log('[claude-defaults] dev mode or no bundled defaults; using real ~/.claude');
-    }
-  } catch (err) {
-    console.error('[claude-defaults] failed to build shadow home:', err);
-    claudeShadowHome = null;
-  }
+  // Kick the merged bundled+user .claude shadow tree build OFF the launch
+  // critical path. createWindow() fires immediately so Chromium starts up in
+  // parallel; sessions:open awaits the resulting promise the first time it
+  // needs HOME (usually 1–3 s after launch — the build is done long before).
+  claudeShadowHomeReady = buildClaudeShadowHome().then(
+    (result) => {
+      claudeShadowHome = result.home;
+      if (claudeShadowHome) {
+        const cachedSuffix = result.stats.cached ? ' [cached]' : '';
+        console.log(
+          `[claude-defaults] shadow home at ${claudeShadowHome} ` +
+            `(bundled=${result.stats.bundled} userOverrides=${result.stats.userOverrides} passthrough=${result.stats.passthrough})${cachedSuffix}`,
+        );
+      } else {
+        console.log('[claude-defaults] dev mode or no bundled defaults; using real ~/.claude');
+      }
+      return claudeShadowHome;
+    },
+    (err) => {
+      console.error('[claude-defaults] failed to build shadow home:', err);
+      claudeShadowHome = null;
+      return null;
+    },
+  );
   createWindow();
+
+  // Kick the whisper.cpp HTTP server off the launch critical path. It boots
+  // in ~1–3 s and warms the model with a brief 440 Hz tone so the first real
+  // user segment hits hot Metal shaders instead of paying 150–400 ms of cold
+  // load. Fire-and-forget: if it fails (binary missing, port wedged) the
+  // transcribe path silently falls back to per-call whisper-cli.
+  void startWhisperServer().then((r) => {
+    if (!r.ok) console.warn('[whisper-server] disabled:', r.reason);
+  });
 
   // Prompt for microphone access at launch. On macOS this shows the native
   // system dialog when the status is 'not-determined'; on already-granted or
@@ -315,6 +343,12 @@ app.whenReady().then(() => {
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    // A macOS window-close stops the ASR server non-permanently (see
+    // window-all-closed). When the dock rebuilds the window, bring it back up.
+    // No-op if it's still running or already starting.
+    void startWhisperServer().then((r) => {
+      if (!r.ok) console.warn('[whisper-server] activate restart skipped:', r.reason);
+    });
   });
 });
 
@@ -348,9 +382,16 @@ app.on('window-all-closed', () => {
   // without awaiting we don't strand zombies. Recap continues in background.
   void shutdownAllSlots();
   // Reap any in-flight whisper-cli child so it doesn't strand a transcription
-  // run past window close (B1).
-  disposeWhisper();
-  if (process.platform !== 'darwin') app.quit();
+  // run past window close (B1). On macOS the process stays alive and the dock
+  // can rebuild the window, so stop the server NON-permanently — `activate`
+  // revives it. On other platforms we're about to quit, so a permanent stop is
+  // fine and before-quit handles the rest.
+  if (process.platform === 'darwin') {
+    void disposeWhisper(false);
+  } else {
+    void disposeWhisper();
+    app.quit();
+  }
 });
 
 // Final safety net: even on cmd-Q with the dock alive (macOS) the window-all-
@@ -374,7 +415,18 @@ app.on('before-quit', (event) => {
     try {
       await Promise.race([shutdownAllSlots(), sleepMs(5000)]);
     } finally {
-      disposeWhisper();
+      // disposeWhisper() reaps the CLI child AND permanently stops the server,
+      // returning the server's shutdown promise. Await it (capped at 1.5 s) so
+      // the SIGTERM→SIGKILL grace (≤ ~1.2 s) completes before app.exit(0) yanks
+      // the process — otherwise a half-killed whisper-server can outlive
+      // Electron.
+      await Promise.race([disposeWhisper(), sleepMs(1500)]);
+      // Synchronously fire the pending debounced openTabs snapshot, then drain
+      // setting writes so the last snapshot lands on disk before we yank the
+      // process. Without flushOpenTabsNow a close-then-quit-within-100ms loses
+      // the close from the manifest (the debounce timer never gets to fire).
+      flushOpenTabsNow(ipcCtx);
+      await flushSettingsWrites();
       app.exit(0);
     }
   })();

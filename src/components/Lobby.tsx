@@ -1,18 +1,35 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { ChevronDown, FolderOpen, KeyRound, LogIn, Mic, MonitorUp } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { ChevronDown, Clock, FolderOpen, KeyRound, LogIn, Mic, MonitorUp } from 'lucide-react';
+import { meetingStore } from '../lib/meeting-store';
 
-interface JoinScreenProps {
-  onJoin: (cwd: string) => void;
-  defaultCwd?: string;
+interface LobbyProps {
   lastError?: string | null;
 }
 
 type AuthMode = 'apikey' | 'subscription' | null;
 
-export function JoinScreen({ onJoin, defaultCwd, lastError }: JoinScreenProps) {
-  const [cwd, setCwd] = useState<string>(defaultCwd ?? '');
+function formatRelative(ts: number): string {
+  const diff = Date.now() - ts;
+  const min = Math.floor(diff / 60_000);
+  if (min < 1) return 'just now';
+  if (min < 60) return `${min}m ago`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}h ago`;
+  const days = Math.floor(hr / 24);
+  if (days < 7) return `${days}d ago`;
+  return new Date(ts).toLocaleDateString();
+}
 
-  // Auth state
+function shortPath(cwd: string): { label: string; parent: string } {
+  const parts = cwd.split('/').filter(Boolean);
+  const label = parts[parts.length - 1] ?? cwd;
+  const parent = parts.slice(0, -1).join('/');
+  return { label, parent: parent ? `/${parent}/` : '/' };
+}
+
+export function Lobby({ lastError }: LobbyProps) {
+  const lobby = useSyncExternalStore(meetingStore.subscribeTabs, meetingStore.getLobbyData);
+
   const [authMode, setAuthMode] = useState<AuthMode>(null);
   const [hasApiKey, setHasApiKey] = useState(false);
   const [subscriptionLoggedIn, setSubscriptionLoggedIn] = useState(false);
@@ -23,11 +40,9 @@ export function JoinScreen({ onJoin, defaultCwd, lastError }: JoinScreenProps) {
   const [loginError, setLoginError] = useState<string>('');
   const apiKeyRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => {
-    if (defaultCwd) setCwd(defaultCwd);
-  }, [defaultCwd]);
+  const [opening, setOpening] = useState(false);
+  const [openError, setOpenError] = useState<string | null>(null);
 
-  // Load auth config on mount
   useEffect(() => {
     window.vibeMeet.auth.getConfig().then((cfg) => {
       setAuthMode(cfg.authMode);
@@ -38,21 +53,23 @@ export function JoinScreen({ onJoin, defaultCwd, lastError }: JoinScreenProps) {
     });
   }, []);
 
-  const pick = useCallback(async () => {
-    const dir = await window.vibeMeet.pickCwd();
-    if (dir) setCwd(dir);
-  }, []);
-
-  const join = useCallback(async () => {
-    let target = cwd;
-    if (!target) {
-      const dir = await window.vibeMeet.pickCwd();
-      if (!dir) return;
-      setCwd(dir);
-      target = dir;
+  const openCwd = useCallback(async (cwd: string) => {
+    if (opening) return;
+    setOpening(true);
+    setOpenError(null);
+    try {
+      const res = await meetingStore.openSession(cwd);
+      if (!res.ok) setOpenError(res.error ?? 'Failed to open meeting');
+    } finally {
+      setOpening(false);
     }
-    onJoin(target);
-  }, [cwd, onJoin]);
+  }, [opening]);
+
+  const pickAndOpen = useCallback(async () => {
+    const dir = await window.vibeMeet.pickCwd();
+    if (!dir) return;
+    await openCwd(dir);
+  }, [openCwd]);
 
   const saveApiKey = useCallback(async () => {
     setApiKeyStatus('saving');
@@ -75,7 +92,6 @@ export function JoinScreen({ onJoin, defaultCwd, lastError }: JoinScreenProps) {
       setLoginStatus('done');
       setAuthMode('subscription');
       setHasApiKey(false);
-      // Re-check credential file
       window.vibeMeet.auth.checkSubscriptionStatus().then((s) => {
         setSubscriptionLoggedIn(s.loggedIn);
       });
@@ -93,7 +109,7 @@ export function JoinScreen({ onJoin, defaultCwd, lastError }: JoinScreenProps) {
 
   return (
     <div className="join-screen">
-      <div className="join-card">
+      <div className="join-card lobby-card">
         <div className="join-brand">
           <div className="join-logo">
             <img src="icon-96.png" alt="AhaMeet" className="join-logo-img" />
@@ -104,7 +120,6 @@ export function JoinScreen({ onJoin, defaultCwd, lastError }: JoinScreenProps) {
           </div>
         </div>
 
-        {/* Claude Auth section */}
         <div className="join-auth-section">
           <button
             type="button"
@@ -123,7 +138,6 @@ export function JoinScreen({ onJoin, defaultCwd, lastError }: JoinScreenProps) {
                 or log in with your Claude.ai subscription account.
               </p>
 
-              {/* API Key */}
               <div className="join-auth-block">
                 <div className="join-auth-block-title">
                   <KeyRound size={13} aria-hidden="true" /> API Key
@@ -162,7 +176,6 @@ export function JoinScreen({ onJoin, defaultCwd, lastError }: JoinScreenProps) {
                 )}
               </div>
 
-              {/* Subscription login */}
               <div className="join-auth-block">
                 <div className="join-auth-block-title">
                   <LogIn size={13} aria-hidden="true" /> Claude Account (Pro/Max)
@@ -192,19 +205,52 @@ export function JoinScreen({ onJoin, defaultCwd, lastError }: JoinScreenProps) {
           )}
         </div>
 
-        <label className="join-field">
-          <span className="join-field-label">Working directory</span>
-          <button type="button" className="join-cwd" onClick={pick}>
-            <span className="join-cwd-icon" aria-hidden="true"><FolderOpen size={18} /></span>
-            <span className="join-cwd-text">{cwd || 'Choose the folder Claude should work in'}</span>
-            <span className="join-cwd-edit">Change</span>
-          </button>
-        </label>
+        {lobby.recent.length > 0 && (
+          <section className="lobby-section">
+            <div className="lobby-section-title">
+              <Clock size={13} aria-hidden="true" />
+              <span>Recent meetings</span>
+            </div>
+            <ul className="lobby-list">
+              {lobby.recent.map((r) => {
+                const { label, parent } = shortPath(r.path);
+                return (
+                  <li key={r.path}>
+                    <button
+                      type="button"
+                      className="lobby-row"
+                      onClick={() => openCwd(r.path)}
+                      disabled={opening}
+                      title={r.path}
+                    >
+                      <span className="lobby-row-icon" aria-hidden="true">
+                        <FolderOpen size={16} />
+                      </span>
+                      <span className="lobby-row-main">
+                        <span className="lobby-row-name">{label}</span>
+                        <span className="lobby-row-path">{parent}</span>
+                      </span>
+                      <span className="lobby-row-meta">{formatRelative(r.lastOpenedAt)}</span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          </section>
+        )}
 
-        {lastError && <div className="join-error">{lastError}</div>}
+        {(lastError || openError) && (
+          <div className="join-error">{openError ?? lastError}</div>
+        )}
 
-        <button className="join-cta" onClick={join}>
-          Start meeting
+        <button
+          type="button"
+          className="join-cta lobby-cta"
+          onClick={pickAndOpen}
+          disabled={opening}
+        >
+          <FolderOpen size={16} aria-hidden="true" />
+          <span>{opening ? 'Opening…' : 'Open another folder'}</span>
         </button>
 
         <div className="join-hints">

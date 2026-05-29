@@ -229,6 +229,34 @@ interface PreviewPaneProps {
 }
 
 function PreviewPane({ state, textRef }: PreviewPaneProps) {
+  // Build a Blob URL once per (data, mediaType) pair so the underlying bytes
+  // don't get re-encoded into a data URL on every render. Falls back to a
+  // base64 data URL when an older main process delivers `dataBase64` only.
+  const mediaUrl = useMemo(() => {
+    if (state.phase !== 'ready') return null;
+    const { doc } = state;
+    if (doc.kind !== 'image' && doc.kind !== 'video') return null;
+    if (!doc.mediaType) return null;
+    if (doc.data) {
+      return URL.createObjectURL(new Blob([doc.data as BlobPart], { type: doc.mediaType }));
+    }
+    if (doc.dataBase64) {
+      return `data:${doc.mediaType};base64,${doc.dataBase64}`;
+    }
+    return null;
+  }, [state]);
+
+  // Revoke the object URL when the preview transitions away from this doc.
+  // Skip the revoke for the `data:` fallback string — `revokeObjectURL` on a
+  // non-blob URL is a no-op, but cleaner to gate it.
+  useEffect(() => {
+    if (!mediaUrl) return;
+    if (!mediaUrl.startsWith('blob:')) return;
+    return () => {
+      URL.revokeObjectURL(mediaUrl);
+    };
+  }, [mediaUrl]);
+
   if (state.phase === 'loading') {
     return <div className="docstage-preview-status">读取中…</div>;
   }
@@ -252,7 +280,7 @@ function PreviewPane({ state, textRef }: PreviewPaneProps) {
     );
   }
 
-  if (doc.kind === 'image' && doc.dataBase64 && doc.mediaType) {
+  if (doc.kind === 'image' && mediaUrl) {
     return (
       <div className="docstage-preview-pane">
         <div className="docstage-preview-meta">
@@ -260,16 +288,13 @@ function PreviewPane({ state, textRef }: PreviewPaneProps) {
           <span className="docstage-preview-size">{sizeLine}</span>
         </div>
         <div className="docstage-preview-media">
-          <img
-            src={`data:${doc.mediaType};base64,${doc.dataBase64}`}
-            alt={doc.name}
-          />
+          <img src={mediaUrl} alt={doc.name} />
         </div>
       </div>
     );
   }
 
-  if (doc.kind === 'video' && doc.dataBase64 && doc.mediaType) {
+  if (doc.kind === 'video' && mediaUrl) {
     return (
       <div className="docstage-preview-pane">
         <div className="docstage-preview-meta">
@@ -277,10 +302,7 @@ function PreviewPane({ state, textRef }: PreviewPaneProps) {
           <span className="docstage-preview-size">{sizeLine}</span>
         </div>
         <div className="docstage-preview-media">
-          <video
-            controls
-            src={`data:${doc.mediaType};base64,${doc.dataBase64}`}
-          />
+          <video controls src={mediaUrl} />
         </div>
       </div>
     );

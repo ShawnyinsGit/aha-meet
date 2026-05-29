@@ -74,10 +74,10 @@ export function registerAuthIpc(): void {
     }
     const trimmed = key.trim();
     if (trimmed.length === 0) {
-      updateSettings({ anthropicApiKey: undefined, authMode: undefined });
+      await updateSettings({ anthropicApiKey: undefined, authMode: undefined });
       return { ok: true };
     }
-    updateSettings({ anthropicApiKey: trimmed, authMode: 'apikey' });
+    await updateSettings({ anthropicApiKey: trimmed, authMode: 'apikey' });
     return { ok: true };
   });
 
@@ -85,7 +85,7 @@ export function registerAuthIpc(): void {
     if (mode !== 'apikey' && mode !== 'subscription' && mode !== null) {
       return { ok: false, error: 'mode must be apikey, subscription, or null' };
     }
-    updateSettings({ authMode: (mode as 'apikey' | 'subscription') ?? undefined });
+    await updateSettings({ authMode: (mode as 'apikey' | 'subscription') ?? undefined });
     return { ok: true };
   });
 
@@ -109,8 +109,9 @@ export function registerAuthIpc(): void {
       });
       proc.on('close', (code: number | null) => {
         if (code === 0) {
-          updateSettings({ authMode: 'subscription', anthropicApiKey: undefined });
-          resolve({ ok: true });
+          updateSettings({ authMode: 'subscription', anthropicApiKey: undefined })
+            .catch((err) => console.error('[auth] failed to persist authMode:', err))
+            .finally(() => resolve({ ok: true }));
         } else {
           resolve({ ok: false, error: `claude auth login exited with code ${code}` });
         }

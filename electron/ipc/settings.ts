@@ -1,24 +1,7 @@
 import { ipcMain, shell } from 'electron';
-import { existsSync, statSync } from 'node:fs';
 import { getSettings, updateSettings, clearVoicePrint, type VoicePrint } from '../store.js';
 
 export function registerSettingsIpc(): void {
-  ipcMain.handle('settings:get-last-cwd', async () => {
-    const s = getSettings();
-    const last = s.lastCwd;
-    // Validate the saved path still resolves to a directory — if the user
-    // deleted or moved it, fall through to the JoinScreen's empty state so
-    // they're forced to pick again rather than starting a session against
-    // a path that no longer exists.
-    if (!last) return null;
-    try {
-      if (existsSync(last) && statSync(last).isDirectory()) return last;
-    } catch {
-      /* ignore — treat as missing */
-    }
-    return null;
-  });
-
   ipcMain.handle('settings:get-voice-config', async () => {
     const s = getSettings();
     return {
@@ -28,15 +11,15 @@ export function registerSettingsIpc(): void {
   });
 
   ipcMain.handle('settings:set-voice-lock-enabled', async (_e, enabled: boolean) => {
-    updateSettings({ voiceLockEnabled: !!enabled });
+    await updateSettings({ voiceLockEnabled: !!enabled });
     return { ok: true };
   });
 
   ipcMain.handle('settings:set-voice-print', async (_e, vp: VoicePrint | null) => {
     if (!vp) {
-      clearVoicePrint();
+      await clearVoicePrint();
     } else {
-      updateSettings({ voicePrint: vp });
+      await updateSettings({ voicePrint: vp });
     }
     return { ok: true };
   });
@@ -64,7 +47,7 @@ export function registerSettingsIpc(): void {
     if (patch.speechFilterMode === 'strict' || patch.speechFilterMode === 'off') {
       next.speechFilterMode = patch.speechFilterMode;
     }
-    updateSettings(next);
+    await updateSettings(next);
     return { ok: true };
   });
 

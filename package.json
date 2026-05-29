@@ -1,6 +1,6 @@
 {
   "name": "aha-meet",
-  "version": "0.6.1",
+  "version": "0.7.6",
   "description": "Real-time meeting-style collaboration with Claude Code",
   "private": true,
   "type": "module",
@@ -25,6 +25,8 @@
     "@ricky0123/vad-web": "^0.0.30",
     "fft.js": "^4.0.4",
     "lucide-react": "^1.16.0",
+    "mammoth": "^1.12.0",
+    "pdfjs-dist": "^5.7.284",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "zod": "^4.4.3"

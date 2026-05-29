@@ -216,23 +216,37 @@ export class Orchestrator implements OrchestratorBridge {
         mcpServers: { meeting: meetingMcp },
         skills: [],
         settingSources: [],
+        // Lock the talker to Haiku 4.5 — small, fast, cheap. Chat-only role
+        // (no real tools, only meeting MCP) so Sonnet/Opus would be wasted
+        // latency. Worker subprocesses keep CLI default (Sonnet preset).
+        model: 'claude-haiku-4-5',
+        // Stream partial tokens so we can dispatch the first sentence to TTS
+        // the moment the model commits a content block, instead of waiting
+        // for the whole turn. Renderer/TTS streaming consumer side is owned
+        // by exec-tts; see docs/plan-tts-streaming.md §3.
+        includePartialMessages: true,
       },
     });
 
     this.talker.start();
 
     if (greeting) {
-      this.talker.sendUserText(greeting);
+      // Greeting is system-synthesised, treat as 'normal' priority so a real
+      // user utterance arriving immediately after still cuts ahead.
+      this.talker.sendUserText(greeting, 'normal');
     }
   }
 
   sendUserText(text: string) {
-    this.talker?.sendUserText(text);
+    // Single entry point reached from the renderer IPC (session:user-text).
+    // Real user voice / typed input → 'high' priority so it always beats
+    // worker progress chatter that arrived a moment earlier.
+    this.talker?.sendUserText(text, 'high');
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   sendUserImage(content: any[]) {
-    this.talker?.sendUserContent(content);
+    this.talker?.sendUserContent(content, 'high');
   }
 
   resolvePermission(id: string, decision: 'allow' | 'deny', message?: string) {
@@ -373,7 +387,7 @@ export class Orchestrator implements OrchestratorBridge {
         } as unknown as SDKMessage,
       },
     });
-    this.talker?.sendUserText(`(you just spoke to the user) ${text}`);
+    this.talker?.sendUserText(`(you just spoke to the user) ${text}`, 'normal');
   }
 
   async createDecision(payload: CreateDecisionPayload): Promise<DecisionCreationResult> {
@@ -451,6 +465,7 @@ export class Orchestrator implements OrchestratorBridge {
     const condensed = r.conclusion.length > 400 ? `${r.conclusion.slice(0, 398)}…` : r.conclusion;
     this.talker?.sendUserText(
       `(decision update) 用户对"${question}"给出了结论：${condensed}\n\n如果这跟你之前推进的方向不一致，请马上调整：可以 delegate_to 现有 worker 让他改，或开新 worker 走另一条路；并简短告诉用户你怎么调整。`,
+      'normal',
     );
     // Resolved → drop both the metadata entry and the fs.watch handle.
     // Without this, a 2hr meeting with 30 decisions leaves 30 stale watchers

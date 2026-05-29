@@ -60,7 +60,15 @@ const api = {
   },
   transcripts: {
     load: (cwd) => ipcRenderer.invoke('transcripts:load', { cwd }),
-    append: (cwd, entry) => ipcRenderer.invoke('transcripts:append', { cwd, entry }),
+    // Fire-and-forget: the renderer's caller already ignores the result
+    // (.catch swallows errors), so we skip the round-trip ack. Saves an
+    // extra IPC reply per transcript line — at 5–10 lines/sec during a busy
+    // meeting that's 10–30 ms/sec of main-thread time freed up. We still
+    // return a resolved Promise to preserve the existing type shape.
+    append: (cwd, entry) => {
+      ipcRenderer.send('transcripts:append', { cwd, entry });
+      return Promise.resolve({ ok: true });
+    },
     clear: (cwd) => ipcRenderer.invoke('transcripts:clear', { cwd }),
   },
   steerWorker: (sessionId, workerId, addendum) =>

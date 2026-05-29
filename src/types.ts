@@ -53,7 +53,9 @@ export type RendererEvent =
   | { kind: 'worker-delivery'; workerId: string; title: string; summary: string; taskId: string; files: WorkerDeliveryFile[]; source?: AgentSource; sessionId?: string }
   | { kind: 'plan-updated'; plan: MeetingPlan; source?: AgentSource; sessionId?: string }
   | { kind: 'decision-pending'; decisionId: string; question: string; path: string; recommendedTitle: string; calendarOk: boolean; remindersOk: boolean; source?: AgentSource; sessionId?: string }
-  | { kind: 'decision-resolved'; decisionId: string; question: string; path: string; conclusion: string; source?: AgentSource; sessionId?: string };
+  | { kind: 'decision-resolved'; decisionId: string; question: string; path: string; conclusion: string; source?: AgentSource; sessionId?: string }
+  | { kind: 'session-ready'; source?: AgentSource; sessionId?: string }
+  | { kind: 'session-start-failed'; error: string; source?: AgentSource; sessionId?: string };
 
 export interface DesktopSource {
   id: string;
@@ -161,7 +163,7 @@ export interface SessionsApi {
     cwd: string,
     greeting?: string,
   ) => Promise<
-    | { ok: true; sessionId: string; cwd: string }
+    | { ok: true; sessionId: string; cwd: string; status?: 'starting' }
     | { ok: false; error: 'duplicate'; sessionId: string; cwd?: string }
     | { ok: false; error: string }
   >;
@@ -246,6 +248,12 @@ export interface DocumentReadOk {
   kind: DeliveryFileKind;
   text?: string;
   truncated?: boolean;
+  /** Raw bytes for image/video kinds — main hands these over via structured
+   *  clone, so the renderer can wrap them in a Blob and use object URLs
+   *  instead of base64 data URLs. */
+  data?: Uint8Array;
+  /** Legacy base64 payload kept for one transition release. New code should
+   *  prefer `data`. */
   dataBase64?: string;
   mediaType?: string;
 }
