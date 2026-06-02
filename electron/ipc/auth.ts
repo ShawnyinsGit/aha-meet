@@ -65,6 +65,9 @@ export function registerAuthIpc(): void {
       authMode: s.authMode ?? null,
       // Never send the actual key back to the renderer — only indicate if one is set.
       hasApiKey: Boolean(s.anthropicApiKey),
+      // Base URL + model are non-secret config; safe to round-trip for prefill.
+      baseUrl: s.anthropicBaseUrl ?? null,
+      model: s.anthropicModel ?? null,
     };
   });
 
@@ -78,6 +81,26 @@ export function registerAuthIpc(): void {
       return { ok: true };
     }
     await updateSettings({ anthropicApiKey: trimmed, authMode: 'apikey' });
+    return { ok: true };
+  });
+
+  ipcMain.handle('auth:set-base-url', async (_e, url: unknown) => {
+    if (typeof url !== 'string') {
+      return { ok: false, error: 'url must be a string' };
+    }
+    const trimmed = url.trim();
+    // Base URL only takes effect in apikey mode; setting it alone must not flip
+    // the auth mode. Empty string clears the override.
+    await updateSettings({ anthropicBaseUrl: trimmed.length === 0 ? undefined : trimmed });
+    return { ok: true };
+  });
+
+  ipcMain.handle('auth:set-model', async (_e, model: unknown) => {
+    if (typeof model !== 'string') {
+      return { ok: false, error: 'model must be a string' };
+    }
+    const trimmed = model.trim();
+    await updateSettings({ anthropicModel: trimmed.length === 0 ? undefined : trimmed });
     return { ok: true };
   });
 

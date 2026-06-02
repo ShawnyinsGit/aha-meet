@@ -248,6 +248,16 @@ async function nativeConfirmDestructive(
 ): Promise<boolean> {
   const win = liveWindow();
   if (!win) return false;
+  // Surface the window first: a window-modal sheet on an unfocused/minimized
+  // app is effectively invisible, so the worker would block on this promise
+  // with no on-screen signal (one of the "silent blocker" symptoms).
+  try {
+    if (win.isMinimized()) win.restore();
+    win.show();
+    win.focus();
+  } catch (err) {
+    console.warn('[main] failed to surface window for destructive confirm:', err);
+  }
   const detail = summarizeToolInput(toolName, input);
   const res = await dialog.showMessageBox(win, {
     type: 'warning',

@@ -101,7 +101,10 @@ async function runRecap(
     })(),
     options: {
       cwd: opts.cwd,
-      model: 'claude-haiku-4-5',
+      // Respect an explicit ANTHROPIC_MODEL (app override or settings.json /
+      // custom gateway) — a hardcoded haiku id is rejected by gateways that
+      // only map the configured model. Falls back to haiku when unset.
+      model: env.ANTHROPIC_MODEL || 'claude-haiku-4-5',
       systemPrompt: RECAP_PROMPT,
       tools: [],
       mcpServers: {},

@@ -35,6 +35,15 @@ interface SpeakSession {
   resume?: () => void;
   drainHoldTimer: number | null;
   fedAnyChunk: boolean;
+  // T3: a same-turn delta that falls below the meaningful-length threshold is
+  // held here instead of being dropped, then prepended onto the next delta so
+  // its words still get spoken once enough text accumulates.
+  pendingShort: string;
+  // Chromium silently stops a single utterance after ~15s and often never
+  // fires onend/onerror, wedging the queue. A pause()+resume() pulse every
+  // <15s keeps the active utterance alive to completion. One timer at a time;
+  // pumpNext arms it per utterance, advance/cancel/finalize clear it.
+  keepAliveTimer: number | null;
 }
 
 type SpeechCallback = () => void;
@@ -114,6 +123,10 @@ export class SpeechController {
     session.current = null;
     session.chunks.length = 0;
     session.index = 0;
+    if (session.keepAliveTimer !== null) {
+      window.clearInterval(session.keepAliveTimer);
+      session.keepAliveTimer = null;
+    }
     if (session.drainHoldTimer !== null) {
       window.clearTimeout(session.drainHoldTimer);
       session.drainHoldTimer = null;
@@ -160,6 +173,8 @@ export class SpeechController {
       awaitingMore: false,
       drainHoldTimer: null,
       fedAnyChunk: false,
+      pendingShort: '',
+      keepAliveTimer: null,
     };
     this.activeSession = session;
     this.bootstrap(session);
@@ -184,19 +199,26 @@ export class SpeechController {
     const active = this.activeSession;
     const sameTurn = active && active.streaming && active.turnId === turnId && !active.completed;
 
-    // Apply threshold against the raw sentence string. The store has already
-    // filtered out below-threshold fragments by holding them in its buffer,
-    // but we double-check here so a misbehaving caller can't sneak a "OK, "
-    // utterance through.
+    // T3: on the same-turn path, fold any previously-held sub-threshold
+    // fragment back in front of this delta so its words aren't lost — they
+    // just had to wait for enough text to accumulate.
+    const effectiveRaw =
+      sameTurn && active.pendingShort ? active.pendingShort + raw : raw;
+    if (sameTurn) active.pendingShort = '';
+
+    // Apply threshold against the (possibly merged) sentence string. The store
+    // has already filtered out below-threshold fragments by holding them in
+    // its buffer, but we double-check here so a misbehaving caller can't sneak
+    // a "OK, " utterance through.
     const minLen = opts.isFinal
       ? 0
       : (sameTurn && active.fedAnyChunk ? FOLLOW_SENTENCE_MIN : FIRST_SENTENCE_MIN);
-    const passesThreshold = meaningfulLen(raw) >= minLen;
+    const passesThreshold = meaningfulLen(effectiveRaw) >= minLen;
 
     // Even on the same-turn path: if the chunk fails the threshold AND it's
-    // not the final flush, drop it. The store should have held it.
+    // not the final flush, hold it (T3) rather than drop it.
     const splitChunks = passesThreshold || sameTurn === false
-      ? splitSentences(raw)
+      ? splitSentences(effectiveRaw)
       : [];
 
     if (sameTurn) {
@@ -208,6 +230,10 @@ export class SpeechController {
           window.clearTimeout(active.drainHoldTimer);
           active.drainHoldTimer = null;
         }
+      } else if (!opts.isFinal && meaningfulLen(effectiveRaw) > 0) {
+        // T3: sub-threshold, non-final fragment — stash it to prepend onto the
+        // next delta instead of silently discarding the words.
+        active.pendingShort = effectiveRaw;
       }
       if (onDone) active.onAllDone = onDone;
       if (opts.isFinal) active.completed = true;
@@ -244,6 +270,8 @@ export class SpeechController {
       awaitingMore: false,
       drainHoldTimer: null,
       fedAnyChunk: true,
+      pendingShort: '',
+      keepAliveTimer: null,
     };
     this.activeSession = session;
     this.bootstrap(session);
@@ -287,6 +315,10 @@ export class SpeechController {
 
   private finalizeSession(session: SpeakSession): void {
     if (this.activeSession !== session) return;
+    if (session.keepAliveTimer !== null) {
+      window.clearInterval(session.keepAliveTimer);
+      session.keepAliveTimer = null;
+    }
     if (session.drainHoldTimer !== null) {
       window.clearTimeout(session.drainHoldTimer);
       session.drainHoldTimer = null;
@@ -350,6 +382,15 @@ export class SpeechController {
         window.clearTimeout(watchdog);
         watchdog = null;
       }
+      // keepAliveTimer is a session-shared field, but only the utterance that
+      // still owns the queue may clear it. A late onend from a superseded
+      // utterance (its watchdog already advanced the queue) must NOT clear the
+      // successor's keepalive — otherwise the successor plays with no 15s
+      // lifeline and Chromium silently truncates it. Guard on seq ownership.
+      if (myId === session.utteranceSeq && session.keepAliveTimer !== null) {
+        window.clearInterval(session.keepAliveTimer);
+        session.keepAliveTimer = null;
+      }
     };
     const advance = () => {
       clearWatchdog();
@@ -373,9 +414,22 @@ export class SpeechController {
       // speak() unblocks the first utterance.
       window.speechSynthesis.resume();
       window.speechSynthesis.speak(u);
-      // ~120ms per char + 3s floor + 6s slack covers Siri zh at rate=1.05.
+      // Keepalive: Chromium silently stops a single utterance after ~15s. A
+      // pause()+resume() pulse every 10s resets that ceiling so long chunks
+      // play to the end instead of cutting off mid-sentence and wedging the
+      // queue. Cleared in clearWatchdog() when this utterance ends.
+      session.keepAliveTimer = window.setInterval(() => {
+        if (session.cancelled || this.activeSession !== session || myId !== session.utteranceSeq) return;
+        try {
+          window.speechSynthesis.pause();
+          window.speechSynthesis.resume();
+        } catch { /* ignore */ }
+      }, 10_000);
+      // ~180ms per char + 3s floor + 6s slack: zh Siri at rate=1.05 runs
+      // ~180-200ms/char, so the old 120ms estimate fired the watchdog BEFORE
+      // onend on long chunks, advancing early and orphaning the keepalive.
       // Capped at 30s so a single chunk can't pin the queue indefinitely.
-      const budgetMs = Math.min(30_000, 3_000 + text.length * 120 + 6_000);
+      const budgetMs = Math.min(30_000, 3_000 + text.length * 180 + 6_000);
       watchdog = window.setTimeout(advance, budgetMs);
     } catch {
       window.setTimeout(() => this.pumpNext(session), 40);

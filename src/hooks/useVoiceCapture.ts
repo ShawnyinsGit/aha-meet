@@ -275,6 +275,11 @@ export function useVoiceCapture({
           onSpeechEnd: async (audio: Float32Array) => {
             setListening(false);
 
+            // Set once the suppressed-segment echo gate has already confirmed
+            // this audio belongs to the enrolled user (a genuine barge-in).
+            // Lets the lower voice-lock block skip a redundant re-embed.
+            let bargeVerified = false;
+
             // Enrollment tap takes precedence over everything else, including
             // the suppression flag. The flag may have been set by an
             // onSpeechStart that fired during TTS playback before the user
@@ -303,30 +308,73 @@ export function useVoiceCapture({
                 segmentProbSumRef.current = 0;
               } else {
                 segmentSuppressedRef.current = false;
-                // Segment started during TTS playback AND TTS is still
-                // playing at speech-end. Apply the barge-in gate: enough
-                // audio AND sustained high speech probability → real
-                // interrupt; otherwise drop as echo/throat-clear/cough.
+                // Segment started during TTS playback AND TTS is still playing
+                // at speech-end — so this audio is either the AI's own voice
+                // looping back through the mic (echo) or a real interruption.
                 const frames = segmentFrameCountRef.current;
                 const avgProb = frames > 0 ? segmentProbSumRef.current / frames : 0;
                 segmentFrameCountRef.current = 0;
                 segmentProbSumRef.current = 0;
-                const longEnough = audio.length >= MIN_SAMPLES_FOR_BARGE_IN;
-                const confident = avgProb >= MIN_AVG_PROB_FOR_BARGE_IN;
-                console.info('[barge-in] suppressed-segment decision', {
-                  durationSec: +(audio.length / 16000).toFixed(2),
-                  minSec: +(MIN_SAMPLES_FOR_BARGE_IN / 16000).toFixed(2),
-                  avgProb: +avgProb.toFixed(2),
-                  minAvgProb: MIN_AVG_PROB_FOR_BARGE_IN,
-                  decision: longEnough && confident ? 'INTERRUPT' : 'DROP',
-                });
-                if (!longEnough || !confident) {
-                  return;
+                const lockOn = voiceLockEnabledRef.current;
+                const enrolled = voicePrintEmbeddingRef.current;
+                if (lockOn && enrolled) {
+                  // Voice-lock is the authoritative echo filter during playback:
+                  // the AI's TTS voice won't match the enrolled user, so a
+                  // sub-threshold similarity means echo → drop silently (no
+                  // barge-in, no transcript). Only a match counts as a real
+                  // interrupt. No short-clip bypass here — during playback an
+                  // unverifiable clip is far likelier echo than a real barge-in,
+                  // so anything we can't positively identify as the user drops.
+                  let matched = false;
+                  try {
+                    const emb =
+                      audio.length >= MIN_SAMPLES_FOR_GATE ? await embedSpeaker(audio) : null;
+                    if (emb) {
+                      const sim = cosineSimilarity(emb, enrolled);
+                      matched = sim >= VOICE_LOCK_THRESHOLD;
+                      console.info('[barge-in] voice-lock echo gate', {
+                        sim: +sim.toFixed(3),
+                        threshold: VOICE_LOCK_THRESHOLD,
+                        durationSec: +(audio.length / 16000).toFixed(2),
+                        decision: matched ? 'INTERRUPT' : 'DROP(echo)',
+                      });
+                    } else {
+                      console.info('[barge-in] voice-lock echo gate: unverifiable clip during TTS → DROP', {
+                        durationSec: +(audio.length / 16000).toFixed(2),
+                      });
+                    }
+                  } catch (e) {
+                    console.error('[barge-in] echo embedding failed → DROP to be safe:', e);
+                  }
+                  if (!matched) {
+                    return;
+                  }
+                  // Confirmed the enrolled user spoke over the AI: real barge-in.
+                  // Skip the redundant voice-lock re-check below.
+                  bargeVerified = true;
+                  onBargeInRef.current?.();
+                } else {
+                  // No enrolled voiceprint to compare against — fall back to the
+                  // duration + average-confidence heuristic. Enough audio AND
+                  // sustained high speech probability → real interrupt;
+                  // otherwise drop as echo/throat-clear/cough.
+                  const longEnough = audio.length >= MIN_SAMPLES_FOR_BARGE_IN;
+                  const confident = avgProb >= MIN_AVG_PROB_FOR_BARGE_IN;
+                  console.info('[barge-in] suppressed-segment heuristic decision', {
+                    durationSec: +(audio.length / 16000).toFixed(2),
+                    minSec: +(MIN_SAMPLES_FOR_BARGE_IN / 16000).toFixed(2),
+                    avgProb: +avgProb.toFixed(2),
+                    minAvgProb: MIN_AVG_PROB_FOR_BARGE_IN,
+                    decision: longEnough && confident ? 'INTERRUPT' : 'DROP',
+                  });
+                  if (!longEnough || !confident) {
+                    return;
+                  }
+                  // Real interrupt: cut Claude off now so playback stops before
+                  // the transcript even finishes. The transcript still flows
+                  // through the normal voice-lock + send pipeline below.
+                  onBargeInRef.current?.();
                 }
-                // Real interrupt: cut Claude off now so playback stops before
-                // the transcript even finishes. The transcript still flows
-                // through the normal voice-lock + send pipeline below.
-                onBargeInRef.current?.();
               }
             } else {
               // Reset stats for the next segment.
@@ -342,7 +390,13 @@ export function useVoiceCapture({
             const lockOn = voiceLockEnabledRef.current;
             const enrolled = voicePrintEmbeddingRef.current;
             const durationSec = audio.length / 16000;
-            if (!lockOn) {
+            if (bargeVerified) {
+              // Already confirmed as the enrolled user by the suppressed-segment
+              // echo gate above — skip the redundant embed + compare.
+              console.info('[voice-lock] barge-in already verified, passing', {
+                durationSec: +durationSec.toFixed(2),
+              });
+            } else if (!lockOn) {
               console.info('[voice-lock] gate=off, passing segment', {
                 hasEmbedding: !!enrolled,
                 durationSec: +durationSec.toFixed(2),

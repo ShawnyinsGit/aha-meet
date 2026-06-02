@@ -4,6 +4,12 @@
 
 export type Locale = 'zh' | 'en';
 
+// Max chars per spoken chunk. Chromium silently truncates a single utterance
+// after ~15s; at ~180-200ms per zh char that ceiling is ~75-80 chars. We cap
+// well under it (~12-13s) so the keepAlive pulse is belt-and-braces, not the
+// sole defense — a dropped pulse then only shortens a chunk, never truncates.
+const MAX_CHUNK_CHARS = 65;
+
 // Strict mode drops chunks that match the worker-tool-event shape (e.g.
 // "(worker abc update) ...", "[worker-3] ...", "worker started/finished/turn
 // complete/thought ..."), leaving normal assistant replies — including pure
@@ -109,14 +115,14 @@ export function splitSentences(text: string): Array<{ text: string; locale: Loca
 
   for (const part of parts) {
     // Further chunk overly long parts so TTS stays interruptible.
-    if (part.length <= 140) {
+    if (part.length <= MAX_CHUNK_CHARS) {
       out.push({ text: part, locale: detectLocale(part) });
     } else {
       // Break on commas / ；/ ,
       const subs = part.split(/(?<=[，,；;])\s*/).filter(Boolean);
       let buf = '';
       for (const s of subs) {
-        if ((buf + s).length > 140 && buf) {
+        if ((buf + s).length > MAX_CHUNK_CHARS && buf) {
           out.push({ text: buf.trim(), locale: detectLocale(buf) });
           buf = s;
         } else {

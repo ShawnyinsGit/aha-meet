@@ -50,6 +50,7 @@ export type RendererEvent =
   | { kind: 'ended'; source?: AgentSource; sessionId?: string }
   | { kind: 'worker-spawned'; workerId: string; title: string; deps: string[]; specialty: WorkerSpecialty; source?: AgentSource; sessionId?: string }
   | { kind: 'worker-ended'; workerId: string; status: WorkerStatus; summary?: string; source?: AgentSource; sessionId?: string }
+  | { kind: 'worker-stalled'; workerId: string; title: string; idleMs: number; currentTool: string | null; source?: AgentSource; sessionId?: string }
   | { kind: 'worker-delivery'; workerId: string; title: string; summary: string; taskId: string; files: WorkerDeliveryFile[]; source?: AgentSource; sessionId?: string }
   | { kind: 'plan-updated'; plan: MeetingPlan; source?: AgentSource; sessionId?: string }
   | { kind: 'decision-pending'; decisionId: string; question: string; path: string; recommendedTitle: string; calendarOk: boolean; remindersOk: boolean; source?: AgentSource; sessionId?: string }
@@ -108,8 +109,15 @@ export interface MemoryApi {
 }
 
 export interface AuthApi {
-  getConfig: () => Promise<{ authMode: 'apikey' | 'subscription' | null; hasApiKey: boolean }>;
+  getConfig: () => Promise<{
+    authMode: 'apikey' | 'subscription' | null;
+    hasApiKey: boolean;
+    baseUrl: string | null;
+    model: string | null;
+  }>;
   setApiKey: (key: string) => Promise<{ ok: boolean; error?: string }>;
+  setBaseUrl: (url: string) => Promise<{ ok: boolean; error?: string }>;
+  setModel: (model: string) => Promise<{ ok: boolean; error?: string }>;
   setMode: (mode: 'apikey' | 'subscription' | null) => Promise<{ ok: boolean; error?: string }>;
   loginSubscription: () => Promise<{ ok: boolean; error?: string }>;
   checkSubscriptionStatus: () => Promise<{ loggedIn: boolean }>;

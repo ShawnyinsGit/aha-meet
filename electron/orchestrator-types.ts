@@ -48,6 +48,7 @@ export interface WorkerDeliveryFile {
 export type OrchestratorOnlyEvent =
   | { kind: 'worker-spawned'; workerId: string; title: string; deps: string[]; specialty: WorkerSpecialtyKind }
   | { kind: 'worker-ended'; workerId: string; status: WorkerStatusKind; summary?: string }
+  | { kind: 'worker-stalled'; workerId: string; title: string; idleMs: number; currentTool: string | null }
   | { kind: 'worker-delivery'; workerId: string; title: string; summary: string; taskId: string; files: WorkerDeliveryFile[] }
   | { kind: 'plan-updated'; plan: MeetingPlan }
   | { kind: 'decision-pending'; decisionId: string; question: string; path: string; recommendedTitle: string; calendarOk: boolean; remindersOk: boolean }
@@ -106,6 +107,10 @@ export interface WorkerHandle {
    *  and cleared by `markTaskDone` to emit a `worker-delivery` event. Reset on
    *  `reassignWorker` when the same handle picks up a new task. */
   deliveries: Set<string>;
+  /** B1 stall watchdog: set true once a `worker-stalled` event has fired for
+   *  the current idle stretch, cleared on the next activity (lastUpdateTs bump)
+   *  so each distinct stall is announced exactly once, not every sweep tick. */
+  stallNotified: boolean;
 }
 
 export interface RecentFileEdit {

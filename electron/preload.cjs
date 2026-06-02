@@ -42,6 +42,8 @@ const api = {
   auth: {
     getConfig: () => ipcRenderer.invoke('auth:get-config'),
     setApiKey: (key) => ipcRenderer.invoke('auth:set-api-key', key),
+    setBaseUrl: (url) => ipcRenderer.invoke('auth:set-base-url', url),
+    setModel: (model) => ipcRenderer.invoke('auth:set-model', model),
     setMode: (mode) => ipcRenderer.invoke('auth:set-mode', mode),
     loginSubscription: () => ipcRenderer.invoke('auth:login-subscription'),
     checkSubscriptionStatus: () => ipcRenderer.invoke('auth:check-subscription-status'),

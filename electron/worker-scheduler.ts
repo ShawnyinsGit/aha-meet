@@ -90,6 +90,13 @@ export interface WorkerSchedulerOpts {
 
 const QUEUED_UPDATE_FLUSH_MS = 1200;
 const QUEUED_UPDATE_MAX = 8;
+// B1 stall watchdog: a worker that produces no SDK event for this long while
+// still 'running' is treated as stalled (hung tool, awaiting an invisible
+// native dialog, infinite loop). We emit one `worker-stalled` event so the
+// renderer can speak it — otherwise a hang produces zero events and the user
+// waits blind. Swept on a coarse interval; only runs while a worker is alive.
+const STALL_THRESHOLD_MS = 45_000;
+const STALL_SWEEP_MS = 15_000;
 const TASK_HISTORY_MAX = 50;
 const ASSISTANT_CONDENSE_CHARS = 140;
 const ASSISTANT_DESCRIBE_MAX = 200;
@@ -100,6 +107,7 @@ export class WorkerScheduler {
   private recentEdits: Map<string, RecentFileEdit> = new Map();
   private workerIdSeq = 0;
   private autoApproveScope: AutoApproveScope;
+  private stallTimer: NodeJS.Timeout | null = null;
   private readonly opts: WorkerSchedulerOpts;
 
   constructor(opts: WorkerSchedulerOpts) {
@@ -275,6 +283,7 @@ export class WorkerScheduler {
     })();
     handle.live.busy = true;
     handle.live.lastUpdateTs = Date.now();
+    handle.stallNotified = false;
     return { ok: true, queued: false };
   }
 
@@ -345,6 +354,7 @@ export class WorkerScheduler {
    *  failed (the user pulled the plug before task_done landed); done/failed
    *  workers keep their status. Idempotent via `disposeWorker`. */
   endAll(): void {
+    this.stopStallWatch();
     for (const handle of this.workers.values()) {
       const finalStatus: WorkerStatusKind =
         handle.status === 'running' || handle.status === 'pending'
@@ -353,6 +363,51 @@ export class WorkerScheduler {
       this.disposeWorker(handle, finalStatus, handle.summary);
     }
     this.workers.clear();
+  }
+
+  // ---------------------------------------------------------------------------
+  // B1 stall watchdog. Armed lazily when a worker spawns, stops itself once no
+  // worker is 'running'. Emits one `worker-stalled` per idle stretch so a hung
+  // worker (no SDK events at all) still surfaces a spoken signal to the user.
+
+  private startStallWatch(): void {
+    if (this.stallTimer) return;
+    this.stallTimer = setInterval(() => this.sweepStalls(), STALL_SWEEP_MS);
+  }
+
+  private stopStallWatch(): void {
+    if (this.stallTimer) {
+      clearInterval(this.stallTimer);
+      this.stallTimer = null;
+    }
+  }
+
+  private sweepStalls(): void {
+    if (this.opts.isClosed()) {
+      this.stopStallWatch();
+      return;
+    }
+    const now = Date.now();
+    let anyRunning = false;
+    for (const handle of this.workers.values()) {
+      if (handle.status !== 'running' || !handle.session) continue;
+      anyRunning = true;
+      if (handle.stallNotified) continue;
+      const idleMs = now - handle.live.lastUpdateTs;
+      if (idleMs < STALL_THRESHOLD_MS) continue;
+      handle.stallNotified = true;
+      this.opts.emit({
+        source: 'talker',
+        event: {
+          kind: 'worker-stalled',
+          workerId: handle.id,
+          title: handle.title,
+          idleMs,
+          currentTool: handle.live.currentTool,
+        },
+      });
+    }
+    if (!anyRunning) this.stopStallWatch();
   }
 
   // ---------------------------------------------------------------------------
@@ -366,6 +421,10 @@ export class WorkerScheduler {
 
     try {
       if (e.kind === 'message') {
+        // Any SDK message is progress: bump the activity clock and clear the
+        // stall flag so the watchdog re-arms for the next idle stretch.
+        handle.live.lastUpdateTs = Date.now();
+        handle.stallNotified = false;
         // SDK message shapes are opaque; we walk known fields defensively.
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const msg: any = e.message;
@@ -497,6 +556,7 @@ export class WorkerScheduler {
       taskSeq: 1,
       taskHistory: [],
       deliveries: new Set<string>(),
+      stallNotified: false,
     };
     this.workers.set(spec.id, handle);
   }
@@ -549,6 +609,7 @@ export class WorkerScheduler {
     handle.queuedAddenda = [];
     handle.pendingDelegateAck = false;
     handle.deliveries.clear();
+    handle.stallNotified = false;
     if (handle.flushTimer) {
       clearTimeout(handle.flushTimer);
       handle.flushTimer = null;
@@ -585,6 +646,8 @@ export class WorkerScheduler {
       handle.queuedAddenda = [];
       handle.live.busy = true;
       handle.live.lastUpdateTs = Date.now();
+      handle.stallNotified = false;
+      this.startStallWatch();
       handle.session.start();
 
       // First prompt mentions peer workers so the new worker knows it may be

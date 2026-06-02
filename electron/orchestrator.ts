@@ -81,6 +81,10 @@ interface OrchestratorOpts {
   cwd: string;
   autoApproveScope?: AutoApproveScope;
   workerEnv?: NodeJS.ProcessEnv;
+  /** Model override for the talker session. When unset the talker defaults to
+   *  Haiku for latency; a custom gateway/model (ANTHROPIC_MODEL) is threaded
+   *  here so the talker doesn't request a model the gateway can't serve. */
+  talkerModel?: string;
   /** Optional override for ClaudeSession construction. Production code leaves
    *  this unset; tests inject a stub so cleanup paths can run without
    *  spawning the real Claude CLI subprocess. */
@@ -98,6 +102,7 @@ export class Orchestrator implements OrchestratorBridge {
   private cwd: string;
   private autoApproveScope: AutoApproveScope;
   private workerEnv: NodeJS.ProcessEnv | undefined;
+  private talkerModel: string | undefined;
   private confirmDestructive: ((toolName: string, input: Record<string, unknown>) => Promise<boolean>) | undefined;
   private closed = false;
   private projectId: string;
@@ -150,6 +155,7 @@ export class Orchestrator implements OrchestratorBridge {
     this.cwd = opts.cwd;
     this.autoApproveScope = opts.autoApproveScope ?? 'off';
     this.workerEnv = opts.workerEnv;
+    this.talkerModel = opts.talkerModel;
     this.confirmDestructive = opts.confirmDestructive;
     this.projectId = computeProjectId(this.cwd);
     this.meetingId = randomUUID();
@@ -216,10 +222,11 @@ export class Orchestrator implements OrchestratorBridge {
         mcpServers: { meeting: meetingMcp },
         skills: [],
         settingSources: [],
-        // Lock the talker to Haiku 4.5 — small, fast, cheap. Chat-only role
+        // Default the talker to Haiku 4.5 — small, fast, cheap. Chat-only role
         // (no real tools, only meeting MCP) so Sonnet/Opus would be wasted
-        // latency. Worker subprocesses keep CLI default (Sonnet preset).
-        model: 'claude-haiku-4-5',
+        // latency. A custom gateway/model override (ANTHROPIC_MODEL) wins so the
+        // talker never requests a model the gateway can't serve.
+        model: this.talkerModel ?? 'claude-haiku-4-5',
         // Stream partial tokens so we can dispatch the first sentence to TTS
         // the moment the model commits a content block, instead of waiting
         // for the whole turn. Renderer/TTS streaming consumer side is owned

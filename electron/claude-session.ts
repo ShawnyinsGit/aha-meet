@@ -1,6 +1,6 @@
 import { query, type Query, type SDKMessage, type SDKUserMessage, type CanUseTool, type PermissionResult, type Options } from '@anthropic-ai/claude-agent-sdk';
 import { mergedSubprocessEnv } from './settings-loader.js';
-import { errorMessage } from './format-error.js';
+import { errorMessage, redactSecrets } from './format-error.js';
 import { classifyToolRisk, type AutoApproveScope } from './auto-approve-policy.js';
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
@@ -93,6 +93,11 @@ export class ClaudeSession {
   // Toggled live by the orchestrator. Default OFF — never enabled silently.
   private autoApproveScope: AutoApproveScope = 'off';
   private confirmDestructive: ConfirmDestructive | undefined;
+  // Ring buffer of recent CLI stderr lines. The SDK reports unclassifiable API
+  // failures as bare codes ('unknown'); the human-readable HTTP error only
+  // appears on the subprocess stderr, which we capture here so it can be
+  // attached to the failing assistant message and shown in the renderer.
+  private stderrRing: string[] = [];
 
   constructor(opts: {
     emit: (e: SessionEvent) => void;
@@ -170,6 +175,15 @@ export class ClaudeSession {
           permissionMode: 'default',
           env: this.envOverride ?? mergedSubprocessEnv(),
           includePartialMessages: false,
+          stderr: (data: string) => {
+            // Redact at the source so the ring, the derived errorDetail, and
+            // this log line can never carry the API key / auth headers (the
+            // gateway or a debug-logging SDK may echo them on failure).
+            const safe = redactSecrets(data);
+            this.stderrRing.push(safe);
+            if (this.stderrRing.length > 40) this.stderrRing.shift();
+            console.error('[claude-cli:stderr]', safe);
+          },
           pathToClaudeCodeExecutable: binPath,
           // Load user/project/local settings so the worker picks up the
           // developer's installed subagents (~/.claude/agents/*.md), hooks
@@ -194,6 +208,25 @@ export class ClaudeSession {
       try {
         for await (const msg of this.q!) {
           if (this.closed) break;
+          // Surface API-level failures the SDK couldn't classify ('unknown' et
+          // al.). The renderer only gets the short code; the real cause lives in
+          // request_id + message content, which we log here so a terminal-
+          // launched build can be diagnosed.
+          const errCode = (msg as { error?: unknown })?.error;
+          if (typeof errCode === 'string' && errCode.length > 0) {
+            const rid = (msg as { request_id?: unknown }).request_id;
+            console.error(
+              `[claude-session] assistant API error code=${errCode}`,
+              `request_id=${typeof rid === 'string' ? rid : 'n/a'}`,
+              JSON.stringify((msg as { message?: unknown }).message ?? null).slice(0, 800),
+            );
+            // Attach the captured stderr tail so the renderer can show the real
+            // HTTP error instead of a bare 'unknown' code.
+            const detail = this.stderrRing.join('').slice(-2000).trim();
+            if (detail.length > 0) {
+              (msg as { errorDetail?: string }).errorDetail = detail;
+            }
+          }
           this.emit({ kind: 'message', message: msg });
         }
       } catch (err: unknown) {

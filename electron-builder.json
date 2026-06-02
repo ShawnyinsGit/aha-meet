@@ -28,7 +28,7 @@
     ],
     "hardenedRuntime": true,
     "gatekeeperAssess": false,
-    "identity": "Xinyang Zhang (P2VFVRZK7P)",
+    "identity": null,
     "entitlements": "build/entitlements.mac.plist",
     "entitlementsInherit": "build/entitlements.mac.plist"
   },

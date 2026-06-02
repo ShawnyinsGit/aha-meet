@@ -2,6 +2,7 @@ import type {
   ActivityEntry,
   AgentSource,
   AttachmentMeta,
+  AutoApproveScope,
   MeetingPlan,
   OpenTabMeta,
   PendingPermission,
@@ -15,11 +16,22 @@ import type {
   WorkerTaskHistoryEntry,
 } from '../types';
 import { MEETING_TOOL_NAMES } from '../../electron/meeting-tools';
+import { redactSecrets } from '../../electron/format-error';
 import { extractText, extractToolUses, uid } from './sdk-message';
-import type { SpeakHandle } from './speech-session';
+import { isSpeechActive, type SpeakHandle } from './speech-session';
 
 const MAX_TRANSCRIPT = 500;
 const MAX_ACTIVITY = 500;
+
+// Proactive announcements (progress / blocker) are spoken via short system
+// lines so the user is never left waiting in silence when a worker stalls,
+// hits a permission prompt, or hands off a delivery. They must never cut the
+// talker off mid-sentence, so the queue polls every ANNOUNCE_RETRY_MS and only
+// speaks the next line once speech goes idle. The queue is capped — if work
+// outpaces speech we drop the oldest lines rather than build a backlog the
+// user would hear long after the moment passed.
+const ANNOUNCE_RETRY_MS = 350;
+const ANNOUNCE_MAX_QUEUE = 6;
 
 const DEFAULT_GREETING = "You're joining a live screen-share meeting with your developer. Greet them in one or two sentences, ask what they want to work on today, and remind them they can share the current screen with the snapshot button when something needs your eyes. Keep it warm and short.";
 
@@ -313,6 +325,13 @@ class MeetingStore {
   private subscribed = false;
   private unsubscribeEvents: (() => void) | null = null;
 
+  // Proactive-announcement queue (see ANNOUNCE_* constants). Mirrors the
+  // trust-mode scope pushed down from App so we can stay quiet about
+  // permission prompts that auto-approve already resolves.
+  private announceQueue: string[] = [];
+  private announceTimer: number | null = null;
+  private autoApproveScope: AutoApproveScope = 'off';
+
   subscribe = (listener: Listener): (() => void) => {
     this.listeners.add(listener);
     this.ensureSubscribed();
@@ -408,6 +427,68 @@ class MeetingStore {
     this.speakCallback = cb;
   }
 
+  /** App mirrors the trust-mode scope here so blocker announcements can stay
+   *  quiet when auto-approve will resolve the prompt itself. */
+  setAutoApproveScope(scope: AutoApproveScope) {
+    this.autoApproveScope = scope;
+  }
+
+  /** Queue a short spoken status line for the user. No-op when TTS is off
+   *  (speakCallback null). The line is spoken once speech goes idle so it
+   *  never cuts the talker off mid-sentence. */
+  private announce(text: string) {
+    const line = text.trim();
+    if (!line || !this.speakCallback) return;
+    this.announceQueue.push(line);
+    if (this.announceQueue.length > ANNOUNCE_MAX_QUEUE) {
+      this.announceQueue.splice(0, this.announceQueue.length - ANNOUNCE_MAX_QUEUE);
+    }
+    this.tryFlushAnnounce();
+  }
+
+  /** Drain one queued announcement when nothing is speaking, then poll back
+   *  for the next. Polling (rather than chaining on the supersede onDone) keeps
+   *  the queue draining even when the talker silently cancels an in-flight
+   *  announcement by starting a new turn. Self-terminates once the queue empties. */
+  private tryFlushAnnounce() {
+    if (!this.speakCallback) {
+      this.announceQueue = [];
+      this.clearAnnounceTimer();
+      return;
+    }
+    if (this.announceQueue.length === 0) {
+      this.clearAnnounceTimer();
+      return;
+    }
+    if (isSpeechActive()) {
+      this.scheduleAnnounceRetry();
+      return;
+    }
+    const line = this.announceQueue.shift();
+    if (line) {
+      try { this.speakCallback.supersede(line); } catch (err) {
+        console.warn('[meeting-store] announce supersede threw:', err);
+      }
+    }
+    // Come back after this line starts playing to drain the rest.
+    this.scheduleAnnounceRetry();
+  }
+
+  private scheduleAnnounceRetry() {
+    if (this.announceTimer !== null) return;
+    this.announceTimer = window.setTimeout(() => {
+      this.announceTimer = null;
+      this.tryFlushAnnounce();
+    }, ANNOUNCE_RETRY_MS);
+  }
+
+  private clearAnnounceTimer() {
+    if (this.announceTimer !== null) {
+      window.clearTimeout(this.announceTimer);
+      this.announceTimer = null;
+    }
+  }
+
   /** VAD detected the user talking over the AI. Tag the active turn so any
    *  in-flight stream events (and the eventual full-message terminal) are
    *  suppressed — without this, the cancelled queue would restart on the
@@ -415,6 +496,10 @@ class MeetingStore {
    *  responsible for the actual cancelSpeech() call; this only updates the
    *  dedup state. */
   markBargeIn(): void {
+    // User took the floor — drop any pending status announcements so we don't
+    // talk over them the instant they finish speaking.
+    this.announceQueue = [];
+    this.clearAnnounceTimer();
     const slot = this.activeId ? this.slots.get(this.activeId) : null;
     if (!slot) return;
     slot.streamBuffer.cancelledByBarge = true;
@@ -437,6 +522,11 @@ class MeetingStore {
       }
       this.unsubscribeEvents = null;
     }
+    // C2: the announce retry timer holds a window.setTimeout handle; without
+    // this a dispose() mid-retry leaks the timer (and would fire into a
+    // torn-down store).
+    this.announceQueue = [];
+    this.clearAnnounceTimer();
     this.subscribed = false;
   }
 
@@ -651,6 +741,11 @@ class MeetingStore {
         return;
       }
     }
+    // C1: status announcements queued for the slot we're leaving must not
+    // play after the switch — they'd describe the wrong meeting. Drop them
+    // (and the pending retry timer) on every context flip.
+    this.announceQueue = [];
+    this.clearAnnounceTimer();
     this.activeId = id;
     slot.unreadCount = 0;
     // B3: replay the freshest backgrounded talker text on switch-in so the
@@ -822,6 +917,24 @@ class MeetingStore {
         currentTool: null,
         currentToolInput: null,
       }));
+      // A failure is a blocker the user needs to hear — done workers are
+      // covered by the louder worker-delivery announcement instead.
+      if (slot.id === this.activeId && e.status === 'failed') {
+        const name = this.workerLabel(slot, e.workerId);
+        this.announce(`「${name}」失败了${e.summary ? '：' + e.summary : '，需要你看一下'}`);
+      }
+      return;
+    }
+    if (e.kind === 'worker-stalled') {
+      // B1: the worker has gone quiet for a long stretch while still running
+      // (hung tool, invisible native dialog, loop). Speak it so the user
+      // isn't left waiting blind. One event per idle stretch (main dedupes).
+      this.bumpUnread(slot);
+      if (slot.id === this.activeId) {
+        const secs = Math.round(e.idleMs / 1000);
+        const toolPart = e.currentTool ? `卡在 ${e.currentTool} 上` : '没有进展';
+        this.announce(`「${e.title}」已经 ${secs} 秒${toolPart}了，可能需要你看一下`);
+      }
       return;
     }
     if (e.kind === 'worker-delivery') {
@@ -840,6 +953,10 @@ class MeetingStore {
         },
       }));
       this.bumpUnread(slot);
+      if (slot.id === this.activeId) {
+        const n = e.files.length;
+        this.announce(`已完成「${e.title}」${n > 0 ? `，改动 ${n} 个文件` : ''}`);
+      }
       return;
     }
     if (e.kind === 'plan-updated') {
@@ -899,6 +1016,15 @@ class MeetingStore {
         ),
       }));
       this.bumpUnread(slot);
+      // The whole point of the feature: don't leave the user waiting in
+      // silence when an agent is blocked on a confirmation. A permission-request
+      // only reaches the renderer when it genuinely needs the user (scope 'off',
+      // or the degraded 'read' path with no native confirmer) — 'all' never
+      // emits one. So announce whenever it arrives, except under 'all'.
+      if (slot.id === this.activeId && this.autoApproveScope !== 'all') {
+        const name = this.workerLabel(slot, source);
+        this.announce(`${name}卡住了，需要你确认是否允许 ${e.toolName}`);
+      }
       return;
     }
     if (e.kind === 'decision-pending') {
@@ -926,6 +1052,9 @@ class MeetingStore {
         ),
       }));
       this.bumpUnread(slot);
+      if (slot.id === this.activeId) {
+        this.announce(`等你确认：${e.question}`);
+      }
       return;
     }
     if (e.kind === 'decision-resolved') {
@@ -950,6 +1079,12 @@ class MeetingStore {
     if (e.kind === 'message') {
       this.handleMessage(slot, source, e.message);
     }
+  }
+
+  /** Human-friendly name for spoken status lines. */
+  private workerLabel(slot: SlotInternal, id: AgentSource): string {
+    if (id === 'talker') return '助手';
+    return slot.state.workers.get(id)?.title || '工作者';
   }
 
   private updateWorker(slot: SlotInternal, id: AgentSource, patch: (w: WorkerState) => WorkerState) {
@@ -983,7 +1118,20 @@ class MeetingStore {
     };
   }
 
-  private handleAgentApiError(slot: SlotInternal, source: AgentSource, code: string) {
+  private handleAgentApiError(slot: SlotInternal, source: AgentSource, code: string, msg?: any) {
+    // The SDK frequently carries the real, human-readable API error inside the
+    // assistant message content (and a request_id for support). For opaque
+    // codes like 'unknown' this underlying text is the only actionable signal,
+    // so we always extract and append it rather than discard the payload.
+    // Defense in depth: stderr is already redacted at the source in
+    // claude-session, but message content can also echo credentials, so scrub
+    // both before anything reaches the UI / lastError.
+    const contentDetail = redactSecrets(extractText(msg?.message?.content).trim());
+    // errorDetail is the CLI stderr tail captured in claude-session; for opaque
+    // codes like 'unknown' it's often the only place the real HTTP error shows.
+    const stderrDetail = typeof msg?.errorDetail === 'string' ? redactSecrets(msg.errorDetail.trim()) : '';
+    const detail = [contentDetail, stderrDetail].filter(Boolean).join('\n');
+    const requestId = typeof msg?.request_id === 'string' ? msg.request_id : '';
     const friendly = (() => {
       switch (code) {
         case 'invalid_request':
@@ -995,24 +1143,34 @@ class MeetingStore {
         case 'server_error':
           return '模型服务暂时不可用,稍后再试。';
         case 'authentication_failed':
-          return '认证失败,请检查 ANTHROPIC_API_KEY 配置。';
+        case 'oauth_org_not_allowed':
+          return '认证失败,请检查 ANTHROPIC_API_KEY / 登录状态。';
         case 'billing_error':
           return '账户额度问题,请检查计费状态。';
         case 'model_not_found':
           return '模型不可用,请检查配置中的模型 ID。';
+        case 'unknown':
+          return '模型请求失败（SDK 未能归类）。常见原因:网络/代理不可达、API Key 或 Base URL 配置有误。';
         default:
           return `Agent API error: ${code}`;
       }
     })();
+    const fullDetail = [
+      friendly,
+      detail ? `详情: ${detail}` : '',
+      requestId ? `request_id: ${requestId}` : '',
+    ]
+      .filter(Boolean)
+      .join('\n');
     this.updateWorker(slot, source, (w) => ({
       ...w,
       activity: appendCapped(
         w.activity,
-        [{ id: uid(), kind: 'error', title: 'API error', detail: friendly, ts: Date.now(), source }],
+        [{ id: uid(), kind: 'error', title: 'API error', detail: fullDetail, ts: Date.now(), source }],
         MAX_ACTIVITY,
       ),
     }));
-    this.mutateSlot(slot.id, (s) => ({ ...s, lastError: friendly }));
+    this.mutateSlot(slot.id, (s) => ({ ...s, lastError: fullDetail }));
     this.bumpUnread(slot);
   }
 
@@ -1029,7 +1187,7 @@ class MeetingStore {
     }
     if (type === 'assistant') {
       if (typeof msg?.error === 'string' && msg.error.length > 0) {
-        this.handleAgentApiError(slot, source, msg.error as string);
+        this.handleAgentApiError(slot, source, msg.error as string, msg);
         return;
       }
       const content = msg?.message?.content;
@@ -1323,6 +1481,10 @@ class MeetingStore {
     try { await window.vibeMeet.sessions.close(id); } catch (err) {
       console.warn('[meeting-store] sessions.close (restart) failed', { id, err });
     }
+    // C1: tearing down the active slot — drop its queued announcements so they
+    // don't fire into the freshly reopened session.
+    this.announceQueue = [];
+    this.clearAnnounceTimer();
     this.slots.delete(id);
     this.activeId = null;
     this.notifyTabsOnly();
@@ -1341,7 +1503,13 @@ class MeetingStore {
       console.warn('[meeting-store] sessions.close (retry) failed', { id, err });
     }
     this.slots.delete(id);
-    if (this.activeId === id) this.activeId = null;
+    if (this.activeId === id) {
+      // C1: only the active slot owns the announce queue; drop it so stale
+      // status lines don't replay into the reopened session.
+      this.announceQueue = [];
+      this.clearAnnounceTimer();
+      this.activeId = null;
+    }
     this.notifyTabsOnly();
     return this.openSession(cwd, greeting);
   }

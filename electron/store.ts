@@ -15,7 +15,7 @@
 // to drain so `before-quit` can't return before the last openTabs snapshot
 // hits disk.
 
-import { app } from 'electron';
+import { app, safeStorage } from 'electron';
 import { existsSync, readFileSync } from 'node:fs';
 import { promises as fsp } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -69,14 +69,76 @@ export interface Settings {
   // 'subscription' relies on the claude CLI's own OAuth credentials.
   authMode?: 'apikey' | 'subscription';
   // Manually entered Anthropic API key. Only used when authMode === 'apikey'.
-  // Stored as plain text in the settings file (userData/settings.json).
+  // Held in memory as plaintext, but persisted to disk encrypted via
+  // `anthropicApiKeyEnc` (Electron safeStorage / OS keychain). The plaintext
+  // field is never written to settings.json when encryption is available.
   anthropicApiKey?: string;
+  // Base64 of safeStorage.encryptString(anthropicApiKey). This is the on-disk
+  // form; load() decrypts it back into `anthropicApiKey` and drops this field
+  // from the in-memory cache. Present in the type only so JSON round-trips.
+  anthropicApiKeyEnc?: string;
+  // Custom gateway base URL (ANTHROPIC_BASE_URL). Only injected when
+  // authMode === 'apikey'. Empty/undefined falls back to settings.json env.
+  anthropicBaseUrl?: string;
+  // Model override (ANTHROPIC_MODEL) for talker + workers. Only injected when
+  // authMode === 'apikey'. Empty/undefined uses CLI/built-in defaults.
+  anthropicModel?: string;
 }
 
 const RECENT_CWDS_MAX = 10;
 
 let cached: Settings | null = null;
 let cachedPath: string | null = null;
+
+// --- API key at-rest encryption (S2) ----------------------------------------
+// safeStorage is backed by the OS keychain (Keychain on macOS). It returns
+// false before app `ready` on some platforms, so every call is guarded — a
+// failure degrades to "key absent this session" rather than crashing, and we
+// never wipe an existing ciphertext we couldn't read.
+
+function safeStorageAvailable(): boolean {
+  try {
+    return safeStorage.isEncryptionAvailable();
+  } catch {
+    return false;
+  }
+}
+
+function tryEncryptKey(plain: string): string | null {
+  try {
+    if (!safeStorageAvailable()) return null;
+    return safeStorage.encryptString(plain).toString('base64');
+  } catch (err) {
+    console.warn('[store] safeStorage encrypt failed; falling back to plaintext:', err);
+    return null;
+  }
+}
+
+function tryDecryptKey(b64: string): string | null {
+  try {
+    if (!safeStorageAvailable()) return null;
+    return safeStorage.decryptString(Buffer.from(b64, 'base64'));
+  } catch (err) {
+    console.warn('[store] safeStorage decrypt failed; API key unavailable this session:', err);
+    return null;
+  }
+}
+
+// Map an in-memory Settings (plaintext-key convention) onto its on-disk form:
+// the API key is written encrypted, never as plaintext, whenever safeStorage
+// is available.
+function toDiskForm(s: Settings): Settings {
+  const { anthropicApiKey, anthropicApiKeyEnc, ...rest } = s;
+  if (anthropicApiKey) {
+    const enc = tryEncryptKey(anthropicApiKey);
+    // safeStorage down → keep plaintext so a transient keychain hiccup can't
+    // silently discard the user's key.
+    return enc ? { ...rest, anthropicApiKeyEnc: enc } : { ...rest, anthropicApiKey };
+  }
+  // No plaintext in memory — preserve any pre-existing ciphertext (e.g. a blob
+  // we couldn't decrypt this session) so a routine write doesn't erase it.
+  return anthropicApiKeyEnc ? { ...rest, anthropicApiKeyEnc } : rest;
+}
 
 // Single tail-promise chain; mirrors the pattern in memory.ts. Errors are
 // swallowed locally so one bad write doesn't poison the chain — individual
@@ -128,6 +190,7 @@ function load(): Settings {
   // (recentCwds + lastActiveCwd subsume it). Idempotent: if recentCwds is
   // already populated the migration is a no-op. Fire-and-forget the persist
   // — `load()` callers don't want to await migration on every cache miss.
+  let needsRewrite = false;
   if (cached.lastCwd && (!cached.recentCwds || cached.recentCwds.length === 0)) {
     const migrated: Settings = {
       ...cached,
@@ -136,7 +199,28 @@ function load(): Settings {
     };
     delete migrated.lastCwd;
     cached = migrated;
-    void persist(migrated).catch((err) => {
+    needsRewrite = true;
+  }
+  // Decrypt the at-rest API key into the in-memory plaintext field so every
+  // existing reader (settings-loader, auth) keeps seeing `anthropicApiKey`
+  // unchanged. A legacy plaintext key on disk (no ciphertext) is migrated to
+  // encrypted form on the next write.
+  const hadPlaintextKeyOnDisk =
+    typeof cached.anthropicApiKey === 'string' &&
+    cached.anthropicApiKey.length > 0 &&
+    !cached.anthropicApiKeyEnc;
+  if (cached.anthropicApiKeyEnc) {
+    const dec = tryDecryptKey(cached.anthropicApiKeyEnc);
+    if (dec !== null) {
+      cached.anthropicApiKey = dec;
+      delete cached.anthropicApiKeyEnc;
+    }
+  }
+  if (hadPlaintextKeyOnDisk && safeStorageAvailable()) needsRewrite = true;
+  // One fire-and-forget rewrite covers both migrations so two concurrent
+  // persist() calls can't race on the rename.
+  if (needsRewrite) {
+    void persist({ ...cached }).catch((err) => {
       console.error('[store] migration write failed:', err);
     });
   }
@@ -146,8 +230,11 @@ function load(): Settings {
 async function persist(next: Settings): Promise<void> {
   const p = settingsPath();
   await fsp.mkdir(dirname(p), { recursive: true });
+  // Encrypt the API key for the on-disk copy; the in-memory cache keeps the
+  // plaintext convention so readers don't have to decrypt.
+  const onDisk = toDiskForm(next);
   const tmp = `${p}.tmp`;
-  await fsp.writeFile(tmp, JSON.stringify(next, null, 2), 'utf8');
+  await fsp.writeFile(tmp, JSON.stringify(onDisk, null, 2), 'utf8');
   await fsp.rename(tmp, p);
   // Cache flips only after the rename succeeds — if write/rename throws we
   // keep the prior cache so the rest of the app sees a coherent value.
@@ -161,6 +248,13 @@ export function getSettings(): Settings {
 export function updateSettings(patch: Partial<Settings>): Promise<Settings> {
   return withWriteLock(async () => {
     const next = { ...load(), ...patch };
+    // Explicit key clear: also drop any ciphertext we couldn't decrypt this
+    // session, otherwise a stale blob would survive a "clear" and toDiskForm
+    // would faithfully re-persist it.
+    if ('anthropicApiKey' in patch && !patch.anthropicApiKey) {
+      delete next.anthropicApiKey;
+      delete next.anthropicApiKeyEnc;
+    }
     await persist(next);
     return { ...next };
   });

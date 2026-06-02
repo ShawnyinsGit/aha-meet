@@ -35,6 +35,8 @@ export function Lobby({ lastError }: LobbyProps) {
   const [subscriptionLoggedIn, setSubscriptionLoggedIn] = useState(false);
   const [authOpen, setAuthOpen] = useState(false);
   const [apiKeyInput, setApiKeyInput] = useState('');
+  const [baseUrlInput, setBaseUrlInput] = useState('');
+  const [modelInput, setModelInput] = useState('');
   const [apiKeyStatus, setApiKeyStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const [loginStatus, setLoginStatus] = useState<'idle' | 'pending' | 'done' | 'error'>('idle');
   const [loginError, setLoginError] = useState<string>('');
@@ -47,6 +49,10 @@ export function Lobby({ lastError }: LobbyProps) {
     window.vibeMeet.auth.getConfig().then((cfg) => {
       setAuthMode(cfg.authMode);
       setHasApiKey(cfg.hasApiKey);
+      // Base URL + model are non-secret; prefill them directly so the user can
+      // see and edit what's currently in effect.
+      setBaseUrlInput(cfg.baseUrl ?? '');
+      setModelInput(cfg.model ?? '');
     });
     window.vibeMeet.auth.checkSubscriptionStatus().then((s) => {
       setSubscriptionLoggedIn(s.loggedIn);
@@ -71,10 +77,14 @@ export function Lobby({ lastError }: LobbyProps) {
     await openCwd(dir);
   }, [openCwd]);
 
-  const saveApiKey = useCallback(async () => {
+  const saveAuthConfig = useCallback(async () => {
     setApiKeyStatus('saving');
-    const res = await window.vibeMeet.auth.setApiKey(apiKeyInput);
-    if (res.ok) {
+    // Save key + gateway + model together. The key save drives authMode; an
+    // empty key clears it. Base URL / model only take effect in apikey mode.
+    const keyRes = await window.vibeMeet.auth.setApiKey(apiKeyInput);
+    const baseRes = await window.vibeMeet.auth.setBaseUrl(baseUrlInput);
+    const modelRes = await window.vibeMeet.auth.setModel(modelInput);
+    if (keyRes.ok && baseRes.ok && modelRes.ok) {
       setApiKeyStatus('saved');
       setHasApiKey(apiKeyInput.trim().length > 0);
       setAuthMode(apiKeyInput.trim().length > 0 ? 'apikey' : null);
@@ -82,7 +92,7 @@ export function Lobby({ lastError }: LobbyProps) {
     } else {
       setApiKeyStatus('error');
     }
-  }, [apiKeyInput]);
+  }, [apiKeyInput, baseUrlInput, modelInput]);
 
   const loginSubscription = useCallback(async () => {
     setLoginStatus('pending');
@@ -151,14 +161,14 @@ export function Lobby({ lastError }: LobbyProps) {
                     placeholder={hasApiKey ? '••••••••••••••••••••••' : 'sk-ant-...'}
                     value={apiKeyInput}
                     onChange={(e) => setApiKeyInput(e.target.value)}
-                    onKeyDown={(e) => e.key === 'Enter' && saveApiKey()}
+                    onKeyDown={(e) => e.key === 'Enter' && saveAuthConfig()}
                     autoComplete="off"
                     spellCheck={false}
                   />
                   <button
                     type="button"
                     className="join-auth-btn"
-                    onClick={saveApiKey}
+                    onClick={saveAuthConfig}
                     disabled={apiKeyStatus === 'saving'}
                   >
                     {apiKeyStatus === 'saving' ? 'Saving…'
@@ -166,14 +176,32 @@ export function Lobby({ lastError }: LobbyProps) {
                       : 'Save'}
                   </button>
                 </div>
+                <input
+                  type="text"
+                  className="join-auth-input join-auth-input-full"
+                  placeholder="Base URL (optional) — https://api.anthropic.com"
+                  value={baseUrlInput}
+                  onChange={(e) => setBaseUrlInput(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && saveAuthConfig()}
+                  autoComplete="off"
+                  spellCheck={false}
+                />
+                <input
+                  type="text"
+                  className="join-auth-input join-auth-input-full"
+                  placeholder="Model (optional) — claude-haiku-4-5"
+                  value={modelInput}
+                  onChange={(e) => setModelInput(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && saveAuthConfig()}
+                  autoComplete="off"
+                  spellCheck={false}
+                />
                 {apiKeyStatus === 'error' && (
-                  <div className="join-auth-error">Failed to save key.</div>
+                  <div className="join-auth-error">Failed to save settings.</div>
                 )}
-                {hasApiKey && authMode === 'apikey' && (
-                  <div className="join-auth-hint">
-                    Leave blank and save to remove the stored key.
-                  </div>
-                )}
+                <div className="join-auth-hint">
+                  Base URL and Model only apply when using an API key. Leave a field blank and save to clear it.
+                </div>
               </div>
 
               <div className="join-auth-block">

@@ -95,10 +95,18 @@ export function mergedSubprocessEnv(): NodeJS.ProcessEnv {
   for (const [k, v] of Object.entries(claudeEnv)) {
     if (typeof v === 'string' && v.length > 0) out[k] = v;
   }
-  // 3. App settings: explicit API key entered in the UI wins over everything.
+  // 3. App settings: explicit API key / gateway / model entered in the UI win
+  //    over everything. Base URL + model are only honored alongside an apikey
+  //    so a stray override can't silently break subscription auth.
   const appSettings = getSettings();
   if (appSettings.authMode === 'apikey' && appSettings.anthropicApiKey) {
     out['ANTHROPIC_API_KEY'] = appSettings.anthropicApiKey;
+    if (appSettings.anthropicBaseUrl) {
+      out['ANTHROPIC_BASE_URL'] = appSettings.anthropicBaseUrl;
+    }
+    if (appSettings.anthropicModel) {
+      out['ANTHROPIC_MODEL'] = appSettings.anthropicModel;
+    }
   }
   return out;
 }

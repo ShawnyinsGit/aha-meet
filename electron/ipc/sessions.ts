@@ -108,7 +108,12 @@ export function registerSessionsIpc(ctx: IpcContext): void {
       // launch+1 s this resolves immediately; on a manifest-cached relaunch
       // it's effectively instant.
       const shadow = await ctx.awaitClaudeShadowHome();
-      const workerEnv = shadow ? { ...mergedSubprocessEnv(), HOME: shadow } : undefined;
+      const mergedEnv = mergedSubprocessEnv();
+      const workerEnv = shadow ? { ...mergedEnv, HOME: shadow } : undefined;
+      // The talker normally runs Haiku for latency; when the user points at a
+      // custom gateway/model via ANTHROPIC_MODEL we honor it so the talker
+      // doesn't request a model the gateway can't serve.
+      const talkerModel = mergedEnv.ANTHROPIC_MODEL || undefined;
 
       // Pre-bind sessionId into the emit closure so every event this
       // orchestrator emits is automatically routed to the right renderer slot.
@@ -117,6 +122,7 @@ export function registerSessionsIpc(ctx: IpcContext): void {
         cwd: resolvedCwd,
         autoApproveScope: ctx.getAutoApprove(),
         workerEnv,
+        talkerModel,
         confirmDestructive: ctx.nativeConfirmDestructive,
       });
 

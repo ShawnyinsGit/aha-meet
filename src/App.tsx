@@ -504,6 +504,9 @@ export function App() {
   // start so a new session inherits the scope.
   useEffect(() => {
     void window.vibeMeet.setAutoApprove(autoApproveScope);
+    // Mirror the scope into the store so blocker announcements stay quiet for
+    // prompts that auto-approve resolves on its own.
+    meetingStore.setAutoApproveScope(autoApproveScope);
     if (!state.running) return;
     // Apply to the currently-focused live session. Background tabs keep their
     // existing mode; toggling here is a per-meeting decision tied to the tab

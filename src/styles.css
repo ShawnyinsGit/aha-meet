@@ -228,6 +228,7 @@ button:disabled {
   transition: border-color var(--transition);
 }
 .join-auth-input:focus { border-color: var(--accent); }
+.join-auth-input-full { flex: none; width: 100%; box-sizing: border-box; margin-top: 8px; }
 
 .join-auth-btn {
   padding: 7px 14px; font-size: 12px; font-weight: 500;
