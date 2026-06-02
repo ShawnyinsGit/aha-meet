@@ -50,7 +50,7 @@ export function App() {
   const { state, restartSession, sendText, sendImage, sendAttachments, publishDroppedFiles, onDroppedFiles, resolvePermission, interrupt, setSpeakCallback } = useClaude();
   const workers = useWorkers();
   const tabs = useTabs();
-  const { state: share, start: startShare, stop: stopShare, captureFrame, videoRef } = useScreenShare();
+  const { state: share, start: startShare, startSystemPicker, stop: stopShare, captureFrame, videoRef } = useScreenShare();
 
   // Derived UI predicates:
   //   hasTabs       — any open tab (live or placeholder); drives Lobby vs Shell branch
@@ -543,13 +543,22 @@ export function App() {
     await startShare(src.id, src.name);
   }, [startShare]);
 
-  const toggleShare = useCallback(() => {
+  const toggleShare = useCallback(async () => {
     if (share.active) {
       stopShare();
-    } else {
+      return;
+    }
+    try {
+      const useSystem = await window.vibeMeet.useSystemPicker();
+      if (useSystem) {
+        await startSystemPicker();
+      } else {
+        setPickerOpen(true);
+      }
+    } catch {
       setPickerOpen(true);
     }
-  }, [share.active, stopShare]);
+  }, [share.active, stopShare, startSystemPicker]);
 
   const handleSnapshot = useCallback(async () => {
     const dataUrl = captureFrame();

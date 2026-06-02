@@ -207,6 +207,7 @@ export interface VibeMeetApi {
   getVoicePref: () => Promise<{ selectedVoiceName: string | null; guidanceDismissed: boolean; speechFilterMode: 'strict' | 'off' }>;
   setVoicePref: (patch: { selectedVoiceName?: string | null; guidanceDismissed?: boolean; speechFilterMode?: 'strict' | 'off' }) => Promise<{ ok: boolean }>;
   openVoiceSettings: () => Promise<{ ok: boolean }>;
+  useSystemPicker: () => Promise<boolean>;
   getDesktopSources: () => Promise<
     | { ok: true; sources: DesktopSource[] }
     | { ok: false; error: string; status: string }

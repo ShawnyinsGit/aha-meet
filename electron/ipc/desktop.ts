@@ -1,7 +1,29 @@
-import { ipcMain, app, desktopCapturer, systemPreferences, shell } from 'electron';
+import { ipcMain, app, desktopCapturer, systemPreferences, shell, session } from 'electron';
+import * as os from 'os';
 import { errorMessage } from '../format-error.js';
 
+function isMacOS14Plus(): boolean {
+  if (process.platform !== 'darwin') return false;
+  // Darwin 23 = macOS 14 Sonoma
+  const major = parseInt(os.release().split('.')[0], 10);
+  return major >= 23;
+}
+
 export function registerDesktopIpc(): void {
+  // macOS 14+: register the system picker so renderer can use getDisplayMedia()
+  // and the OS-native ScreenCaptureKit picker appears (enumerates fullscreen windows).
+  if (isMacOS14Plus()) {
+    session.defaultSession.setDisplayMediaRequestHandler(
+      (_request, callback) => {
+        // Fallback: deny if the system picker somehow doesn't handle it.
+        callback({ video: undefined as any });
+      },
+      { useSystemPicker: true },
+    );
+  }
+
+  ipcMain.handle('desktop:use-system-picker', () => isMacOS14Plus());
+
   ipcMain.handle('desktop:get-sources', async () => {
     try {
       const status = process.platform === 'darwin'

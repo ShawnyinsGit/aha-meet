@@ -52,11 +52,30 @@ export function useScreenShare() {
       }
       streamRef.current = stream;
       stream.getVideoTracks()[0]?.addEventListener('ended', () => stop());
-      // Flip state first so <video> mounts; the effect below binds the stream
-      // to videoRef.current once it exists.
       setState({ active: true, sourceId, sourceName, error: null });
     } catch (err: unknown) {
       setState({ ...initial, error: errorMessage(err) });
+    }
+  }, [stop]);
+
+  const startSystemPicker = useCallback(async () => {
+    try {
+      const stream = await navigator.mediaDevices.getDisplayMedia({
+        video: { frameRate: 15 } as any,
+        audio: false,
+      });
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((t) => t.stop());
+      }
+      streamRef.current = stream;
+      const track = stream.getVideoTracks()[0];
+      const label = track?.label ?? 'Screen';
+      track?.addEventListener('ended', () => stop());
+      setState({ active: true, sourceId: 'system-picker', sourceName: label, error: null });
+    } catch (err: unknown) {
+      const msg = errorMessage(err);
+      if (msg.includes('AbortError') || msg.includes('Permission denied')) return;
+      setState({ ...initial, error: msg });
     }
   }, [stop]);
 
@@ -94,5 +113,5 @@ export function useScreenShare() {
     return () => stop();
   }, [stop]);
 
-  return { state, start, stop, captureFrame, videoRef };
+  return { state, start, startSystemPicker, stop, captureFrame, videoRef };
 }

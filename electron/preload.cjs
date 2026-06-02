@@ -32,6 +32,7 @@ const api = {
   getVoicePref: () => ipcRenderer.invoke('settings:get-voice-pref'),
   setVoicePref: (patch) => ipcRenderer.invoke('settings:set-voice-pref', patch),
   openVoiceSettings: () => ipcRenderer.invoke('system:open-voice-settings'),
+  useSystemPicker: () => ipcRenderer.invoke('desktop:use-system-picker'),
   getDesktopSources: () => ipcRenderer.invoke('desktop:get-sources'),
   checkScreenPermission: () => ipcRenderer.invoke('desktop:check-permission'),
   openScreenSettings: () => ipcRenderer.invoke('desktop:open-settings'),
