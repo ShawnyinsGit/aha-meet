@@ -1,6 +1,6 @@
 {
   "name": "aha-meet",
-  "version": "0.7.6",
+  "version": "0.8.2",
   "description": "Real-time meeting-style collaboration with Claude Code",
   "private": true,
   "type": "module",
@@ -37,7 +37,7 @@
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.4",
     "electron": "^42.0.0",
-    "electron-builder": "^25.1.8",
+    "electron-builder": "^26.8.1",
     "typescript": "^5.7.2",
     "vite": "^6.0.3"
   }

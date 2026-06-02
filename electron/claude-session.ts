@@ -131,6 +131,9 @@ export class ClaudeSession {
   start() {
     if (this.q) return;
     const canUseTool: CanUseTool = async (toolName, input, options) => {
+      if (this.closed) {
+        return { behavior: 'deny', message: 'session ended', interrupt: true };
+      }
       if (this.autoApproveScope !== 'off') {
         // 'all' scope: every tool is auto-approved (user explicitly chose this).
         if (this.autoApproveScope === 'all') {
@@ -141,7 +144,13 @@ export class ClaudeSession {
           return { behavior: 'allow', updatedInput: input };
         }
         if (this.confirmDestructive) {
+          if (this.closed) {
+            return { behavior: 'deny', message: 'session ended', interrupt: true };
+          }
           const allowed = await this.confirmDestructive(toolName, input);
+          if (this.closed) {
+            return { behavior: 'deny', message: 'session ended', interrupt: true };
+          }
           return allowed
             ? { behavior: 'allow', updatedInput: input }
             : {

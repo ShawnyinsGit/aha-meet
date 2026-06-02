@@ -33,6 +33,7 @@
     "entitlementsInherit": "build/entitlements.mac.plist"
   },
   "dmg": {
+    "icon": null,
     "title": "AhaMeet ${version}",
     "writeUpdateInfo": false
   }

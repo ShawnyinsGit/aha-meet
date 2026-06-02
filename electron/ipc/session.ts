@@ -79,7 +79,9 @@ export function registerSessionIpc(ctx: IpcContext): void {
     // compromised renderer can fire this IPC silently — require a native
     // OS-level confirmation so the elevation can't happen behind the user's
     // back. 'off' and 'read' keep their existing no-prompt behavior.
-    if (next === 'all') {
+    // Skip the dialog if already at 'all' — re-sends happen when useEffect
+    // re-fires on tab switch / re-render and shouldn't re-prompt.
+    if (next === 'all' && ctx.getAutoApprove() !== 'all') {
       const parent = BrowserWindow.getFocusedWindow();
       const result = await dialog.showMessageBox(parent ?? (null as unknown as BrowserWindow), {
         type: 'warning',

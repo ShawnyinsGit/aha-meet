@@ -106,6 +106,7 @@ export function App() {
   const isMac = typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform);
 
   const speakingRef = useRef(false);
+  const sendWithModeRef = useRef<(text: string) => void>(sendText);
 
   // Cold start: pull the persisted tab layout + recent cwds from main and
   // hydrate the store. Placeholders for previously-open tabs land in the tab
@@ -391,8 +392,8 @@ export function App() {
       console.warn('[voice] dropped — no active session');
       return;
     }
-    sendText(text);
-  }, [sendText]);
+    sendWithModeRef.current(text);
+  }, []);
 
   // Barge-in: any time the VAD says we've started speaking, cut Claude off.
   // markBargeIn() tags the active streaming turn so subsequent stream events
@@ -578,6 +579,8 @@ export function App() {
 ${trimmed}`;
     await sendText(directive);
   }, [multiAgent, sendText]);
+
+  sendWithModeRef.current = sendWithMode;
 
   const sendAttachmentsWithMode = useCallback(
     async (staged: Parameters<typeof sendAttachments>[0], raw: string) => {
