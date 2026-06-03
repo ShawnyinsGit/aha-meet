@@ -12,14 +12,17 @@ function isMacOS14Plus(): boolean {
 export function registerDesktopIpc(): void {
   // macOS 14+: register the system picker so renderer can use getDisplayMedia()
   // and the OS-native ScreenCaptureKit picker appears (enumerates fullscreen windows).
+  // Deferred to app.whenReady because session.defaultSession is only available
+  // after the app is ready — accessing it at module-load time throws.
   if (isMacOS14Plus()) {
-    session.defaultSession.setDisplayMediaRequestHandler(
-      (_request, callback) => {
-        // Fallback: deny if the system picker somehow doesn't handle it.
-        callback({ video: undefined as any });
-      },
-      { useSystemPicker: true },
-    );
+    app.whenReady().then(() => {
+      session.defaultSession.setDisplayMediaRequestHandler(
+        (_request, callback) => {
+          callback({ video: undefined as any });
+        },
+        { useSystemPicker: true },
+      );
+    });
   }
 
   ipcMain.handle('desktop:use-system-picker', () => isMacOS14Plus());
