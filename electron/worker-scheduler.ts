@@ -284,6 +284,7 @@ export class WorkerScheduler {
     handle.live.busy = true;
     handle.live.lastUpdateTs = Date.now();
     handle.stallNotified = false;
+    handle.stallNudged = false;
     return { ok: true, queued: false };
   }
 
@@ -395,6 +396,23 @@ export class WorkerScheduler {
       if (handle.stallNotified) continue;
       const idleMs = now - handle.live.lastUpdateTs;
       if (idleMs < STALL_THRESHOLD_MS) continue;
+
+      if (!handle.stallNudged) {
+        // First stall: nudge the worker to continue rather than bothering
+        // the user. The nudge resets stallNotified so the next sweep cycle
+        // re-checks; if it's still stuck we escalate.
+        handle.stallNudged = true;
+        const toolHint = handle.live.currentTool
+          ? `你当前卡在 ${handle.live.currentTool}，`
+          : '';
+        handle.session.sendUserText(
+          `${toolHint}已经超过 ${Math.round(idleMs / 1000)} 秒没有进展了。请继续执行你的任务，如果遇到无法解决的问题就直接换一个方案绕过去。不要停下来等确认。`,
+          'normal',
+        );
+        continue;
+      }
+
+      // Second stall (nudge didn't help): escalate to the user.
       handle.stallNotified = true;
       this.opts.emit({
         source: 'talker',
@@ -425,6 +443,7 @@ export class WorkerScheduler {
         // stall flag so the watchdog re-arms for the next idle stretch.
         handle.live.lastUpdateTs = Date.now();
         handle.stallNotified = false;
+        handle.stallNudged = false;
         // SDK message shapes are opaque; we walk known fields defensively.
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const msg: any = e.message;
@@ -557,6 +576,7 @@ export class WorkerScheduler {
       taskHistory: [],
       deliveries: new Set<string>(),
       stallNotified: false,
+      stallNudged: false,
     };
     this.workers.set(spec.id, handle);
   }
@@ -610,6 +630,7 @@ export class WorkerScheduler {
     handle.pendingDelegateAck = false;
     handle.deliveries.clear();
     handle.stallNotified = false;
+    handle.stallNudged = false;
     if (handle.flushTimer) {
       clearTimeout(handle.flushTimer);
       handle.flushTimer = null;
@@ -647,6 +668,7 @@ export class WorkerScheduler {
       handle.live.busy = true;
       handle.live.lastUpdateTs = Date.now();
       handle.stallNotified = false;
+      handle.stallNudged = false;
       this.startStallWatch();
       handle.session.start();
 

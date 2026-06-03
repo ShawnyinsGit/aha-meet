@@ -102,11 +102,14 @@ export function summariseForSpeech(text: string, raw: string): string {
   return text.replace(/\[\[CODE_BLOCK\]\]/g, narration);
 }
 
-// Split into spoken-length chunks. Each chunk gets a locale tag so the TTS
-// layer can pick the right voice per sentence (zh sentence → Tingting,
-// en sentence → Samantha/Siri).
+// Split into spoken-length chunks. All chunks share the dominant locale of
+// the full input so a mixed CJK+EN sentence doesn't flip voices mid-stream
+// (which causes jarring dual-voice playback and can drop content when a
+// sub-chunk is too short for one engine but fine for the other).
 export function splitSentences(text: string): Array<{ text: string; locale: Locale }> {
   const out: Array<{ text: string; locale: Locale }> = [];
+  const dominantLocale = detectLocale(text);
+
   // Split on sentence enders for both languages, keeping the punctuation.
   const parts = text
     .split(/(?<=[。！？!?.])\s+|(?<=[。！？!?.])(?=[^\s])/u)
@@ -116,20 +119,20 @@ export function splitSentences(text: string): Array<{ text: string; locale: Loca
   for (const part of parts) {
     // Further chunk overly long parts so TTS stays interruptible.
     if (part.length <= MAX_CHUNK_CHARS) {
-      out.push({ text: part, locale: detectLocale(part) });
+      out.push({ text: part, locale: dominantLocale });
     } else {
       // Break on commas / ；/ ,
       const subs = part.split(/(?<=[，,；;])\s*/).filter(Boolean);
       let buf = '';
       for (const s of subs) {
         if ((buf + s).length > MAX_CHUNK_CHARS && buf) {
-          out.push({ text: buf.trim(), locale: detectLocale(buf) });
+          out.push({ text: buf.trim(), locale: dominantLocale });
           buf = s;
         } else {
           buf += s;
         }
       }
-      if (buf.trim()) out.push({ text: buf.trim(), locale: detectLocale(buf) });
+      if (buf.trim()) out.push({ text: buf.trim(), locale: dominantLocale });
     }
   }
   return out;

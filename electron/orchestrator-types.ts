@@ -111,6 +111,9 @@ export interface WorkerHandle {
    *  the current idle stretch, cleared on the next activity (lastUpdateTs bump)
    *  so each distinct stall is announced exactly once, not every sweep tick. */
   stallNotified: boolean;
+  /** First stall fires a nudge to the worker; only escalate to the user on
+   *  the second consecutive stall (meaning the nudge didn't unblock it). */
+  stallNudged: boolean;
 }
 
 export interface RecentFileEdit {
