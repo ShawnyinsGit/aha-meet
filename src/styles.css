@@ -2947,6 +2947,22 @@ button:disabled {
   line-height: 1.5;
   color: var(--text-secondary);
 }
+.workspace-delivery-accept-btn {
+  margin-top: 8px;
+  padding: 4px 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(154, 226, 154, 0.4);
+  background: rgba(154, 226, 154, 0.12);
+  color: #9ae29a;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+.workspace-delivery-accept-btn:hover {
+  background: rgba(154, 226, 154, 0.22);
+  border-color: rgba(154, 226, 154, 0.6);
+}
 .workspace-feed-meta {
   margin-top: 6px;
   font-size: 10px;

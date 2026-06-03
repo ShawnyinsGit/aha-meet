@@ -1,7 +1,7 @@
 import { cloneElement, isValidElement, useCallback, useEffect, useMemo, useState } from 'react';
 import type { ReactElement, ReactNode } from 'react';
 import { ChevronUp, ChevronDown } from 'lucide-react';
-import type { WorkerState } from '../lib/meeting-store';
+import type { DeliverySnapshot, WorkerState } from '../lib/meeting-store';
 import type { MeetingPlan } from '../types';
 import { ClaudeWorkspace } from './ClaudeWorkspace';
 import { WorkerCard } from './WorkerCard';
@@ -16,6 +16,8 @@ interface ParticipantPanelProps {
   aiSpeaking: boolean;
   selfTile: ReactNode;
   onResolvePermission: (id: string, decision: 'allow' | 'deny') => void;
+  deliveryHistory?: DeliverySnapshot[];
+  onAcceptDelivery?: () => void;
 }
 
 export function ParticipantPanel({
@@ -25,6 +27,8 @@ export function ParticipantPanel({
   aiSpeaking,
   selfTile,
   onResolvePermission,
+  deliveryHistory,
+  onAcceptDelivery,
 }: ParticipantPanelProps) {
   const sortedWorkers = useMemo(() => {
     // Priority order:
@@ -163,6 +167,8 @@ export function ParticipantPanel({
             lastText={selectedWorker.lastText}
             startedAt={selectedWorker.startedAt}
             pendingPermissionTool={selectedWorker.pendingPermission?.toolName ?? null}
+            deliveryHistory={selectedWorker.role === 'talker' ? deliveryHistory : undefined}
+            onAcceptDelivery={selectedWorker.role === 'talker' ? onAcceptDelivery : undefined}
           />
         )}
       </div>

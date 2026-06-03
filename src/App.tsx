@@ -712,6 +712,8 @@ ${trimmed}`
                 running={state.running}
                 aiSpeaking={aiSpeaking}
                 onResolvePermission={resolvePermission}
+                deliveryHistory={workers.deliveryHistory}
+                onAcceptDelivery={workers.acceptDelivery}
                 selfTile={
                   <ParticipantTile
                     name="You"

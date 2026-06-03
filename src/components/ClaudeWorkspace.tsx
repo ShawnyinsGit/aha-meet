@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import type {
   ActivityEntry,
@@ -7,6 +7,7 @@ import type {
   WorkerStatus,
   WorkerTaskHistoryEntry,
 } from '../types';
+import type { DeliverySnapshot } from '../lib/meeting-store';
 import { ClaudeAvatar } from './ClaudeAvatar';
 
 type CurrentTaskStatus = 'idle' | WorkerStatus | 'speaking';
@@ -40,6 +41,8 @@ interface ClaudeWorkspaceProps {
   lastText?: string;
   startedAt?: number | null;
   pendingPermissionTool?: string | null;
+  deliveryHistory?: DeliverySnapshot[];
+  onAcceptDelivery?: () => void;
 }
 
 const dotColor: Record<ActivityEntry['kind'], string> = {
@@ -127,6 +130,8 @@ export function ClaudeWorkspace({
   lastText,
   startedAt,
   pendingPermissionTool,
+  deliveryHistory,
+  onAcceptDelivery,
 }: ClaudeWorkspaceProps) {
   const lastAssistant = useMemo(() => [...transcript].reverse().find((t) => t.role === 'assistant'), [transcript]);
   const latestToolCall = useMemo(
@@ -172,6 +177,25 @@ export function ClaudeWorkspace({
   const currentTaskTone = taskStatus ? taskStatusTone[taskStatus] : 'idle';
   const currentTaskLabel = taskStatus ? taskStatusLabel[taskStatus] : 'Idle';
   const currentTaskExpanded = expanded.has('__current__');
+
+  const deliveryLen = deliveryHistory?.length ?? 0;
+  const prevDeliveryLen = useRef(deliveryLen);
+  useEffect(() => {
+    if (!deliveryHistory || deliveryHistory.length === 0) return;
+    if (deliveryHistory.length <= prevDeliveryLen.current) {
+      prevDeliveryLen.current = deliveryHistory.length;
+      return;
+    }
+    prevDeliveryLen.current = deliveryHistory.length;
+    const latest = deliveryHistory[deliveryHistory.length - 1];
+    const key = `delivery-${latest.taskId}`;
+    setExpanded((prev) => {
+      if (prev.has(key)) return prev;
+      const next = new Set(prev);
+      next.add(key);
+      return next;
+    });
+  }, [deliveryLen, deliveryHistory]);
 
   // Build the merged feed: taskHistory (most recent first) followed by
   // recent activity entries. Capped so we don't blow the panel up.
@@ -310,6 +334,70 @@ export function ClaudeWorkspace({
           <div className="workspace-now-card workspace-now-thought">
             {lastAssistant.text.slice(0, 280)}
             {lastAssistant.text.length > 280 ? '…' : ''}
+          </div>
+        </section>
+      )}
+
+      {deliveryHistory && deliveryHistory.length > 0 && (
+        <section className="workspace-feed">
+          <div className="workspace-feed-label">Deliveries</div>
+          <div className="workspace-feed-list">
+            {[...deliveryHistory].reverse().map((d) => {
+              const key = `delivery-${d.taskId}`;
+              const isOpen = expanded.has(key);
+              const isPending = d.status === 'pending';
+              const statusPill = d.status === 'accepted' ? 'done' : d.status === 'revised' ? 'working' : 'pending';
+              const statusLabel = d.status === 'accepted' ? 'Accepted' : d.status === 'revised' ? 'Revised' : `${d.files.length} files`;
+              return (
+                <div
+                  key={key}
+                  className={`workspace-feed-row workspace-feed-row-clickable ${isOpen ? 'workspace-feed-row-open' : ''}`}
+                  onClick={() => toggleExpand(key)}
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      toggleExpand(key);
+                    }
+                  }}
+                  aria-expanded={isOpen}
+                >
+                  <span className="workspace-feed-dot" style={{ background: d.status === 'accepted' ? '#9ae29a' : d.status === 'revised' ? '#f5c542' : '#7cc6ff' }} />
+                  <div className="workspace-feed-text">
+                    <div className="workspace-feed-title">
+                      <span className="workspace-feed-title-text">{d.title}</span>
+                      <span className={`workspace-task-pill workspace-task-pill-${statusPill}`}>
+                        {statusLabel}
+                      </span>
+                      {d.receivedAt > 0 && (
+                        <span className="workspace-feed-time">{formatHistoryTime(d.receivedAt)}</span>
+                      )}
+                      <span className="workspace-feed-caret" aria-hidden>
+                        {isOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                      </span>
+                    </div>
+                    {!isOpen && d.summary && (
+                      <div className="workspace-feed-detail">{d.summary}</div>
+                    )}
+                    {isOpen && (
+                      <div className="workspace-feed-detail workspace-feed-detail-expanded">
+                        {d.summary}
+                        {isPending && onAcceptDelivery && (
+                          <button
+                            type="button"
+                            className="workspace-delivery-accept-btn"
+                            onClick={(e) => { e.stopPropagation(); onAcceptDelivery(); }}
+                          >
+                            通过
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </section>
       )}

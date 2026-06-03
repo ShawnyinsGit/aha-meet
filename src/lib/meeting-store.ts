@@ -123,6 +123,8 @@ export interface WorkerState {
  *  "delivery acceptance" panel. Pushed by a `worker-delivery` event from main
  *  when the worker calls `task_done`. Cleared by the user accepting or by a
  *  new delivery from any worker (only the most recent delivery is staged). */
+export type DeliveryStatus = 'pending' | 'accepted' | 'revised';
+
 export interface DeliverySnapshot {
   workerId: AgentSource;
   title: string;
@@ -130,6 +132,7 @@ export interface DeliverySnapshot {
   taskId: string;
   files: WorkerDeliveryFile[];
   receivedAt: number;
+  status: DeliveryStatus;
 }
 
 export interface MeetingState {
@@ -141,6 +144,7 @@ export interface MeetingState {
    *  staged. Replaced (not queued) when another worker finishes — pick the
    *  freshest one. */
   currentDelivery: DeliverySnapshot | null;
+  deliveryHistory: DeliverySnapshot[];
 }
 
 /** Tab metadata projected from each slot. Drives the TabStrip rendering. */
@@ -266,6 +270,7 @@ function emptyState(): MeetingState {
     running: false,
     lastError: null,
     currentDelivery: null,
+    deliveryHistory: [],
   };
 }
 
@@ -938,25 +943,22 @@ class MeetingStore {
       return;
     }
     if (e.kind === 'worker-delivery') {
-      // Stage this delivery for the ScreenStage acceptance panel. Replaces
-      // any prior pending delivery — only the freshest one is shown so the
-      // user always knows which worker just handed something off.
+      const snapshot: DeliverySnapshot = {
+        workerId: e.workerId,
+        title: e.title,
+        summary: e.summary,
+        taskId: e.taskId,
+        files: e.files,
+        receivedAt: Date.now(),
+        status: 'pending',
+      };
+      const MAX_DELIVERY_HISTORY = 20;
       this.mutateSlot(slot.id, (s) => ({
         ...s,
-        currentDelivery: {
-          workerId: e.workerId,
-          title: e.title,
-          summary: e.summary,
-          taskId: e.taskId,
-          files: e.files,
-          receivedAt: Date.now(),
-        },
+        currentDelivery: snapshot,
+        deliveryHistory: [...s.deliveryHistory, snapshot].slice(-MAX_DELIVERY_HISTORY),
       }));
       this.bumpUnread(slot);
-      if (slot.id === this.activeId) {
-        const n = e.files.length;
-        this.announce(`已完成「${e.title}」${n > 0 ? `，改动 ${n} 个文件` : ''}`);
-      }
       return;
     }
     if (e.kind === 'plan-updated') {
@@ -1696,7 +1698,14 @@ class MeetingStore {
     if (!id) return;
     const slot = this.slots.get(id);
     if (!slot || !slot.state.currentDelivery) return;
-    this.mutateSlot(slot.id, (s) => ({ ...s, currentDelivery: null }));
+    const taskId = slot.state.currentDelivery.taskId;
+    this.mutateSlot(slot.id, (s) => ({
+      ...s,
+      currentDelivery: null,
+      deliveryHistory: s.deliveryHistory.map((d) =>
+        d.taskId === taskId ? { ...d, status: 'accepted' as const } : d,
+      ),
+    }));
   }
 
   /** Push revision feedback back into the meeting. Tries the worker's
@@ -1754,7 +1763,16 @@ class MeetingStore {
   }
 
   private markDeliveryRevised(slot: SlotInternal, workerId: AgentSource, feedback: string) {
-    this.mutateSlot(slot.id, (s) => ({ ...s, currentDelivery: null }));
+    const taskId = slot.state.currentDelivery?.taskId;
+    this.mutateSlot(slot.id, (s) => ({
+      ...s,
+      currentDelivery: null,
+      deliveryHistory: taskId
+        ? s.deliveryHistory.map((d) =>
+            d.taskId === taskId ? { ...d, status: 'revised' as const } : d,
+          )
+        : s.deliveryHistory,
+    }));
     this.updateWorker(slot, workerId, (w) => ({
       ...w,
       activity: appendCapped(

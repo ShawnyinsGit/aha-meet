@@ -306,14 +306,6 @@ export class WorkerScheduler {
       });
       return;
     }
-    // Inform the talker so the user hears a clean completion line.
-    const talker = this.opts.getTalker();
-    if (talker) {
-      const condensed = summary.length > TASK_DONE_LINE_MAX
-        ? `${summary.slice(0, TASK_DONE_LINE_MAX - 2)}…`
-        : summary;
-      talker.sendUserText(`(worker ${workerId} done) ${condensed}`, 'low');
-    }
     // Snapshot the deliverables BEFORE disposeWorker resets the handle, so
     // the renderer's "delivery acceptance" panel sees the same file list the
     // user expects from the just-completed turn. Snapshot to an array; the
@@ -321,6 +313,31 @@ export class WorkerScheduler {
     // task if this handle is reassigned.
     const deliveredPaths = Array.from(handle.deliveries);
     handle.deliveries.clear();
+
+    // Inform the talker with a walkthrough prompt so it explains the delivery
+    // conversationally rather than just announcing completion.
+    const talker = this.opts.getTalker();
+    if (talker) {
+      const condensed = summary.length > TASK_DONE_LINE_MAX
+        ? `${summary.slice(0, TASK_DONE_LINE_MAX - 2)}…`
+        : summary;
+      const fileCount = deliveredPaths.length;
+      const fileList = fileCount > 0
+        ? deliveredPaths.slice(0, 10).map((p) => p.split('/').pop() ?? p).join(', ')
+        : '(no file edits)';
+      const walkthrough = [
+        `(worker ${workerId} delivered)`,
+        `任务「${handle.title}」完成了，改了 ${fileCount} 个文件。`,
+        `请向用户讲解这次交付的内容，逐步说明做了什么、为什么这么做。`,
+        `用对话方式讲解，每次说一两句就停下来等用户反应。`,
+        `如果用户说OK/通过/没问题就不用继续解释了。`,
+        ``,
+        `交付摘要: ${condensed}`,
+        `文件: ${fileList}`,
+      ].join('\n');
+      talker.sendUserText(walkthrough, 'low');
+    }
+
     this.opts.emit({
       source: 'talker',
       event: { kind: 'worker-ended', workerId, status: 'done', summary },
