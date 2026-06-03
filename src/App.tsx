@@ -108,6 +108,18 @@ export function App() {
   const speakingRef = useRef(false);
   const sendWithModeRef = useRef<(text: string) => void>(sendText);
 
+  useEffect(() => {
+    if (!aiSpeaking) return;
+    const id = window.setInterval(() => {
+      if (speakingRef.current && !isSpeechActive()) {
+        console.warn('[voice] safety-net: aiSpeaking stuck true but controller idle — clearing');
+        speakingRef.current = false;
+        setAiSpeaking(false);
+      }
+    }, 8_000);
+    return () => window.clearInterval(id);
+  }, [aiSpeaking]);
+
   // Cold start: pull the persisted tab layout + recent cwds from main and
   // hydrate the store. Placeholders for previously-open tabs land in the tab
   // strip; clicking one resumes its Orchestrator. Cheap (just metadata).

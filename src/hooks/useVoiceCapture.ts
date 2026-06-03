@@ -2,29 +2,22 @@ import { useEffect, useRef, useState } from 'react';
 import { MicVAD } from '@ricky0123/vad-web';
 import { cosineSimilarity, embedSpeaker } from '../lib/speaker-embedding';
 
-// Below this many samples (~0.5s @ 16 kHz) we skip the voice-lock gate
+// Below this many samples (~0.3s @ 16 kHz) we skip the voice-lock gate
 // entirely — embeddings on very short clips are unreliable and we'd rather
 // pass through brief responses ("ok", "yes") than reject them.
-const MIN_SAMPLES_FOR_GATE = 8000;
-// Cosine-similarity threshold the segment must meet against the enrolled
-// embedding to be accepted. Tuned empirically; expose to settings later if
-// real-world false-reject rate is too high.
+const MIN_SAMPLES_FOR_GATE = 4800;
 const VOICE_LOCK_THRESHOLD = 0.5;
 // Barge-in-during-playback gate: a speech segment that starts while TTS is
-// playing must reach this many samples (~300ms @ 16 kHz) before we treat it
-// as a real user interruption. Below this we assume it's AEC residue, a
-// throat clear, or a cough and drop it silently. 300ms is empirically long
-// enough to filter common false positives without making real interruptions
-// feel laggy — and short enough that brief replies ("OK", "嗯", "好的") that
-// land right at the tail of TTS don't get swallowed.
-const MIN_SAMPLES_FOR_BARGE_IN = 4800;
+// playing must reach this many samples (~200ms @ 16 kHz) before we treat it
+// as a real user interruption. Below this we assume it's AEC residue or a
+// cough and drop it silently.
+const MIN_SAMPLES_FOR_BARGE_IN = 3200;
 // Average speech-probability needed across a suppressed segment before we
-// accept it as a barge-in. AEC residue and room noise tend to sit around
-// 0.45-0.55 (just at VAD's positiveSpeechThreshold); real speech runs
-// higher, but the segment also includes ~384ms of low-prob redemption tail
-// which drags the average down. 0.55 is a deliberate middle ground that
-// accepts real speech and rejects pure-echo blips.
-const MIN_AVG_PROB_FOR_BARGE_IN = 0.55;
+// accept it as a barge-in. The segment includes a ~240ms low-prob redemption
+// tail which drags the average down significantly for short utterances.
+// 0.45 accepts real speech while still rejecting pure-echo blips (which sit
+// around 0.3-0.4 after AEC).
+const MIN_AVG_PROB_FOR_BARGE_IN = 0.45;
 
 interface UseVoiceCaptureOptions {
   enabled: boolean;
@@ -231,23 +224,10 @@ export function useVoiceCapture({
             micStreamRef.current = s;
             return s;
           },
-          // Sensitivity: keep defaults moderate; we'd rather miss a few
-          // misfires than truncate words. The positive threshold stays at
-          // 0.55 to avoid being re-triggered by TTS echo (barge-in false
-          // positives regress hard below ~0.5). The negative threshold was
-          // tightened from 0.4 → 0.35 so end-of-speech is declared more
-          // decisively; combined with the shorter redemptionMs below this is
-          // the bulk of the ASR end-to-end latency cut.
-          positiveSpeechThreshold: 0.55,
+          positiveSpeechThreshold: 0.5,
           negativeSpeechThreshold: 0.35,
-          // Grace period before declaring speech-end ("did they pause or stop?").
-          // 384 → 240 ms: 240 ms still covers natural mid-utterance pauses
-          // (typical Mandarin gap is 200–250 ms) but stops burning the extra
-          // 144 ms of wallclock on every segment.
-          redemptionMs: 240,
-          // Drop sub-128ms segments as VAD misfires (clicks, breaths).
-          minSpeechMs: 128,
-          // Prepend ~256ms of audio so word onsets aren't clipped.
+          redemptionMs: 200,
+          minSpeechMs: 100,
           preSpeechPadMs: 256,
           onSpeechStart: () => {
             // Enrollment is a user-driven capture — never let TTS suppression
