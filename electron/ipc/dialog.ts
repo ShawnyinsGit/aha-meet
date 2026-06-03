@@ -22,13 +22,12 @@ export function registerDialogIpc(ctx: IpcContext): void {
     if (!winConfirm) return null;
     const confirm = await dialog.showMessageBox(winConfirm, {
       type: 'warning',
-      title: 'Confirm meeting workspace',
-      message: 'Workers will get filesystem and shell access',
+      title: '确认工作目录',
+      message: 'Worker 将获得文件和命令行访问权限',
       detail:
-        `AhaMeet workers will be able to read, write, and run shell commands in:\n\n${picked}\n\n` +
-        'and all subdirectories. Individual tool calls still require your approval unless ' +
-        'you enable auto-approve in settings.',
-      buttons: ['Cancel', 'Confirm'],
+        `AhaMeet 的 Worker 将可以在以下目录中读取、写入文件和执行命令：\n\n${picked}\n\n` +
+        '包括所有子目录。除非你在设置中启用自动批准，否则每次工具调用仍需你确认。',
+      buttons: ['取消', '确认'],
       defaultId: 0,
       cancelId: 0,
       noLink: true,

@@ -261,10 +261,10 @@ async function nativeConfirmDestructive(
   const detail = summarizeToolInput(toolName, input);
   const res = await dialog.showMessageBox(win, {
     type: 'warning',
-    title: 'Auto-approve: confirm destructive action',
-    message: `Worker wants to run: ${toolName}`,
+    title: '自动批准：确认高风险操作',
+    message: `Worker 请求执行：${toolName}`,
     detail,
-    buttons: ['Deny', 'Allow'],
+    buttons: ['拒绝', '允许'],
     defaultId: 0,
     cancelId: 0,
     noLink: true,
