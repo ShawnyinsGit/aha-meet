@@ -16,17 +16,21 @@ import {
   loadTranscript,
 } from '../transcript-store.js';
 import { errorMessage } from '../format-error.js';
+import type { IpcContext } from './context.js';
 
 function isNonEmptyString(v: unknown): v is string {
   return typeof v === 'string' && v.length > 0;
 }
 
-export function registerTranscriptsIpc(): void {
+export function registerTranscriptsIpc(ctx: IpcContext): void {
   ipcMain.handle('transcripts:load', async (_e, payload: unknown) => {
     try {
       const cwd = (payload as { cwd?: unknown } | undefined)?.cwd;
       if (!isNonEmptyString(cwd)) {
         return { ok: false as const, error: 'invalid cwd' };
+      }
+      if (!ctx.registry.findByCwd(cwd)) {
+        return { ok: false as const, error: 'cwd has no active session' };
       }
       const entries = await loadTranscript(cwd);
       return { ok: true as const, entries };
@@ -42,12 +46,14 @@ export function registerTranscriptsIpc(): void {
       console.warn('[transcripts] append: invalid cwd, dropping');
       return;
     }
+    if (!ctx.registry.findByCwd(cwd)) {
+      console.warn('[transcripts] append: cwd has no active session, dropping');
+      return;
+    }
     if (!p || p.entry === undefined || p.entry === null) {
       console.warn('[transcripts] append: missing entry, dropping');
       return;
     }
-    // Fire-and-forget: the underlying transcript-store serializes writes per
-    // cwd, so we don't need to await here. Log any failures.
     appendTranscript(cwd, p.entry).catch((err: unknown) => {
       console.error('[transcripts] append failed:', errorMessage(err));
     });
@@ -58,6 +64,9 @@ export function registerTranscriptsIpc(): void {
       const cwd = (payload as { cwd?: unknown } | undefined)?.cwd;
       if (!isNonEmptyString(cwd)) {
         return { ok: false as const, error: 'invalid cwd' };
+      }
+      if (!ctx.registry.findByCwd(cwd)) {
+        return { ok: false as const, error: 'cwd has no active session' };
       }
       await clearTranscript(cwd);
       return { ok: true as const };

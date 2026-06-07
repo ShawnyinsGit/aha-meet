@@ -280,13 +280,17 @@ export class ClaudeSession {
 
   async interrupt() {
     if (this.q) {
-      try { await this.q.interrupt(); } catch { /* ignore */ }
+      try { await this.q.interrupt(); } catch (err) {
+        console.warn('[claude-session] interrupt failed:', err);
+      }
     }
   }
 
   async setPermissionMode(mode: 'default' | 'acceptEdits' | 'bypassPermissions' | 'plan') {
     if (this.q) {
-      try { await this.q.setPermissionMode(mode); } catch { /* ignore */ }
+      try { await this.q.setPermissionMode(mode); } catch (err) {
+        console.warn('[claude-session] setPermissionMode failed:', err);
+      }
     }
   }
 

@@ -1,5 +1,5 @@
 import { ipcMain, shell } from 'electron';
-import { existsSync } from 'node:fs';
+import { realpath } from 'node:fs/promises';
 import { isInsideDecisionsRoot } from '../decisions.js';
 import { errorMessage } from '../format-error.js';
 
@@ -11,11 +11,12 @@ export function registerDecisionIpc(): void {
     if (!isInsideDecisionsRoot(decisionPath)) {
       return { ok: false, error: 'path is outside decisions root' };
     }
-    if (!existsSync(decisionPath)) {
-      return { ok: false, error: 'file not found' };
-    }
     try {
-      const err = await shell.openPath(decisionPath);
+      const resolved = await realpath(decisionPath);
+      if (!isInsideDecisionsRoot(resolved)) {
+        return { ok: false, error: 'symlink target is outside decisions root' };
+      }
+      const err = await shell.openPath(resolved);
       if (err) return { ok: false, error: err };
       return { ok: true };
     } catch (e: unknown) {

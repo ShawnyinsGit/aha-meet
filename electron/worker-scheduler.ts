@@ -37,6 +37,7 @@ import {
 } from './orchestrator-helpers.js';
 import type { SteerResult } from './meeting-mcp.js';
 import type { AutoApproveScope } from './auto-approve-policy.js';
+import { snapshotDeliveryFilesSync } from './delivery-snapshot.js';
 import type {
   MeetingPlan,
   MeetingPlanNode,
@@ -268,18 +269,15 @@ export class WorkerScheduler {
     void (async () => {
       try {
         await handle.session?.interrupt();
+        if (!handle.session || handle.status !== 'running') {
+          handle.queuedAddenda.push(addendum);
+          this.harvestUnresolvedAddenda(handle);
+          return;
+        }
+        handle.session.sendUserText(`(plan update) ${addendum}`);
       } catch (err) {
-        console.error(`[scheduler] worker.interrupt() failed steering ${workerId}:`, err);
+        console.error(`[scheduler] steerWorker failed for ${workerId}:`, err);
       }
-      // M1: the worker may have task_done'd during the await, nulling the
-      // session via disposeWorker. A bare optional-chain send would drop the
-      // steer silently; re-route it back to Talker through harvest instead.
-      if (!handle.session || handle.status !== 'running') {
-        handle.queuedAddenda.push(addendum);
-        this.harvestUnresolvedAddenda(handle);
-        return;
-      }
-      handle.session.sendUserText(`(plan update) ${addendum}`);
     })();
     handle.live.busy = true;
     handle.live.lastUpdateTs = Date.now();
@@ -313,6 +311,8 @@ export class WorkerScheduler {
     // task if this handle is reassigned.
     const deliveredPaths = Array.from(handle.deliveries);
     handle.deliveries.clear();
+
+    const snapshotMap = snapshotDeliveryFilesSync(this.opts.cwd, handle.title, deliveredPaths);
 
     // Inform the talker with a walkthrough prompt so it explains the delivery
     // conversationally rather than just announcing completion.
@@ -351,7 +351,10 @@ export class WorkerScheduler {
           title: handle.title,
           summary,
           taskId: handle.currentTaskId,
-          files: deliveredPaths.map((p) => ({ path: p })),
+          files: deliveredPaths.map((p) => ({
+            path: p,
+            snapshotRelativePath: snapshotMap.get(p),
+          })),
         },
       });
     }
@@ -549,11 +552,17 @@ export class WorkerScheduler {
         }
       }
     } catch (err) {
-      // B2: stop event-handler exceptions from leaving the handle stranded in
-      // 'running'. We deliberately don't dispose+cascade here — the SDK
-      // 'ended' event will arrive (or end() will run) and drive cleanup
-      // through the normal path. Logging is enough to surface the bug.
       console.error(`[scheduler] onWorkerEvent body threw for ${workerId}:`, err);
+      if (e.kind === 'ended' && handle.status === 'running') {
+        try {
+          this.harvestUnresolvedAddenda(handle);
+          this.disposeWorker(handle, 'failed');
+          this.emitPlanUpdate();
+          this.cascadeFailure(workerId);
+        } catch (cleanupErr) {
+          console.error(`[scheduler] cleanup after ended-handler throw also failed for ${workerId}:`, cleanupErr);
+        }
+      }
     }
   }
 
@@ -840,18 +849,15 @@ export class WorkerScheduler {
     void (async () => {
       try {
         await handle.session?.interrupt();
+        if (!handle.session || handle.status !== 'running') {
+          handle.queuedAddenda.push(...batch);
+          this.harvestUnresolvedAddenda(handle);
+          return;
+        }
+        handle.session.sendUserText(`(plan update) ${batch.join('\n')}`);
       } catch (err) {
-        console.error(`[scheduler] worker.interrupt() failed flushing addenda for ${handle.id}:`, err);
+        console.error(`[scheduler] flushQueuedAddenda failed for ${handle.id}:`, err);
       }
-      // M1: same race as steerWorker — if the worker disposed during the
-      // await, return the whole batch to Talker via harvest rather than
-      // letting the optional-chain send no-op it away.
-      if (!handle.session || handle.status !== 'running') {
-        handle.queuedAddenda.push(...batch);
-        this.harvestUnresolvedAddenda(handle);
-        return;
-      }
-      handle.session.sendUserText(`(plan update) ${batch.join('\n')}`);
     })();
   }
 

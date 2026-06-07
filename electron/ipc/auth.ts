@@ -89,8 +89,16 @@ export function registerAuthIpc(): void {
       return { ok: false, error: 'url must be a string' };
     }
     const trimmed = url.trim();
-    // Base URL only takes effect in apikey mode; setting it alone must not flip
-    // the auth mode. Empty string clears the override.
+    if (trimmed.length > 0) {
+      try {
+        const parsed = new URL(trimmed);
+        if (parsed.protocol !== 'https:') {
+          return { ok: false, error: 'base URL must use https://' };
+        }
+      } catch {
+        return { ok: false, error: 'invalid URL format' };
+      }
+    }
     await updateSettings({ anthropicBaseUrl: trimmed.length === 0 ? undefined : trimmed });
     return { ok: true };
   });

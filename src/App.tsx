@@ -70,6 +70,7 @@ export function App() {
   const [multiAgent, setMultiAgent] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [aiSpeaking, setAiSpeaking] = useState(false);
+  const [viewingFile, setViewingFile] = useState<{ relativePath: string } | null>(null);
   const elapsed = useElapsedSeconds(activeOpenedAt);
 
   // Voice lock state. `voicePrint` is the full persisted struct (for UI:
@@ -207,10 +208,10 @@ export function App() {
       setGuideOpen(false);
       return;
     }
-    if (!guidanceDismissed && chineseAny) {
+    if (!guidanceDismissed && !guidanceClosedThisSession && chineseAny) {
       setGuideOpen(true);
     }
-  }, [isMac, voicesReady, voices, guidanceDismissed]);
+  }, [isMac, voicesReady, voices, guidanceDismissed, guidanceClosedThisSession]);
 
   const handleVoiceChange = useCallback((name: string | null) => {
     setSelectedVoiceNameState(name);
@@ -717,6 +718,10 @@ ${trimmed}`
             sessionId={activeTab?.id ?? null}
             onAcceptDelivery={workers.acceptDelivery}
             onReviseDelivery={workers.reviseDelivery}
+            aiSpeaking={aiSpeaking}
+            onDeliveryFileSelect={(path) => setViewingFile({ relativePath: path })}
+            viewingFile={viewingFile}
+            onCloseFileView={() => setViewingFile(null)}
             defaultContent={
               <ParticipantPanel
                 workers={workers.workerList}
@@ -754,6 +759,9 @@ ${trimmed}`
           onSubscribeDroppedFiles={onDroppedFiles}
           multiAgent={multiAgent}
           disabled={!state.running}
+          sessionId={activeTab?.id ?? null}
+          onViewFile={(path) => setViewingFile({ relativePath: path })}
+          viewingFilePath={viewingFile?.relativePath ?? null}
         />
       </main>
 

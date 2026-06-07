@@ -62,6 +62,22 @@ export function registerSessionIpc(ctx: IpcContext): void {
       if (!isPermissionMode(payload?.mode)) {
         return { ok: false, error: `Invalid permission mode: ${String(payload?.mode)}` };
       }
+      if (payload.mode === 'bypassPermissions') {
+        const win = ctx.liveWindow();
+        if (!win) return { ok: false, error: 'No window' };
+        const result = await dialog.showMessageBox(win, {
+          type: 'warning',
+          title: '启用跳过权限模式？',
+          message: 'SDK 的所有工具调用将跳过权限检查，直接执行。',
+          detail: '这与"全自动批准"效果类似——写入、命令执行等都不会再询问。确定要启用吗？',
+          buttons: ['取消', '启用'],
+          defaultId: 0,
+          cancelId: 0,
+        });
+        if (result.response !== 1) {
+          return { ok: false, error: 'cancelled' };
+        }
+      }
       await slot.orchestrator.setPermissionMode(payload.mode);
       return { ok: true };
     },

@@ -1,4 +1,4 @@
-import { useCallback, useSyncExternalStore } from 'react';
+import { useCallback, useMemo, useSyncExternalStore } from 'react';
 import { meetingStore, type DeliverySnapshot, type WorkerState } from '../lib/meeting-store';
 import type { SpeakHandle } from '../lib/speech-session';
 import type { MeetingPlan, StagedAttachment } from '../types';
@@ -36,6 +36,8 @@ export function useWorkers(): UseWorkersResult {
   // active-slot state shape.
   const cwd = useSyncExternalStore(meetingStore.subscribeTabs, meetingStore.getActiveCwd);
 
+  const workerList = useMemo(() => Array.from(state.workers.values()), [state.workers]);
+
   const setSpeakCallback = useCallback((cb: SpeakHandle | null) => {
     meetingStore.setSpeakCallback(cb);
   }, []);
@@ -66,7 +68,7 @@ export function useWorkers(): UseWorkersResult {
 
   return {
     workers: state.workers,
-    workerList: Array.from(state.workers.values()),
+    workerList,
     plan: state.plan,
     running: state.running,
     cwd,

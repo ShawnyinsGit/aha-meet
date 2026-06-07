@@ -38,6 +38,7 @@ export interface MeetingPlan {
  *  fetches contents via `documents.read`. */
 export interface WorkerDeliveryFile {
   path: string;
+  snapshotRelativePath?: string;
 }
 
 /** Every event from main is tagged with the sessionId of the slot that
@@ -275,8 +276,29 @@ export interface DocumentReadErr {
 
 export type DocumentReadResult = DocumentReadOk | DocumentReadErr;
 
+export interface DirEntry {
+  name: string;
+  isDir: boolean;
+  size: number;
+  ext: string;
+}
+
+export interface DirListOk {
+  ok: true;
+  entries: DirEntry[];
+}
+
+export interface DirListErr {
+  ok: false;
+  error: string;
+  code?: string;
+}
+
+export type DirListResult = DirListOk | DirListErr;
+
 export interface DocumentsApi {
   read: (sessionId: string | null, path: string) => Promise<DocumentReadResult>;
+  list: (sessionId: string | null, dirPath: string) => Promise<DirListResult>;
 }
 
 declare global {

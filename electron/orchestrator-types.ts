@@ -38,6 +38,7 @@ export interface MeetingPlan {
  *  classifies the kind there so this event stays small. */
 export interface WorkerDeliveryFile {
   path: string;
+  snapshotRelativePath?: string;
 }
 
 // Orchestrator-only events (alongside session events emitted from a worker/talker).

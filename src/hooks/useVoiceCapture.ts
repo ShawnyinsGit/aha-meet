@@ -226,7 +226,7 @@ export function useVoiceCapture({
           },
           positiveSpeechThreshold: 0.5,
           negativeSpeechThreshold: 0.35,
-          redemptionMs: 200,
+          redemptionMs: 1000,
           minSpeechMs: 100,
           preSpeechPadMs: 256,
           onSpeechStart: () => {

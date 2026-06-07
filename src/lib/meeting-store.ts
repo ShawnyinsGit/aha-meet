@@ -1648,7 +1648,12 @@ class MeetingStore {
   async resolvePermission(id: string, decision: 'allow' | 'deny') {
     const sessionId = this.effectiveSessionId();
     if (!sessionId) return;
-    await window.vibeMeet.resolvePermission(sessionId, id, decision);
+    try {
+      await window.vibeMeet.resolvePermission(sessionId, id, decision);
+    } catch (err) {
+      console.error('[meeting-store] resolvePermission IPC failed:', err);
+      return;
+    }
     const slot = this.slots.get(sessionId);
     if (!slot) return;
     this.mutateSlot(slot.id, (s) => {

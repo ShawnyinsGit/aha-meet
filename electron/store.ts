@@ -16,7 +16,7 @@
 // hits disk.
 
 import { app, safeStorage } from 'electron';
-import { existsSync, readFileSync } from 'node:fs';
+import { copyFileSync, existsSync, readFileSync } from 'node:fs';
 import { promises as fsp } from 'node:fs';
 import { dirname, join } from 'node:path';
 
@@ -181,8 +181,11 @@ function load(): Settings {
     const parsed = JSON.parse(raw);
     cached = typeof parsed === 'object' && parsed !== null ? (parsed as Settings) : {};
   } catch (err) {
-    // Corrupt file — log and start fresh rather than crash the app.
     console.error('[store] failed to parse settings.json, starting fresh:', err);
+    try {
+      copyFileSync(p, `${p}.corrupt-backup`);
+      console.warn(`[store] corrupt settings.json backed up to ${p}.corrupt-backup`);
+    } catch { /* best-effort */ }
     cached = {};
   }
   // One-shot migration: pre-multi-tab versions only kept lastCwd. Promote it

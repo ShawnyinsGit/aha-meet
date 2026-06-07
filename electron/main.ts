@@ -105,7 +105,7 @@ function createWindow() {
         `font-src 'self' data: ${devOrigin}`,
         `connect-src 'self' ${devOrigin} ${devWsOrigin}`,
         `worker-src 'self' blob:`,
-        `frame-src 'none'`,
+        `frame-src blob:`,
         `object-src 'none'`,
         `base-uri 'self'`,
       ].join('; ')
@@ -118,7 +118,7 @@ function createWindow() {
         `font-src 'self' data:`,
         `connect-src 'self'`,
         `worker-src 'self' blob:`,
-        `frame-src 'none'`,
+        `frame-src blob:`,
         `object-src 'none'`,
         `base-uri 'self'`,
       ].join('; ');
@@ -302,7 +302,7 @@ registerDecisionIpc();
 registerDialogIpc(ipcCtx);
 registerAttachmentsIpc(ipcCtx);
 registerDocumentsIpc(ipcCtx);
-registerTranscriptsIpc();
+registerTranscriptsIpc(ipcCtx);
 
 // ---- App lifecycle ----------------------------------------------------------
 

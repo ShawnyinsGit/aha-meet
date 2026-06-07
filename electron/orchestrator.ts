@@ -65,7 +65,7 @@ import type {
   WorkerSpecialtyKind,
   WorkerStatusKind,
 } from './orchestrator-types.js';
-import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk';
+import type { SDKMessage, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
 
 export type {
   OrchestratorEvent,
@@ -251,8 +251,7 @@ export class Orchestrator implements OrchestratorBridge {
     this.talker?.sendUserText(text, 'high');
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  sendUserImage(content: any[]) {
+  sendUserImage(content: SDKUserMessage['message']['content']) {
     this.talker?.sendUserContent(content, 'high');
   }
 
@@ -527,12 +526,8 @@ export class Orchestrator implements OrchestratorBridge {
   }
 
   private appendTalkerTurn(turn: TalkerTurn) {
-    this.talkerTranscript.push(turn);
-    if (this.talkerTranscript.length > TALKER_TRANSCRIPT_MAX_ENTRIES) {
-      this.talkerTranscript.splice(
-        0,
-        this.talkerTranscript.length - TALKER_TRANSCRIPT_MAX_ENTRIES,
-      );
-    }
+    this.talkerTranscript = [...this.talkerTranscript, turn].slice(
+      -TALKER_TRANSCRIPT_MAX_ENTRIES,
+    );
   }
 }

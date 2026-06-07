@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Send, Paperclip, X, FileText, FileType, Image as ImageIcon, FileWarning } from 'lucide-react';
+import { Send, Paperclip, X, FileText, FileType, Image as ImageIcon, FileWarning, FolderOpen } from 'lucide-react';
 import type {
   ActivityEntry,
   AttachmentKind,
@@ -8,6 +8,7 @@ import type {
   TranscriptEntry,
 } from '../types';
 import { PermissionCard } from './PermissionCard';
+import { FileTree } from './FileTree';
 
 interface SideDrawerProps {
   open: boolean;
@@ -23,6 +24,9 @@ interface SideDrawerProps {
   onSubscribeDroppedFiles?: (cb: (files: File[]) => void) => () => void;
   multiAgent?: boolean;
   disabled: boolean;
+  sessionId?: string | null;
+  onViewFile?: (relativePath: string) => void;
+  viewingFilePath?: string | null;
 }
 
 const TIME_TICK_MS = 30_000;
@@ -45,7 +49,7 @@ const ACCEPT_ATTR = [
   'image/png', 'image/jpeg', 'image/webp',
 ].join(',');
 
-type Tab = 'chat' | 'activity';
+type Tab = 'chat' | 'activity' | 'files';
 
 const dotColor: Record<ActivityEntry['kind'], string> = {
   'tool-call': '#7cc6ff',
@@ -138,6 +142,9 @@ export function SideDrawer({
   onSubscribeDroppedFiles,
   multiAgent = false,
   disabled,
+  sessionId,
+  onViewFile,
+  viewingFilePath,
 }: SideDrawerProps) {
   const [tab, setTab] = useState<Tab>('chat');
   const [text, setText] = useState('');
@@ -149,6 +156,10 @@ export function SideDrawer({
   const endRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+
+  useEffect(() => {
+    if (viewingFilePath) setTab('files');
+  }, [viewingFilePath]);
 
   useEffect(() => {
     if (tab !== 'chat') return;
@@ -286,6 +297,10 @@ export function SideDrawer({
         <button className={`drawer-tab ${tab === 'activity' ? 'active' : ''}`} onClick={() => setTab('activity')}>
           Activity
           {activity.length > 0 && <span className="drawer-badge">{activity.length}</span>}
+        </button>
+        <button className={`drawer-tab ${tab === 'files' ? 'active' : ''}`} onClick={() => setTab('files')}>
+          <FolderOpen size={14} aria-hidden="true" style={{ marginRight: 4, verticalAlign: -2 }} />
+          Files
         </button>
       </div>
 
@@ -482,6 +497,16 @@ export function SideDrawer({
               </div>
             );
           })}
+        </div>
+      )}
+
+      {tab === 'files' && (
+        <div className="drawer-files">
+          <FileTree
+            sessionId={sessionId ?? null}
+            onViewFile={(path) => onViewFile?.(path)}
+            viewingPath={viewingFilePath ?? null}
+          />
         </div>
       )}
     </aside>

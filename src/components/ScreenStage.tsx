@@ -1,7 +1,8 @@
 import { ReactNode, RefObject } from 'react';
 import type { ScreenShareState } from '../hooks/useScreenShare';
 import type { DeliverySnapshot } from '../lib/meeting-store';
-import { DocumentStage } from './DocumentStage';
+import { DeliveryViewer } from './DeliveryViewer';
+import { FileViewer } from './FileViewer';
 
 interface ScreenStageProps {
   share: ScreenShareState;
@@ -9,8 +10,6 @@ interface ScreenStageProps {
   onPickSource: () => void;
   onStopShare: () => void;
   defaultContent: ReactNode;
-  /** When non-null and the user isn't currently screen-sharing, the stage
-   *  swaps to the delivery acceptance panel instead of the default content. */
   delivery: DeliverySnapshot | null;
   sessionId: string | null;
   onAcceptDelivery: () => void;
@@ -18,6 +17,10 @@ interface ScreenStageProps {
     | { ok: true; route: 'worker' | 'talker'; queued?: boolean }
     | { ok: false; error: string }
   >;
+  aiSpeaking?: boolean;
+  onDeliveryFileSelect?: (path: string) => void;
+  viewingFile?: { relativePath: string } | null;
+  onCloseFileView?: () => void;
 }
 
 export function ScreenStage({
@@ -30,25 +33,47 @@ export function ScreenStage({
   sessionId,
   onAcceptDelivery,
   onReviseDelivery,
+  aiSpeaking = false,
+  onDeliveryFileSelect,
+  viewingFile,
+  onCloseFileView,
 }: ScreenStageProps) {
-  // Screen share wins (live video is more urgent than a static deliverable).
-  // Otherwise prefer a staged delivery over the default participant grid.
   const showDelivery = !share.active && delivery !== null;
+  const showFile = !share.active && !showDelivery && viewingFile !== null && viewingFile !== undefined;
+
+  const stageClass = share.active
+    ? 'stage-sharing'
+    : showDelivery
+      ? 'stage-delivery'
+      : showFile
+        ? 'stage-file'
+        : 'stage-default';
+
   return (
-    <div
-      className={`stage ${share.active ? 'stage-sharing' : showDelivery ? 'stage-delivery' : 'stage-default'}`}
-    >
-      {!share.active && !showDelivery && (
+    <div className={`stage ${stageClass}`}>
+      {!share.active && !showDelivery && !showFile && (
         <div className="stage-default-content">{defaultContent}</div>
       )}
 
       {showDelivery && delivery && (
         <div className="stage-delivery-content">
-          <DocumentStage
+          <DeliveryViewer
             delivery={delivery}
             sessionId={sessionId}
+            aiSpeaking={aiSpeaking}
             onAccept={onAcceptDelivery}
             onRevise={onReviseDelivery}
+            onFileSelect={onDeliveryFileSelect}
+          />
+        </div>
+      )}
+
+      {showFile && viewingFile && (
+        <div className="stage-file-content">
+          <FileViewer
+            relativePath={viewingFile.relativePath}
+            sessionId={sessionId}
+            onClose={() => onCloseFileView?.()}
           />
         </div>
       )}

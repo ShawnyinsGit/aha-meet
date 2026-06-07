@@ -25,6 +25,12 @@ const MAX_READ_BYTES = 8 * 1024 * 1024;
 // open the file in their editor.
 const MAX_TEXT_BYTES = 512 * 1024;
 
+const IGNORED_NAMES = new Set([
+  'node_modules', '.git', '.DS_Store', '__pycache__', '.venv', 'venv',
+  '.next', '.nuxt', 'dist', '.cache', '.parcel-cache', '.turbo',
+  'coverage', '.nyc_output', '.idea', '.vscode', 'Thumbs.db',
+]);
+
 const VIDEO_EXTENSIONS = new Set(['mp4', 'webm', 'mov', 'm4v']);
 const VIDEO_MIME_BY_EXT: Record<string, 'video/mp4' | 'video/webm' | 'video/quicktime'> = {
   mp4: 'video/mp4',
@@ -34,6 +40,24 @@ const VIDEO_MIME_BY_EXT: Record<string, 'video/mp4' | 'video/webm' | 'video/quic
 };
 
 export type DeliveryFileKind = AttachmentKind | 'video' | 'binary' | 'missing';
+
+export interface DirEntry {
+  name: string;
+  isDir: boolean;
+  size: number;
+  ext: string;
+}
+
+export interface DirListResult {
+  ok: true;
+  entries: DirEntry[];
+}
+
+export interface DirListError {
+  ok: false;
+  error: string;
+  code?: 'not-in-cwd' | 'no-session' | 'not-dir' | 'read-failed';
+}
 
 export interface DocumentReadResult {
   ok: true;
@@ -110,12 +134,18 @@ export function registerDocumentsIpc(ctx: IpcContext): void {
     if (!slot) return { ok: false, error: 'No active session', code: 'no-session' };
 
     const rawPath = typeof payload?.path === 'string' ? payload.path : '';
-    if (!rawPath || !isAbsolute(rawPath)) {
-      return { ok: false, error: 'Path must be absolute', code: 'invalid-path' };
+    if (!rawPath) {
+      return { ok: false, error: 'Path is required', code: 'invalid-path' };
     }
 
     const cwd = slot.cwd;
-    if (!cwd || !isUnderCwd(rawPath, cwd)) {
+    if (!cwd) {
+      return { ok: false, error: 'No workspace directory', code: 'no-session' };
+    }
+    const absPath = isAbsolute(rawPath) ? rawPath : pathResolve(cwd, rawPath);
+    // Redirect the rest of the handler to the resolved absolute path.
+    const resolvedRawPath = absPath;
+    if (!isUnderCwd(resolvedRawPath, cwd)) {
       return { ok: false, error: 'Path is not inside the session workspace', code: 'not-in-cwd' };
     }
 
@@ -125,9 +155,9 @@ export function registerDocumentsIpc(ctx: IpcContext): void {
     // containment before any stat/read follows the link off the workspace.
     let realPath: string;
     try {
-      realPath = await fs.realpath(rawPath);
+      realPath = await fs.realpath(resolvedRawPath);
     } catch {
-      return { ok: false, error: `File not found: ${basename(rawPath)}`, code: 'missing' };
+      return { ok: false, error: `File not found: ${basename(resolvedRawPath)}`, code: 'missing' };
     }
     let realCwd: string;
     try {
@@ -141,9 +171,9 @@ export function registerDocumentsIpc(ctx: IpcContext): void {
 
     let stat: Awaited<ReturnType<typeof fs.stat>>;
     try {
-      stat = await fs.stat(rawPath);
+      stat = await fs.stat(resolvedRawPath);
     } catch (err: unknown) {
-      return { ok: false, error: `File not found: ${basename(rawPath)}`, code: 'missing' };
+      return { ok: false, error: `File not found: ${basename(resolvedRawPath)}`, code: 'missing' };
     }
 
     if (!stat.isFile()) {
@@ -151,15 +181,13 @@ export function registerDocumentsIpc(ctx: IpcContext): void {
     }
 
     const sizeBytes = stat.size;
-    const name = basename(rawPath);
+    const name = basename(resolvedRawPath);
     const kind = detectKind(name);
 
-    // Oversized → return a metadata-only "binary" entry so the renderer can
-    // still show the file in the list with size + an "open in finder" hint.
     if (sizeBytes > MAX_READ_BYTES) {
       return {
         ok: true,
-        path: rawPath,
+        path: resolvedRawPath,
         name,
         sizeBytes,
         kind: 'binary',
@@ -168,12 +196,12 @@ export function registerDocumentsIpc(ctx: IpcContext): void {
 
     try {
       if (kind === 'text') {
-        const buffer = await fs.readFile(rawPath);
+        const buffer = await fs.readFile(resolvedRawPath);
         const truncated = buffer.length > MAX_TEXT_BYTES;
         const slice = truncated ? buffer.subarray(0, MAX_TEXT_BYTES) : buffer;
         return {
           ok: true,
-          path: rawPath,
+          path: resolvedRawPath,
           name,
           sizeBytes,
           kind: 'text',
@@ -183,34 +211,32 @@ export function registerDocumentsIpc(ctx: IpcContext): void {
       }
 
       if (kind === 'image') {
-        const buffer = await fs.readFile(rawPath);
+        const buffer = await fs.readFile(resolvedRawPath);
         const ext = extensionOf(name);
         const mediaType =
           ext === 'png' ? 'image/png'
             : ext === 'webp' ? 'image/webp'
-              : 'image/jpeg';
+              : ext === 'gif' ? 'image/gif'
+                : ext === 'svg' ? 'image/svg+xml'
+                  : 'image/jpeg';
         return {
           ok: true,
-          path: rawPath,
+          path: resolvedRawPath,
           name,
           sizeBytes,
           kind: 'image',
-          // Hand the bytes over as a Uint8Array view of the underlying
-          // ArrayBuffer — Electron's structured-clone IPC ships ArrayBuffers
-          // by reference, so this avoids the base64 encode + atob round-trip
-          // and the ~33% size inflation of a data URL.
           data: new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength),
           mediaType,
         };
       }
 
       if (kind === 'video') {
-        const buffer = await fs.readFile(rawPath);
+        const buffer = await fs.readFile(resolvedRawPath);
         const ext = extensionOf(name) ?? 'mp4';
         const mediaType = VIDEO_MIME_BY_EXT[ext] ?? 'video/mp4';
         return {
           ok: true,
-          path: rawPath,
+          path: resolvedRawPath,
           name,
           sizeBytes,
           kind: 'video',
@@ -220,10 +246,7 @@ export function registerDocumentsIpc(ctx: IpcContext): void {
       }
 
       if (kind === 'word' || kind === 'pdf') {
-        // Reuse the same parser used for inbound attachments: returns text.
-        // Buffer-native variant skips the base64 encode/decode round-trip
-        // we used to do via parseAttachment.
-        const buffer = await fs.readFile(rawPath);
+        const buffer = await fs.readFile(resolvedRawPath);
         const parsed = await parseAttachmentBuffer({
           name,
           mime: kind === 'word'
@@ -234,7 +257,7 @@ export function registerDocumentsIpc(ctx: IpcContext): void {
         });
         return {
           ok: true,
-          path: rawPath,
+          path: resolvedRawPath,
           name,
           sizeBytes,
           kind,
@@ -242,14 +265,66 @@ export function registerDocumentsIpc(ctx: IpcContext): void {
         };
       }
 
-      // Unknown binary — return metadata only.
       return {
         ok: true,
-        path: rawPath,
+        path: resolvedRawPath,
         name,
         sizeBytes,
         kind: 'binary',
       };
+    } catch (err: unknown) {
+      return { ok: false, error: `Read failed: ${formatError(err)}`, code: 'read-failed' };
+    }
+  });
+
+  ipcMain.handle('documents:list', async (_e, payload: { sessionId?: unknown; dirPath?: unknown }): Promise<DirListResult | DirListError> => {
+    const slot = ctx.registry.resolve(pickSessionId(payload));
+    if (!slot) return { ok: false, error: 'No active session', code: 'no-session' };
+
+    const cwd = slot.cwd;
+    if (!cwd) return { ok: false, error: 'No workspace directory', code: 'no-session' };
+
+    const relDir = typeof payload?.dirPath === 'string' ? payload.dirPath : '';
+    const absDir = relDir ? pathResolve(cwd, relDir) : cwd;
+
+    if (!isUnderCwd(absDir, cwd)) {
+      return { ok: false, error: 'Path is not inside the session workspace', code: 'not-in-cwd' };
+    }
+
+    let realDir: string;
+    try { realDir = await fs.realpath(absDir); } catch {
+      return { ok: false, error: 'Directory not found', code: 'not-dir' };
+    }
+    let realCwd: string;
+    try { realCwd = await fs.realpath(cwd); } catch { realCwd = cwd; }
+    if (!isUnderCwd(realDir, realCwd)) {
+      return { ok: false, error: 'Path is not inside the session workspace', code: 'not-in-cwd' };
+    }
+
+    try {
+      const dirents = await fs.readdir(absDir, { withFileTypes: true });
+      const entries: DirEntry[] = [];
+
+      for (const d of dirents) {
+        if (IGNORED_NAMES.has(d.name) || d.name.startsWith('.')) continue;
+        const isDir = d.isDirectory();
+        let size = 0;
+        if (!isDir) {
+          try {
+            const s = await fs.stat(pathResolve(absDir, d.name));
+            size = s.size;
+          } catch { /* skip stat errors */ }
+        }
+        const ext = isDir ? '' : (extensionOf(d.name) ?? '');
+        entries.push({ name: d.name, isDir, size, ext });
+      }
+
+      entries.sort((a, b) => {
+        if (a.isDir !== b.isDir) return a.isDir ? -1 : 1;
+        return a.name.localeCompare(b.name);
+      });
+
+      return { ok: true, entries };
     } catch (err: unknown) {
       return { ok: false, error: `Read failed: ${formatError(err)}`, code: 'read-failed' };
     }

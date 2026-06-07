@@ -60,6 +60,7 @@ const api = {
   },
   documents: {
     read: (sessionId, path) => ipcRenderer.invoke('documents:read', { sessionId, path }),
+    list: (sessionId, dirPath) => ipcRenderer.invoke('documents:list', { sessionId, dirPath }),
   },
   transcripts: {
     load: (cwd) => ipcRenderer.invoke('transcripts:load', { cwd }),
