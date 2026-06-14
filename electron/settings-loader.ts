@@ -18,7 +18,17 @@ export function loadClaudeEnv(): ClaudeEnv {
     const parsed = JSON.parse(raw);
     const env = (parsed?.env ?? {}) as ClaudeEnv;
     return env;
-  } catch {
+  } catch (err) {
+    console.error('[settings-loader] failed to parse Claude settings:', err);
+    try {
+      const { dialog } = require('electron');
+      dialog.showMessageBoxSync({
+        type: 'warning',
+        title: '配置警告',
+        message: 'Claude 配置文件解析失败',
+        detail: `~/.claude/settings.json 格式有误，SDK 会话可能无法正常认证。\n\n错误: ${err instanceof Error ? err.message : String(err)}`,
+      });
+    } catch { /* dialog may not be available during early startup */ }
     return {};
   }
 }

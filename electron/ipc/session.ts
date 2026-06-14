@@ -8,6 +8,7 @@ import { BrowserWindow, dialog, ipcMain } from 'electron';
 import { formatError } from '../format-error.js';
 import type { AutoApproveScope } from '../auto-approve-policy.js';
 import type { IpcContext } from './context.js';
+import { saveImageToAssets } from '../attachments/assets.js';
 
 const PERMISSION_MODES = new Set(['default', 'acceptEdits', 'bypassPermissions', 'plan'] as const);
 type PermissionMode = 'default' | 'acceptEdits' | 'bypassPermissions' | 'plan';
@@ -62,7 +63,7 @@ export function registerSessionIpc(ctx: IpcContext): void {
       if (!isPermissionMode(payload?.mode)) {
         return { ok: false, error: `Invalid permission mode: ${String(payload?.mode)}` };
       }
-      if (payload.mode === 'bypassPermissions') {
+      if (payload.mode === 'bypassPermissions' && ctx.getAutoApprove() !== 'all') {
         const win = ctx.liveWindow();
         if (!win) return { ok: false, error: 'No window' };
         const result = await dialog.showMessageBox(win, {
@@ -175,6 +176,9 @@ export function registerSessionIpc(ctx: IpcContext): void {
           { type: 'text', text: caption || 'Here is my current screen. Please take a look.' },
         ]);
         ctx.registry.touch(slot.id);
+        if (slot.cwd) {
+          void saveImageToAssets(slot.cwd, b64, mediaType);
+        }
       } catch (err: unknown) {
         return { ok: false, error: `Send failed: ${formatError(err)}` };
       }

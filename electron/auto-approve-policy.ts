@@ -45,8 +45,18 @@ const SAFE_MCP_PREFIXES: ReadonlyArray<string> = [
   'mcp__meeting-worker__',
 ];
 
+// Computer Use MCP tools with individual risk classification. screenshot,
+// mouse_move, and scroll are read-only / low-risk; click and keyboard actions
+// are destructive (they modify external application state).
+const SAFE_COMPUTER_USE_TOOLS: ReadonlySet<string> = new Set([
+  'mcp__computer-use__screenshot',
+  'mcp__computer-use__mouse_move',
+  'mcp__computer-use__scroll',
+]);
+
 export function classifyToolRisk(toolName: string): ToolRisk {
   if (SAFE_BUILTIN_TOOLS.has(toolName)) return 'safe';
+  if (SAFE_COMPUTER_USE_TOOLS.has(toolName)) return 'safe';
   for (const prefix of SAFE_MCP_PREFIXES) {
     if (toolName.startsWith(prefix)) return 'safe';
   }

@@ -21,6 +21,7 @@ import { SettingsMenu } from './components/SettingsMenu';
 import { VoiceLockPanel, type EnrollmentToast } from './components/VoiceLockPanel';
 import { MemoryPanel } from './components/MemoryPanel';
 import { VoiceSelector } from './components/VoiceSelector';
+import { SkillManagerPanel } from './components/SkillManagerPanel';
 import { VoiceGuideModal } from './components/VoiceGuideModal';
 import { ParticipantPanel } from './components/ParticipantPanel';
 import { hasPremiumChineseVoice, listChineseVoices } from './lib/voice-quality';
@@ -117,7 +118,7 @@ export function App() {
         speakingRef.current = false;
         setAiSpeaking(false);
       }
-    }, 8_000);
+    }, 300);
     return () => window.clearInterval(id);
   }, [aiSpeaking]);
 
@@ -145,8 +146,8 @@ export function App() {
           setVoicePrintEmbedding(new Float32Array(vp.embedding));
         }
       }
+      if (enabled) void prewarmSpeakerModel().catch(() => {});
     }).catch(() => { /* settings file may not exist yet */ });
-    void prewarmSpeakerModel().catch(() => {});
     return () => { cancelled = true; };
   }, []);
 
@@ -258,46 +259,51 @@ export function App() {
         if (!emb) return;
         setEnrollment((prev) => {
           if (!prev) return prev;
-          const embeddings = [...prev.embeddings, emb];
-          const capturedSamples = prev.capturedSamples + samples.length;
-          const targetSamples = ENROLLMENT_TARGET_SECONDS * SAMPLE_RATE;
-          if (capturedSamples < targetSamples) {
-            return { embeddings, capturedSamples };
-          }
-          const mean = averageEmbeddings(embeddings);
-          if (mean) {
-            const vp: VoicePrint = {
-              embedding: Array.from(mean),
-              model: SPEAKER_MODEL_ID,
-              secondsCaptured: capturedSamples / SAMPLE_RATE,
-              enrolledAt: Date.now(),
-            };
-            setVoicePrint(vp);
-            setVoicePrintEmbedding(mean);
-            setVoiceLockEnabled(true);
-            void window.vibeMeet.setVoicePrint(vp);
-            void window.vibeMeet.setVoiceLockEnabled(true);
-            showEnrollmentToast('saved');
-          } else {
-            // averageEmbeddings only returns null on degenerate input (all
-            // zero-norm vectors) — surface it instead of silently bailing.
-            showEnrollmentToast('tooShort');
-          }
-          // Enrollment completed — restore prior mute state outside this updater.
-          setTimeout(() => {
-            if (prevMutedRef.current !== null) {
-              const restore = prevMutedRef.current;
-              prevMutedRef.current = null;
-              if (restore) setMuted(true);
-            }
-          }, 0);
-          return null;
+          return {
+            embeddings: [...prev.embeddings, emb],
+            capturedSamples: prev.capturedSamples + samples.length,
+          };
         });
       } catch (e) {
         console.warn('[voice-lock] enrollment embedding failed:', e);
       }
     })();
-  }, [showEnrollmentToast]);
+  }, []);
+
+  // Finalize enrollment when enough speech has been captured. Kept outside the
+  // state updater so side effects (IPC calls, other setState) don't violate the
+  // purity requirement React places on updater functions.
+  useEffect(() => {
+    if (!enrollment) return;
+    const targetSamples = ENROLLMENT_TARGET_SECONDS * SAMPLE_RATE;
+    if (enrollment.capturedSamples < targetSamples) return;
+    const mean = averageEmbeddings(enrollment.embeddings);
+    if (mean) {
+      const vp: VoicePrint = {
+        embedding: Array.from(mean),
+        model: SPEAKER_MODEL_ID,
+        secondsCaptured: enrollment.capturedSamples / SAMPLE_RATE,
+        enrolledAt: Date.now(),
+      };
+      setVoicePrint(vp);
+      setVoicePrintEmbedding(mean);
+      setVoiceLockEnabled(true);
+      void window.vibeMeet.setVoicePrint(vp);
+      void window.vibeMeet.setVoiceLockEnabled(true);
+      showEnrollmentToast('saved');
+    } else {
+      // averageEmbeddings only returns null on degenerate input (all
+      // zero-norm vectors) — surface it instead of silently bailing.
+      showEnrollmentToast('tooShort');
+    }
+    // Restore prior mute state now that enrollment is done.
+    if (prevMutedRef.current !== null) {
+      const restore = prevMutedRef.current;
+      prevMutedRef.current = null;
+      if (restore) setMuted(true);
+    }
+    setEnrollment(null);
+  }, [enrollment, showEnrollmentToast]);
 
   const handleToggleVoiceLock = useCallback(() => {
     setVoiceLockEnabled((prev) => {
@@ -344,42 +350,40 @@ export function App() {
   // Without this, users who stop before the 8s target wall got no voiceprint
   // saved, which in turn left the gate toggle disabled forever.
   const handleCancelEnrollment = useCallback(() => {
-    setEnrollment((prev) => {
-      // Three outcomes worth distinguishing in the UI:
-      //   saved     — enough clean speech to finalize a voice print
-      //   tooShort  — some samples but below the 2s minimum (user spoke briefly)
-      //   cancelled — no usable samples at all (user never spoke)
-      if (prev && prev.embeddings.length > 0 && prev.capturedSamples >= ENROLLMENT_MIN_FINALIZE_SAMPLES) {
-        const mean = averageEmbeddings(prev.embeddings);
-        if (mean) {
-          const vp: VoicePrint = {
-            embedding: Array.from(mean),
-            model: SPEAKER_MODEL_ID,
-            secondsCaptured: prev.capturedSamples / SAMPLE_RATE,
-            enrolledAt: Date.now(),
-          };
-          setVoicePrint(vp);
-          setVoicePrintEmbedding(mean);
-          setVoiceLockEnabled(true);
-          void window.vibeMeet.setVoicePrint(vp);
-          void window.vibeMeet.setVoiceLockEnabled(true);
-          showEnrollmentToast('saved');
-        } else {
-          showEnrollmentToast('tooShort');
-        }
-      } else if (prev && prev.embeddings.length > 0) {
-        showEnrollmentToast('tooShort');
+    // Three outcomes worth distinguishing in the UI:
+    //   saved     — enough clean speech to finalize a voice print
+    //   tooShort  — some samples but below the 2s minimum (user spoke briefly)
+    //   cancelled — no usable samples at all (user never spoke)
+    if (enrollment && enrollment.embeddings.length > 0 && enrollment.capturedSamples >= ENROLLMENT_MIN_FINALIZE_SAMPLES) {
+      const mean = averageEmbeddings(enrollment.embeddings);
+      if (mean) {
+        const vp: VoicePrint = {
+          embedding: Array.from(mean),
+          model: SPEAKER_MODEL_ID,
+          secondsCaptured: enrollment.capturedSamples / SAMPLE_RATE,
+          enrolledAt: Date.now(),
+        };
+        setVoicePrint(vp);
+        setVoicePrintEmbedding(mean);
+        setVoiceLockEnabled(true);
+        void window.vibeMeet.setVoicePrint(vp);
+        void window.vibeMeet.setVoiceLockEnabled(true);
+        showEnrollmentToast('saved');
       } else {
-        showEnrollmentToast('cancelled');
+        showEnrollmentToast('tooShort');
       }
-      return null;
-    });
+    } else if (enrollment && enrollment.embeddings.length > 0) {
+      showEnrollmentToast('tooShort');
+    } else {
+      showEnrollmentToast('cancelled');
+    }
+    setEnrollment(null);
     if (prevMutedRef.current !== null) {
       const restore = prevMutedRef.current;
       prevMutedRef.current = null;
       if (restore) setMuted(true);
     }
-  }, [showEnrollmentToast]);
+  }, [enrollment, showEnrollmentToast]);
 
   const handleClearEnrollment = useCallback(() => {
     setVoicePrint(null);
@@ -393,7 +397,8 @@ export function App() {
   // never capture audio — their transcript fills from text the Talker emits.
   // Voice-print enrollment runs from the settings panel even with no tab open,
   // so we keep the mic on whenever an enrollment is in flight.
-  const micEnabled = (!muted && hasLiveTab) || enrollment != null;
+  // VAD stays alive during mute (paused mode) so toggling is instant.
+  const micEnabled = hasLiveTab || enrollment != null;
 
   const onVoiceFinal = useCallback((text: string) => {
     // Read the active id fresh inside the callback. Closing over hasLiveTab at
@@ -430,6 +435,7 @@ export function App() {
     enabled: micEnabled,
     onTranscript: onVoiceFinal,
     onBargeIn,
+    paused: muted,
     // Suppress mic input while TTS is playing so the speaker→mic loop doesn't
     // get transcribed as if the user said it (and doesn't fire barge-in on
     // Claude's own voice).
@@ -440,10 +446,66 @@ export function App() {
     // Divert raw segments to the enrollment collector instead of
     // transcribing them — only active while the user is recording a sample.
     tapSegment: enrollment ? handleEnrollmentSegment : undefined,
-    // While muted the whisper VAD is torn down. Keep the mic button
-    // clickable so the user can unmute — otherwise the toggle is one-way.
     muted,
   });
+
+  // Spacebar mute/unmute: short press toggles, long press is push-to-talk.
+  // Uses a ref for muted to avoid re-registering listeners on every toggle
+  // (which would reset the spaceDown flag mid-press and break push-to-talk).
+  const mutedRef = useRef(muted);
+  useEffect(() => { mutedRef.current = muted; }, [muted]);
+
+  useEffect(() => {
+    let pressTime = 0;
+    let wasMuted = false;
+    let spaceDown = false;
+
+    const isTypingTarget = () => {
+      const el = document.activeElement;
+      if (!el) return false;
+      const tag = el.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return true;
+      if ((el as HTMLElement).isContentEditable) return true;
+      return false;
+    };
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== ' ' || e.repeat || isTypingTarget()) return;
+      e.preventDefault();
+      spaceDown = true;
+      pressTime = Date.now();
+      wasMuted = mutedRef.current;
+      if (wasMuted) setMuted(false);
+    };
+
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (e.key !== ' ' || !spaceDown) return;
+      e.preventDefault();
+      spaceDown = false;
+      const duration = Date.now() - pressTime;
+      if (duration < 300) {
+        if (!wasMuted) setMuted(true);
+      } else {
+        if (wasMuted) setMuted(true);
+      }
+    };
+
+    const onBlur = () => {
+      if (spaceDown && wasMuted) {
+        setMuted(true);
+        spaceDown = false;
+      }
+    };
+
+    document.addEventListener('keydown', onKeyDown);
+    document.addEventListener('keyup', onKeyUp);
+    window.addEventListener('blur', onBlur);
+    return () => {
+      document.removeEventListener('keydown', onKeyDown);
+      document.removeEventListener('keyup', onKeyUp);
+      window.removeEventListener('blur', onBlur);
+    };
+  }, []);
 
   // Wire TTS to assistant messages, with a "speaking" flag so we mute the mic.
   // The SpeakHandle is a single sink with three modes:
@@ -517,19 +579,16 @@ export function App() {
   // path that bypasses canUseTool still won't block. Sent on every session
   // start so a new session inherits the scope.
   useEffect(() => {
-    void window.vibeMeet.setAutoApprove(autoApproveScope);
-    // Mirror the scope into the store so blocker announcements stay quiet for
-    // prompts that auto-approve resolves on its own.
     meetingStore.setAutoApproveScope(autoApproveScope);
-    if (!state.running) return;
-    // Apply to the currently-focused live session. Background tabs keep their
-    // existing mode; toggling here is a per-meeting decision tied to the tab
-    // the user is looking at.
-    const id = meetingStore.getActiveId();
-    void window.vibeMeet.setPermissionMode(
-      id,
-      autoApproveScope !== 'off' ? 'bypassPermissions' : 'default',
-    );
+    void (async () => {
+      const res = await window.vibeMeet.setAutoApprove(autoApproveScope);
+      if (!res.ok || !state.running) return;
+      const id = meetingStore.getActiveId();
+      void window.vibeMeet.setPermissionMode(
+        id,
+        autoApproveScope !== 'off' ? 'bypassPermissions' : 'default',
+      );
+    })();
   }, [autoApproveScope, state.running]);
 
   // If auto-approve is toggled on while a prompt is already showing, resolve
@@ -703,6 +762,7 @@ ${trimmed}`
               onCancelEnroll={handleCancelEnrollment}
               onClearEnrollment={handleClearEnrollment}
             />
+            <SkillManagerPanel />
           </SettingsMenu>
         }
       />
@@ -716,10 +776,9 @@ ${trimmed}`
             onStopShare={stopShare}
             delivery={workers.currentDelivery}
             sessionId={activeTab?.id ?? null}
-            onAcceptDelivery={workers.acceptDelivery}
-            onReviseDelivery={workers.reviseDelivery}
+            onAcceptDelivery={() => { setViewingFile(null); workers.acceptDelivery(); }}
+            onReviseDelivery={(fb: string) => { setViewingFile(null); return workers.reviseDelivery(fb); }}
             aiSpeaking={aiSpeaking}
-            onDeliveryFileSelect={(path) => setViewingFile({ relativePath: path })}
             viewingFile={viewingFile}
             onCloseFileView={() => setViewingFile(null)}
             defaultContent={

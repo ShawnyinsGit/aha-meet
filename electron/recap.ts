@@ -9,7 +9,10 @@
 // presses interrupt after `end()` was called.
 
 import { query } from '@anthropic-ai/claude-agent-sdk';
+import { promises as fs } from 'node:fs';
+import path from 'node:path';
 import { appendEntry } from './memory.js';
+import { ensureDir, maybeAppendGitignore } from './attachments/workspace.js';
 import { extractText, RECAP_MIN_TRANSCRIPT_ENTRIES, RECAP_TRANSCRIPT_CHAR_CAP } from './orchestrator-helpers.js';
 import { RECAP_PROMPT } from './orchestrator-prompts.js';
 import { mergedSubprocessEnv } from './settings-loader.js';
@@ -146,6 +149,7 @@ async function runRecap(
   if (!Array.isArray(parsed)) return;
 
   let saved = 0;
+  const minutesItems: Array<{ category: MemoryCategory; content: string }> = [];
   for (const raw of parsed) {
     if (!raw || typeof raw !== 'object') continue;
     const r = raw as Record<string, unknown>;
@@ -162,6 +166,7 @@ async function runRecap(
     ) {
       continue;
     }
+    minutesItems.push({ category: category as MemoryCategory, content: content.trim() });
     const result = await appendEntry({
       category: category as MemoryCategory,
       content,
@@ -172,4 +177,68 @@ async function runRecap(
     if (result.ok) saved += 1;
   }
   console.log(`[memory] recap saved ${saved} entries from meeting ${opts.meetingId}`);
+
+  void writeMinutes(opts, minutesItems);
+}
+
+const MINUTES_DIR = '.vibe-minutes';
+const TRANSCRIPT_TAIL = 50;
+const TRANSCRIPT_LINE_CAP = 200;
+
+async function writeMinutes(
+  opts: RecapOpts,
+  items: Array<{ category: MemoryCategory; content: string }>,
+): Promise<void> {
+  try {
+    const dir = await ensureDir(opts.cwd, MINUTES_DIR);
+    if (!dir) return;
+
+    const now = new Date();
+    const pad2 = (n: number) => String(n).padStart(2, '0');
+    const dateStr = `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())}`;
+    const shortId = opts.meetingId.slice(0, 8);
+    const filename = `${dateStr}-${shortId}.md`;
+
+    const sections: Record<MemoryCategory, string[]> = {
+      decision: [],
+      todo: [],
+      point: [],
+      fact: [],
+    };
+    for (const item of items) {
+      sections[item.category].push(`- ${item.content}`);
+    }
+
+    const lines: string[] = [`# 会议纪要 — ${dateStr}`, ''];
+    if (sections.decision.length > 0) {
+      lines.push('## 决策', ...sections.decision, '');
+    }
+    if (sections.todo.length > 0) {
+      lines.push('## 待办', ...sections.todo, '');
+    }
+    if (sections.point.length > 0) {
+      lines.push('## 要点', ...sections.point, '');
+    }
+    if (sections.fact.length > 0) {
+      lines.push('## 事实', ...sections.fact, '');
+    }
+
+    const tail = opts.transcript.slice(-TRANSCRIPT_TAIL);
+    if (tail.length > 0) {
+      lines.push('---', '', '## 对话摘要', '');
+      for (const t of tail) {
+        const role = t.role === 'user' ? '用户' : '助手';
+        const text = t.text.length > TRANSCRIPT_LINE_CAP
+          ? `${t.text.slice(0, TRANSCRIPT_LINE_CAP)}…`
+          : t.text;
+        lines.push(`**${role}**: ${text}`, '');
+      }
+    }
+
+    await fs.writeFile(path.join(dir, filename), lines.join('\n'), 'utf8');
+    await maybeAppendGitignore(opts.cwd, MINUTES_DIR);
+    console.log(`[minutes] wrote ${filename}`);
+  } catch (err) {
+    console.warn('[minutes] writeMinutes failed:', err);
+  }
 }

@@ -45,9 +45,8 @@ const TIMEOUT_RESTART_THRESHOLD = 3;
 // short enough that the probe still acts as a real fallback if the stdout
 // banner wording drifts upstream.
 const PROBE_GRACE_MS = 600;
-// Sanity floor for the q5_1 small model (~180 MB on disk). Anything smaller
-// than this is almost certainly a truncated download or a placeholder.
 const MIN_MODEL_BYTES = 1_000_000;
+const IDLE_TIMEOUT_MS = 120_000;
 
 type ServerState = {
   child: ChildProcess;
@@ -62,6 +61,21 @@ let starting: Promise<StartResult> | null = null;
 let serverDeadPermanently = false;
 let restartAttempts: number[] = [];
 let timeoutEvents: number[] = [];
+let idleTimer: NodeJS.Timeout | null = null;
+
+function resetIdleTimer(): void {
+  if (idleTimer) clearTimeout(idleTimer);
+  idleTimer = setTimeout(() => {
+    idleTimer = null;
+    if (!state?.ready || serverDeadPermanently) return;
+    console.log('[whisper-server] idle for 2min — stopping to reclaim memory');
+    void stopWhisperServer(false);
+  }, IDLE_TIMEOUT_MS);
+}
+
+function clearIdleTimer(): void {
+  if (idleTimer) { clearTimeout(idleTimer); idleTimer = null; }
+}
 
 export type StartResult =
   | { ok: true; port: number }
@@ -111,6 +125,7 @@ async function spawnOnNextFreePort(
       attachExitHandler(res.child, serverBin, modelPath, cwd);
       const warmed = await warmupOrTimeout(port);
       if (state) state.ready = true;
+      resetIdleTimer();
       if (!warmed) {
         console.warn('[whisper-server] warmup failed — first segment will be cold');
       } else {
@@ -375,6 +390,7 @@ export async function postInference(
   lang: 'auto' | 'zh' | 'en',
   timeoutMs: number = SERVER_FETCH_TIMEOUT_MS,
 ): Promise<string> {
+  resetIdleTimer();
   const wav = encodeWavPcm16(pcm);
   // Node's global Blob accepts Buffer directly (BinaryLike includes
   // ArrayBufferView; Buffer is a Uint8Array). No DOM lib types needed.
@@ -435,6 +451,7 @@ function pruneOldEvents(buf: number[]): void {
 }
 
 export async function stopWhisperServer(permanent: boolean = true): Promise<void> {
+  clearIdleTimer();
   if (!state) return;
   const s = state;
   state = null;

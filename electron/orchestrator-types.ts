@@ -20,7 +20,8 @@ export type WorkerSpecialtyKind =
   | 'devops'
   | 'test'
   | 'docs'
-  | 'review';
+  | 'review'
+  | 'computer-use';
 
 export interface MeetingPlanNode {
   id: string;

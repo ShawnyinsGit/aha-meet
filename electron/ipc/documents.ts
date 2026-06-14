@@ -8,9 +8,9 @@
 // reaches Orchestrator.steerWorker → WorkerScheduler.steerWorker and lands on
 // the same worker session as a (plan update) addendum.
 
-import { ipcMain } from 'electron';
+import { dialog, ipcMain, shell } from 'electron';
 import { promises as fs } from 'node:fs';
-import { basename, isAbsolute, resolve as pathResolve, sep } from 'node:path';
+import { basename, dirname, isAbsolute, resolve as pathResolve, sep } from 'node:path';
 import { formatError } from '../format-error.js';
 import type { IpcContext } from './context.js';
 import { classifyKind, parseAttachmentBuffer, type AttachmentKind } from '../attachments/parse.js';
@@ -39,7 +39,7 @@ const VIDEO_MIME_BY_EXT: Record<string, 'video/mp4' | 'video/webm' | 'video/quic
   mov: 'video/quicktime',
 };
 
-export type DeliveryFileKind = AttachmentKind | 'video' | 'binary' | 'missing';
+export type DeliveryFileKind = AttachmentKind | 'pptx' | 'xlsx' | 'video' | 'binary' | 'missing';
 
 export interface DirEntry {
   name: string;
@@ -114,18 +114,77 @@ function isUnderCwd(absPath: string, cwd: string): boolean {
   return normalisedPath.startsWith(normalisedCwd) || pathResolve(absPath) === pathResolve(cwd);
 }
 
+// Session-level allowlist for directories outside cwd that the user has
+// explicitly approved via the native dialog. Keyed by slot id; not persisted.
+const approvedExternalDirs = new Map<string, Set<string>>();
+
+export function clearApprovedExternalDirs(slotId: string): void {
+  approvedExternalDirs.delete(slotId);
+}
+
+function isExternalApproved(absPath: string, slotId: string): boolean {
+  const approved = approvedExternalDirs.get(slotId);
+  if (!approved || approved.size === 0) return false;
+  const normalized = pathResolve(absPath);
+  for (const dir of approved) {
+    const normalizedDir = pathResolve(dir) + sep;
+    if (normalized.startsWith(normalizedDir) || normalized === pathResolve(dir)) return true;
+  }
+  return false;
+}
+
+async function maybeAuthorizeExternal(
+  displayPath: string,
+  approveDir: string,
+  slotId: string,
+  ctx: IpcContext,
+): Promise<boolean> {
+  if (isExternalApproved(displayPath, slotId)) return true;
+  const win = ctx.liveWindow();
+  if (!win) return false;
+  const res = await dialog.showMessageBox(win, {
+    type: 'question',
+    title: '查看工作区外的文件',
+    message: '此文件不在当前工作区内',
+    detail: `路径: ${displayPath}\n\n是否允许访问此目录下的文件？`,
+    buttons: ['拒绝', '允许'],
+    defaultId: 1,
+    cancelId: 0,
+    noLink: true,
+  });
+  if (res.response !== 1) return false;
+  if (!approvedExternalDirs.has(slotId)) {
+    approvedExternalDirs.set(slotId, new Set());
+  }
+  approvedExternalDirs.get(slotId)!.add(approveDir);
+  return true;
+}
+
 function extensionOf(name: string): string | null {
   const idx = name.lastIndexOf('.');
   if (idx < 0 || idx === name.length - 1) return null;
   return name.slice(idx + 1).toLowerCase();
 }
 
+const PPTX_EXTENSIONS = new Set(['pptx', 'ppt']);
+const XLSX_EXTENSIONS = new Set(['xlsx', 'xls', 'csv']);
+
 function detectKind(name: string): DeliveryFileKind {
   const ext = extensionOf(name);
   if (ext && VIDEO_EXTENSIONS.has(ext)) return 'video';
+  if (ext && PPTX_EXTENSIONS.has(ext)) return 'pptx';
+  if (ext && XLSX_EXTENSIONS.has(ext)) return 'xlsx';
   const k = classifyKind(name, '');
   if (k) return k;
   return 'binary';
+}
+
+function escapeHtml(str: string): string {
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
 }
 
 export function registerDocumentsIpc(ctx: IpcContext): void {
@@ -145,8 +204,12 @@ export function registerDocumentsIpc(ctx: IpcContext): void {
     const absPath = isAbsolute(rawPath) ? rawPath : pathResolve(cwd, rawPath);
     // Redirect the rest of the handler to the resolved absolute path.
     const resolvedRawPath = absPath;
-    if (!isUnderCwd(resolvedRawPath, cwd)) {
-      return { ok: false, error: 'Path is not inside the session workspace', code: 'not-in-cwd' };
+    const pathInCwd = isUnderCwd(resolvedRawPath, cwd);
+    if (!pathInCwd) {
+      const allowed = await maybeAuthorizeExternal(resolvedRawPath, dirname(resolvedRawPath), slot.id, ctx);
+      if (!allowed) {
+        return { ok: false, error: 'Path is not inside the session workspace', code: 'not-in-cwd' };
+      }
     }
 
     // String-level isUnderCwd only collapses `../`; it cannot see through a
@@ -165,13 +228,16 @@ export function registerDocumentsIpc(ctx: IpcContext): void {
     } catch {
       realCwd = cwd;
     }
-    if (!isUnderCwd(realPath, realCwd)) {
+    if (pathInCwd && !isUnderCwd(realPath, realCwd)) {
+      console.warn(`[documents:read] symlink escape blocked: ${resolvedRawPath} -> ${realPath}`);
       return { ok: false, error: 'Path is not inside the session workspace', code: 'not-in-cwd' };
     }
 
+    // Use the realpath-resolved path for all subsequent I/O to close the
+    // TOCTOU window between the symlink check and the actual read.
     let stat: Awaited<ReturnType<typeof fs.stat>>;
     try {
-      stat = await fs.stat(resolvedRawPath);
+      stat = await fs.stat(realPath);
     } catch (err: unknown) {
       return { ok: false, error: `File not found: ${basename(resolvedRawPath)}`, code: 'missing' };
     }
@@ -196,7 +262,7 @@ export function registerDocumentsIpc(ctx: IpcContext): void {
 
     try {
       if (kind === 'text') {
-        const buffer = await fs.readFile(resolvedRawPath);
+        const buffer = await fs.readFile(realPath);
         const truncated = buffer.length > MAX_TEXT_BYTES;
         const slice = truncated ? buffer.subarray(0, MAX_TEXT_BYTES) : buffer;
         return {
@@ -211,7 +277,7 @@ export function registerDocumentsIpc(ctx: IpcContext): void {
       }
 
       if (kind === 'image') {
-        const buffer = await fs.readFile(resolvedRawPath);
+        const buffer = await fs.readFile(realPath);
         const ext = extensionOf(name);
         const mediaType =
           ext === 'png' ? 'image/png'
@@ -231,7 +297,7 @@ export function registerDocumentsIpc(ctx: IpcContext): void {
       }
 
       if (kind === 'video') {
-        const buffer = await fs.readFile(resolvedRawPath);
+        const buffer = await fs.readFile(realPath);
         const ext = extensionOf(name) ?? 'mp4';
         const mediaType = VIDEO_MIME_BY_EXT[ext] ?? 'video/mp4';
         return {
@@ -245,24 +311,80 @@ export function registerDocumentsIpc(ctx: IpcContext): void {
         };
       }
 
-      if (kind === 'word' || kind === 'pdf') {
-        const buffer = await fs.readFile(resolvedRawPath);
-        const parsed = await parseAttachmentBuffer({
-          name,
-          mime: kind === 'word'
-            ? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-            : 'application/pdf',
-          sizeBytes,
-          buffer,
-        });
+      if (kind === 'word') {
+        const buffer = await fs.readFile(realPath);
+        let fallbackText = '';
+        try {
+          const parsed = await parseAttachmentBuffer({
+            name,
+            mime: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            sizeBytes,
+            buffer,
+          });
+          fallbackText = parsed.text ?? '';
+        } catch (err) { console.warn('[documents:read] DOCX text extraction failed:', basename(resolvedRawPath), err); }
         return {
           ok: true,
           path: resolvedRawPath,
           name,
           sizeBytes,
-          kind,
-          text: parsed.text ?? '',
+          kind: 'word',
+          text: fallbackText,
+          data: new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength),
+          mediaType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
         };
+      }
+
+      if (kind === 'pdf') {
+        const buffer = await fs.readFile(realPath);
+        return {
+          ok: true,
+          path: resolvedRawPath,
+          name,
+          sizeBytes,
+          kind: 'pdf',
+          data: new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength),
+          mediaType: 'application/pdf',
+        };
+      }
+
+      if (kind === 'pptx') {
+        const buffer = await fs.readFile(realPath);
+        return {
+          ok: true,
+          path: resolvedRawPath,
+          name,
+          sizeBytes,
+          kind: 'pptx',
+          data: new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength),
+          mediaType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+        };
+      }
+
+      if (kind === 'xlsx') {
+        const buffer = await fs.readFile(realPath);
+        try {
+          const XLSX = await import('xlsx');
+          const workbook = XLSX.read(buffer, { type: 'buffer' });
+          const htmlParts: string[] = [];
+          for (const sheetName of workbook.SheetNames) {
+            const sheet = workbook.Sheets[sheetName];
+            if (!sheet) continue;
+            const html = XLSX.utils.sheet_to_html(sheet);
+            htmlParts.push(`<h3>${escapeHtml(sheetName)}</h3>${html}`);
+          }
+          return {
+            ok: true,
+            path: resolvedRawPath,
+            name,
+            sizeBytes,
+            kind: 'xlsx',
+            text: htmlParts.join('\n'),
+          };
+        } catch (err) {
+          console.warn('[documents:read] XLSX parse failed:', basename(resolvedRawPath), err);
+          return { ok: true, path: resolvedRawPath, name, sizeBytes, kind: 'binary' };
+        }
       }
 
       return {
@@ -287,8 +409,12 @@ export function registerDocumentsIpc(ctx: IpcContext): void {
     const relDir = typeof payload?.dirPath === 'string' ? payload.dirPath : '';
     const absDir = relDir ? pathResolve(cwd, relDir) : cwd;
 
-    if (!isUnderCwd(absDir, cwd)) {
-      return { ok: false, error: 'Path is not inside the session workspace', code: 'not-in-cwd' };
+    const dirInCwd = isUnderCwd(absDir, cwd);
+    if (!dirInCwd) {
+      const allowed = await maybeAuthorizeExternal(absDir, absDir, slot.id, ctx);
+      if (!allowed) {
+        return { ok: false, error: 'Path is not inside the session workspace', code: 'not-in-cwd' };
+      }
     }
 
     let realDir: string;
@@ -297,12 +423,13 @@ export function registerDocumentsIpc(ctx: IpcContext): void {
     }
     let realCwd: string;
     try { realCwd = await fs.realpath(cwd); } catch { realCwd = cwd; }
-    if (!isUnderCwd(realDir, realCwd)) {
+    if (dirInCwd && !isUnderCwd(realDir, realCwd)) {
+      console.warn(`[documents:list] symlink escape blocked: ${absDir} -> ${realDir}`);
       return { ok: false, error: 'Path is not inside the session workspace', code: 'not-in-cwd' };
     }
 
     try {
-      const dirents = await fs.readdir(absDir, { withFileTypes: true });
+      const dirents = await fs.readdir(realDir, { withFileTypes: true });
       const entries: DirEntry[] = [];
 
       for (const d of dirents) {
@@ -311,7 +438,7 @@ export function registerDocumentsIpc(ctx: IpcContext): void {
         let size = 0;
         if (!isDir) {
           try {
-            const s = await fs.stat(pathResolve(absDir, d.name));
+            const s = await fs.stat(pathResolve(realDir, d.name));
             size = s.size;
           } catch { /* skip stat errors */ }
         }
@@ -328,6 +455,31 @@ export function registerDocumentsIpc(ctx: IpcContext): void {
     } catch (err: unknown) {
       return { ok: false, error: `Read failed: ${formatError(err)}`, code: 'read-failed' };
     }
+  });
+
+  ipcMain.handle('documents:open-external', async (_e, payload: { sessionId?: unknown; path?: unknown }) => {
+    const slot = ctx.registry.resolve(pickSessionId(payload));
+    if (!slot) return { ok: false, error: 'No active session' };
+    const cwd = slot.cwd;
+    if (!cwd) return { ok: false, error: 'No workspace directory' };
+    const rawPath = typeof payload?.path === 'string' ? payload.path : '';
+    if (!rawPath) return { ok: false, error: 'Path required' };
+    const absPath = isAbsolute(rawPath) ? rawPath : pathResolve(cwd, rawPath);
+    const openInCwd = isUnderCwd(absPath, cwd);
+    if (!openInCwd) {
+      const allowed = await maybeAuthorizeExternal(absPath, dirname(absPath), slot.id, ctx);
+      if (!allowed) return { ok: false, error: 'Path outside workspace' };
+    }
+    let realPath: string;
+    try { realPath = await fs.realpath(absPath); } catch {
+      return { ok: false, error: 'File not found' };
+    }
+    let realCwd: string;
+    try { realCwd = await fs.realpath(cwd); } catch { realCwd = cwd; }
+    if (openInCwd && !isUnderCwd(realPath, realCwd)) return { ok: false, error: 'Path outside workspace' };
+    const err = await shell.openPath(realPath);
+    if (err) return { ok: false, error: err };
+    return { ok: true };
   });
 
   ipcMain.handle('session:steer-worker', (_e, payload: RawSteerPayload) => {

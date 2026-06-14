@@ -25,6 +25,7 @@ import {
   setOpenTabs,
 } from '../store.js';
 import type { IpcContext } from './context.js';
+import { clearApprovedExternalDirs } from './documents.js';
 
 interface OpenPayload {
   cwd?: unknown;
@@ -201,6 +202,7 @@ export function registerSessionsIpc(ctx: IpcContext): void {
     const slot = ctx.registry.get(id);
     if (!slot) return { ok: false, error: 'not-found' };
     try { slot.orchestrator.end(); } catch { /* ignore */ }
+    clearApprovedExternalDirs(id);
     ctx.registry.close(id);
     // Close is the one path where "tab still on disk after close" would be a
     // real bug — tests that re-launch immediately rely on it. Flush rather

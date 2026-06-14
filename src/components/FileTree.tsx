@@ -24,7 +24,7 @@ function formatBytes(n: number): string {
 
 function fileIcon(ext: string) {
   const imageExts = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'ico']);
-  const docExts = new Set(['pdf', 'docx', 'doc']);
+  const docExts = new Set(['pdf', 'docx', 'doc', 'pptx', 'ppt', 'xlsx', 'xls']);
   if (imageExts.has(ext)) return <FileImage size={14} aria-hidden="true" />;
   if (docExts.has(ext)) return <FileType size={14} aria-hidden="true" />;
   if (ext === 'md' || ext === 'markdown' || ext === 'txt') return <FileText size={14} aria-hidden="true" />;

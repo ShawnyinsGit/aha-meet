@@ -18,7 +18,6 @@ interface ScreenStageProps {
     | { ok: false; error: string }
   >;
   aiSpeaking?: boolean;
-  onDeliveryFileSelect?: (path: string) => void;
   viewingFile?: { relativePath: string } | null;
   onCloseFileView?: () => void;
 }
@@ -34,7 +33,6 @@ export function ScreenStage({
   onAcceptDelivery,
   onReviseDelivery,
   aiSpeaking = false,
-  onDeliveryFileSelect,
   viewingFile,
   onCloseFileView,
 }: ScreenStageProps) {
@@ -63,7 +61,8 @@ export function ScreenStage({
             aiSpeaking={aiSpeaking}
             onAccept={onAcceptDelivery}
             onRevise={onReviseDelivery}
-            onFileSelect={onDeliveryFileSelect}
+
+
           />
         </div>
       )}

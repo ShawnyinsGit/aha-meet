@@ -61,6 +61,7 @@ const api = {
   documents: {
     read: (sessionId, path) => ipcRenderer.invoke('documents:read', { sessionId, path }),
     list: (sessionId, dirPath) => ipcRenderer.invoke('documents:list', { sessionId, dirPath }),
+    openExternal: (sessionId, path) => ipcRenderer.invoke('documents:open-external', { sessionId, path }),
   },
   transcripts: {
     load: (cwd) => ipcRenderer.invoke('transcripts:load', { cwd }),
@@ -74,6 +75,15 @@ const api = {
       return Promise.resolve({ ok: true });
     },
     clear: (cwd) => ipcRenderer.invoke('transcripts:clear', { cwd }),
+  },
+  accessibility: {
+    check: () => ipcRenderer.invoke('accessibility:check'),
+    request: () => ipcRenderer.invoke('accessibility:request'),
+  },
+  skills: {
+    list: () => ipcRenderer.invoke('skills:list'),
+    install: (source) => ipcRenderer.invoke('skills:install', source),
+    uninstall: (name) => ipcRenderer.invoke('skills:uninstall', name),
   },
   steerWorker: (sessionId, workerId, addendum) =>
     ipcRenderer.invoke('session:steer-worker', { sessionId, workerId, addendum }),

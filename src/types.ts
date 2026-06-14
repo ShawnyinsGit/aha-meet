@@ -12,7 +12,8 @@ export type WorkerSpecialty =
   | 'devops'
   | 'test'
   | 'docs'
-  | 'review';
+  | 'review'
+  | 'computer-use';
 
 export interface WorkerTaskHistoryEntry {
   id: string;
@@ -187,6 +188,19 @@ export interface SessionsApi {
   }>;
 }
 
+export interface SkillInfo {
+  name: string;
+  description: string;
+  source: 'bundled' | 'user';
+  path: string;
+}
+
+export interface SkillsApi {
+  list: () => Promise<{ ok: true; skills: SkillInfo[] } | { ok: false; error: string }>;
+  install: (source: string) => Promise<{ ok: true; skill: SkillInfo } | { ok: false; error: string }>;
+  uninstall: (name: string) => Promise<{ ok: true } | { ok: false; error: string }>;
+}
+
 export interface VibeMeetApi {
   sessions: SessionsApi;
   sendUserText: (sessionId: string | null, text: string) => Promise<{ ok: boolean; error?: string }>;
@@ -229,6 +243,11 @@ export interface VibeMeetApi {
   };
   documents: DocumentsApi;
   transcripts: TranscriptsApi;
+  accessibility: {
+    check: () => Promise<{ granted: boolean }>;
+    request: () => Promise<{ granted: boolean }>;
+  };
+  skills: SkillsApi;
   steerWorker: (
     sessionId: string | null,
     workerId: string,
@@ -248,7 +267,7 @@ export interface TranscriptsApi {
   clear: (cwd: string) => Promise<{ ok: true } | { ok: false; error: string }>;
 }
 
-export type DeliveryFileKind = AttachmentKind | 'video' | 'binary' | 'missing';
+export type DeliveryFileKind = AttachmentKind | 'pptx' | 'xlsx' | 'video' | 'binary' | 'missing';
 
 export interface DocumentReadOk {
   ok: true;
@@ -299,6 +318,7 @@ export type DirListResult = DirListOk | DirListErr;
 export interface DocumentsApi {
   read: (sessionId: string | null, path: string) => Promise<DocumentReadResult>;
   list: (sessionId: string | null, dirPath: string) => Promise<DirListResult>;
+  openExternal: (sessionId: string | null, path: string) => Promise<{ ok: boolean; error?: string }>;
 }
 
 declare global {

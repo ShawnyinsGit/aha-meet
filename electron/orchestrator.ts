@@ -54,6 +54,7 @@ import {
   type SaveMemoryResult,
   type SteerResult,
 } from './meeting-mcp.js';
+import { buildComputerUseMcp, type ComputerUseBridge } from './computer-use-mcp.js';
 import { startRecap, type RecapHandle } from './recap.js';
 import { WorkerScheduler, type SessionFactory } from './worker-scheduler.js';
 import type {
@@ -160,6 +161,11 @@ export class Orchestrator implements OrchestratorBridge {
     this.projectId = computeProjectId(this.cwd);
     this.meetingId = randomUUID();
     this.sessionFactory = opts.sessionFactory ?? ((o) => new ClaudeSession(o));
+    const cuBridge: ComputerUseBridge = {
+      injectScreenshot: (workerId, data) => {
+        this.scheduler.injectScreenshotToWorker(workerId, data);
+      },
+    };
     this.scheduler = new WorkerScheduler({
       emit: (e) => this.safeEmit(e),
       cwd: this.cwd,
@@ -167,13 +173,10 @@ export class Orchestrator implements OrchestratorBridge {
       workerEnv: this.workerEnv,
       confirmDestructive: this.confirmDestructive,
       sessionFactory: this.sessionFactory,
-      buildWorkerMcp: (workerId) => buildWorkerMcp(this, workerId),
+      buildWorkerMcp: (workerId) => buildWorkerMcp(this, workerId, this.cwd),
+      buildComputerUseMcp: (workerId) => buildComputerUseMcp(cuBridge, workerId),
       getTalker: () => this.talker,
       isClosed: () => this.closed,
-      // Live read from the settings store so the user's "播报过滤" toggle in
-      // the side drawer reaches every active orchestrator without an IPC
-      // fanout — getSettings() is backed by an in-process cache that
-      // updateSettings() refreshes in place.
       getSpeechFilterMode: () => (getSettings().speechFilterMode === 'off' ? 'off' : 'strict'),
     });
     Orchestrator.liveInstances.add(this);

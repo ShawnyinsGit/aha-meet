@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { X } from 'lucide-react';
+import { ExternalLink, X } from 'lucide-react';
 import type { DeliveryFileKind, DocumentReadResult } from '../types';
 
 interface FileViewerProps {
@@ -37,6 +37,8 @@ export function kindLabel(kind: DeliveryFileKind): string {
     case 'video': return 'VIDEO';
     case 'word': return 'DOCX';
     case 'pdf': return 'PDF';
+    case 'pptx': return 'PPTX';
+    case 'xlsx': return 'XLSX';
     case 'binary': return 'BIN';
     case 'missing': return 'MISSING';
     default: return 'FILE';
@@ -90,23 +92,46 @@ export function FileViewer({ relativePath, sessionId, onClose }: FileViewerProps
           <span className="file-viewer-name">{fileName}</span>
           <span className="file-viewer-dir">{relativePath}</span>
         </div>
-        <button
-          type="button"
-          className="file-viewer-close"
-          onClick={onClose}
-          aria-label="Close file viewer"
-        >
-          <X size={18} aria-hidden="true" />
-        </button>
+        <div className="file-viewer-actions">
+          <button
+            type="button"
+            className="file-viewer-action-btn"
+            onClick={() => {
+              if (sessionId) void window.vibeMeet.documents.openExternal(sessionId, relativePath).then((res) => {
+                if (res && !res.ok) console.warn('[FileViewer] open-external failed:', res.error);
+              });
+            }}
+            aria-label="用系统应用打开"
+            title="用系统应用打开"
+          >
+            <ExternalLink size={16} aria-hidden="true" />
+          </button>
+          <button
+            type="button"
+            className="file-viewer-close"
+            onClick={onClose}
+            aria-label="Close file viewer"
+          >
+            <X size={18} aria-hidden="true" />
+          </button>
+        </div>
       </header>
       <div className="file-viewer-content" ref={scrollRef}>
-        <FileContent state={state} fileName={fileName} />
+        <FileContent state={state} fileName={fileName} sessionId={sessionId} />
       </div>
     </div>
   );
 }
 
-export function FileContent({ state, fileName }: { state: ViewState; fileName: string }) {
+export function FileContent({
+  state,
+  fileName,
+  sessionId,
+}: {
+  state: ViewState;
+  fileName: string;
+  sessionId?: string | null;
+}) {
   const mediaUrl = useMemo(() => {
     if (state.phase !== 'ready') return null;
     const { doc } = state;
@@ -155,6 +180,39 @@ export function FileContent({ state, fileName }: { state: ViewState; fileName: s
     return () => { URL.revokeObjectURL(pdfBlobUrl); };
   }, [pdfBlobUrl]);
 
+  const xlsxBlobUrl = useMemo(() => {
+    if (state.phase !== 'ready') return null;
+    const { doc } = state;
+    if (doc.kind === 'xlsx' && doc.text) {
+      const wrapped = wrapXlsxHtml(doc.text);
+      return URL.createObjectURL(new Blob([wrapped], { type: 'text/html' }));
+    }
+    return null;
+  }, [state]);
+
+  useEffect(() => {
+    if (!xlsxBlobUrl) return;
+    return () => { URL.revokeObjectURL(xlsxBlobUrl); };
+  }, [xlsxBlobUrl]);
+
+  const svgBlobUrl = useMemo(() => {
+    if (state.phase !== 'ready') return null;
+    const { doc } = state;
+    const ext = extensionOf(doc.name);
+    if (doc.kind === 'text' && ext === SVG_EXT) {
+      const source = doc.data ?? (doc.text ? new TextEncoder().encode(doc.text) : null);
+      if (source) {
+        return URL.createObjectURL(new Blob([source as BlobPart], { type: 'image/svg+xml' }));
+      }
+    }
+    return null;
+  }, [state]);
+
+  useEffect(() => {
+    if (!svgBlobUrl) return;
+    return () => { URL.revokeObjectURL(svgBlobUrl); };
+  }, [svgBlobUrl]);
+
   if (state.phase === 'loading') {
     return <div className="file-viewer-status">Loading...</div>;
   }
@@ -166,35 +224,12 @@ export function FileContent({ state, fileName }: { state: ViewState; fileName: s
   const ext = extensionOf(doc.name);
   const sizeLine = `${formatSize(doc.sizeBytes)} · ${kindLabel(doc.kind)}`;
 
-  if (doc.kind === 'text' && ext === SVG_EXT && doc.data) {
-    const svgUrl = URL.createObjectURL(new Blob([doc.data as BlobPart], { type: 'image/svg+xml' }));
+  if (doc.kind === 'text' && ext === SVG_EXT && svgBlobUrl) {
     return (
       <div className="file-viewer-pane">
         <div className="file-viewer-meta">{sizeLine}</div>
         <div className="file-viewer-media">
-          <img
-            src={svgUrl}
-            alt={fileName}
-            onLoad={() => URL.revokeObjectURL(svgUrl)}
-            onError={() => URL.revokeObjectURL(svgUrl)}
-          />
-        </div>
-      </div>
-    );
-  }
-
-  if (doc.kind === 'text' && ext === SVG_EXT && doc.text) {
-    const svgUrl = URL.createObjectURL(new Blob([doc.text], { type: 'image/svg+xml' }));
-    return (
-      <div className="file-viewer-pane">
-        <div className="file-viewer-meta">{sizeLine}</div>
-        <div className="file-viewer-media">
-          <img
-            src={svgUrl}
-            alt={fileName}
-            onLoad={() => URL.revokeObjectURL(svgUrl)}
-            onError={() => URL.revokeObjectURL(svgUrl)}
-          />
+          <img src={svgBlobUrl} alt={fileName} />
         </div>
       </div>
     );
@@ -225,6 +260,15 @@ export function FileContent({ state, fileName }: { state: ViewState; fileName: s
     );
   }
 
+  if (doc.kind === 'word' && doc.data) {
+    return (
+      <div className="file-viewer-pane">
+        <div className="file-viewer-meta">{sizeLine}</div>
+        <DocxRenderer data={doc.data} />
+      </div>
+    );
+  }
+
   if ((doc.kind === 'text' || doc.kind === 'word') && doc.text !== undefined) {
     return (
       <div className="file-viewer-pane">
@@ -241,6 +285,7 @@ export function FileContent({ state, fileName }: { state: ViewState; fileName: s
         <iframe
           className="file-viewer-iframe"
           src={pdfBlobUrl}
+          sandbox=""
           title={doc.name}
         />
       </div>
@@ -252,6 +297,29 @@ export function FileContent({ state, fileName }: { state: ViewState; fileName: s
       <div className="file-viewer-pane">
         <div className="file-viewer-meta">{sizeLine}</div>
         <pre className="file-viewer-text">{doc.text}</pre>
+      </div>
+    );
+  }
+
+  if (doc.kind === 'pptx' && doc.data) {
+    return (
+      <div className="file-viewer-pane">
+        <div className="file-viewer-meta">{sizeLine}</div>
+        <PptxRenderer data={doc.data} />
+      </div>
+    );
+  }
+
+  if (doc.kind === 'xlsx' && xlsxBlobUrl) {
+    return (
+      <div className="file-viewer-pane">
+        <div className="file-viewer-meta">{sizeLine}</div>
+        <iframe
+          className="file-viewer-iframe"
+          src={xlsxBlobUrl}
+          sandbox=""
+          title={doc.name}
+        />
       </div>
     );
   }
@@ -282,11 +350,86 @@ export function FileContent({ state, fileName }: { state: ViewState; fileName: s
     <div className="file-viewer-pane file-viewer-binary">
       <div className="file-viewer-meta">{sizeLine}</div>
       <div className="file-viewer-status">
-        This file cannot be previewed inline.
+        无法在应用内预览此文件
         <div className="file-viewer-path-hint">{doc.path}</div>
+        <button
+          type="button"
+          className="file-viewer-open-btn"
+          onClick={() => {
+            if (sessionId) void window.vibeMeet.documents.openExternal(sessionId, doc.path).then((res) => {
+              if (res && !res.ok) console.warn('[FileViewer] open-external failed:', res.error);
+            });
+          }}
+        >
+          用系统应用打开
+        </button>
       </div>
     </div>
   );
+}
+
+function DocxRenderer({ data }: { data: Uint8Array }) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    let cancelled = false;
+    el.innerHTML = '';
+    import('docx-preview').then(({ renderAsync }) => {
+      if (cancelled) return;
+      return renderAsync(data.buffer as ArrayBuffer, el, undefined, {
+        className: 'docx-preview-body',
+        inWrapper: true,
+        ignoreWidth: false,
+        ignoreHeight: false,
+      });
+    }).catch((err: unknown) => {
+      if (!cancelled) setError(err instanceof Error ? err.message : 'DOCX 渲染失败');
+    });
+    return () => { cancelled = true; };
+  }, [data]);
+
+  if (error) return <div className="file-viewer-status file-viewer-error">{error}</div>;
+  return <div ref={containerRef} className="file-viewer-docx" />;
+}
+
+function PptxRenderer({ data }: { data: Uint8Array }) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    let cancelled = false;
+    el.innerHTML = '';
+    import('pptx-preview').then((mod) => {
+      if (cancelled) return;
+      const pptx = mod.default || mod;
+      const width = el.clientWidth - 48;
+      const height = Math.round(width * 9 / 16);
+      pptx.init(el, width, height);
+      return pptx.preview(data.buffer as ArrayBuffer);
+    }).catch((err: unknown) => {
+      if (!cancelled) setError(err instanceof Error ? err.message : 'PPTX 渲染失败');
+    });
+    return () => { cancelled = true; };
+  }, [data]);
+
+  if (error) return <div className="file-viewer-status file-viewer-error">{error}</div>;
+  return <div ref={containerRef} className="file-viewer-pptx" />;
+}
+
+function wrapXlsxHtml(tableHtml: string): string {
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"><style>
+body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding: 16px; margin: 0; background: #fff; color: #222; }
+table { border-collapse: collapse; width: 100%; margin-bottom: 24px; font-size: 13px; }
+td, th { border: 1px solid #d0d0d0; padding: 6px 10px; text-align: left; white-space: nowrap; }
+th { background: #f5f5f5; font-weight: 600; position: sticky; top: 0; }
+tr:nth-child(even) { background: #fafafa; }
+h3 { margin: 20px 0 8px; font-size: 15px; color: #555; border-bottom: 1px solid #e0e0e0; padding-bottom: 4px; }
+</style></head><body>${tableHtml}</body></html>`;
 }
 
 function MarkdownRenderer({ text }: { text: string }) {
@@ -365,11 +508,22 @@ function simpleMarkdown(text: string): string {
   return out.join('\n');
 }
 
+function sanitizeHref(url: string): string {
+  const decoded = url.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"');
+  const scheme = decoded.trim().toLowerCase().replace(/[\x00-\x1f\x7f]/g, '');
+  if (/^(javascript|vbscript|data|blob):/i.test(scheme)) return '';
+  return url;
+}
+
 function inlineFormat(s: string): string {
   let result = escapeHtml(s);
   result = result.replace(/`([^`]+)`/g, '<code>$1</code>');
   result = result.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
   result = result.replace(/\*([^*]+)\*/g, '<em>$1</em>');
-  result = result.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+  result = result.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_match, text: string, href: string) => {
+    const safe = sanitizeHref(href);
+    if (!safe) return escapeHtml(text.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"'));
+    return `<a href="${safe}" target="_blank" rel="noopener">${text}</a>`;
+  });
   return result;
 }

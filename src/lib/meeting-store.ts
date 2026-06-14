@@ -565,8 +565,8 @@ class MeetingStore {
    *  emit entries, but we still guard defensively. */
   private persistTalkerEntry(slot: SlotInternal, entry: TranscriptEntry): void {
     if (!slot.historyLoaded || slot.placeholder) return;
-    void window.vibeMeet.transcripts.append(slot.cwd, entry).catch(() => {
-      /* fire-and-forget — transient FS hiccup shouldn't disrupt the UI */
+    void window.vibeMeet.transcripts.append(slot.cwd, entry).catch((err: unknown) => {
+      console.warn('[meeting-store] transcript append failed:', err);
     });
   }
 
@@ -833,12 +833,25 @@ class MeetingStore {
       const pending = slot.pendingInput;
       slot.pendingInput = [];
       if (pending.length > 0) {
+        // Send directly to this slot's session via explicit ID — NOT through
+        // activeLiveSlot() which would route to whichever tab is active now.
+        const targetId = slot.id;
         void (async () => {
           for (const item of pending) {
             try {
-              if (item.kind === 'text') await this.sendText(item.text);
-              else if (item.kind === 'image') await this.sendImage(item.dataUrl, item.caption);
-              else if (item.kind === 'attachments') await this.sendAttachments(item.staged, item.text);
+              if (item.kind === 'text') {
+                await window.vibeMeet.sendUserText(targetId, item.text);
+              } else if (item.kind === 'image') {
+                await window.vibeMeet.sendUserImage(targetId, item.dataUrl, item.caption);
+              } else if (item.kind === 'attachments') {
+                const wire = item.staged.map((a) => ({
+                  name: a.name,
+                  mime: a.mime,
+                  sizeBytes: a.sizeBytes,
+                  dataBase64: a.dataBase64,
+                }));
+                await window.vibeMeet.sendUserAttachments(targetId, wire, item.text);
+              }
             } catch (err) {
               console.warn('[meeting-store] pendingInput replay threw', err);
             }
@@ -1531,7 +1544,8 @@ class MeetingStore {
     const slot = this.activeLiveSlot();
     if (!slot) return;
     if (slot.status === 'failed') return;
-    const entry: TranscriptEntry = { id: uid(), role: 'user', text, ts: Date.now() };
+    const entryId = uid();
+    const entry: TranscriptEntry = { id: entryId, role: 'user', text, ts: Date.now() };
     this.updateWorker(slot, 'talker', (w) => ({
       ...w,
       transcript: appendCapped(w.transcript, [entry], MAX_TRANSCRIPT),
@@ -1541,15 +1555,29 @@ class MeetingStore {
       slot.pendingInput.push({ kind: 'text', text });
       return;
     }
-    await window.vibeMeet.sendUserText(slot.id, text);
+    try {
+      await window.vibeMeet.sendUserText(slot.id, text);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error('[meeting-store] sendText failed:', msg);
+      this.updateWorker(slot, 'talker', (w) => ({
+        ...w,
+        activity: appendCapped(
+          w.activity,
+          [{ id: uid(), kind: 'error', title: 'Text send failed', detail: msg, ts: Date.now() }],
+          MAX_ACTIVITY,
+        ),
+      }));
+    }
   }
 
   async sendImage(dataUrl: string, caption: string) {
     const slot = this.activeLiveSlot();
     if (!slot) return;
     if (slot.status === 'failed') return;
+    const entryId = uid();
     const entry: TranscriptEntry = {
-      id: uid(),
+      id: entryId,
       role: 'user',
       text: caption || 'Shared current screen',
       imageUrl: dataUrl,
@@ -1564,7 +1592,21 @@ class MeetingStore {
       slot.pendingInput.push({ kind: 'image', dataUrl, caption });
       return;
     }
-    await window.vibeMeet.sendUserImage(slot.id, dataUrl, caption);
+    try {
+      await window.vibeMeet.sendUserImage(slot.id, dataUrl, caption);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error('[meeting-store] sendImage failed:', msg);
+      this.updateWorker(slot, 'talker', (w) => ({
+        ...w,
+        transcript: w.transcript.filter((t) => t.id !== entryId),
+        activity: appendCapped(
+          w.activity,
+          [{ id: uid(), kind: 'error', title: 'Image send failed', detail: msg, ts: Date.now() }],
+          MAX_ACTIVITY,
+        ),
+      }));
+    }
   }
 
   async sendAttachments(
@@ -1648,14 +1690,13 @@ class MeetingStore {
   async resolvePermission(id: string, decision: 'allow' | 'deny') {
     const sessionId = this.effectiveSessionId();
     if (!sessionId) return;
+    const slot = this.slots.get(sessionId);
+    if (!slot) return;
     try {
       await window.vibeMeet.resolvePermission(sessionId, id, decision);
     } catch (err) {
       console.error('[meeting-store] resolvePermission IPC failed:', err);
-      return;
     }
-    const slot = this.slots.get(sessionId);
-    if (!slot) return;
     this.mutateSlot(slot.id, (s) => {
       const workers = new Map(s.workers);
       for (const [key, w] of workers) {
@@ -1689,7 +1730,11 @@ class MeetingStore {
     const slot = this.slots.get(id);
     if (!slot || slot.placeholder) return;
     slot.intendedExit = true;
-    await window.vibeMeet.endSession(id);
+    try {
+      await window.vibeMeet.endSession(id);
+    } catch (err) {
+      console.error('[meeting-store] endSession IPC failed:', err);
+    }
     this.mutateSlot(slot.id, (s) => ({ ...s, running: false, lastError: null }));
   }
 

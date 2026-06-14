@@ -73,6 +73,10 @@ export interface WorkerSchedulerOpts {
    *  Owned by the orchestrator because the MCP factory needs the bridge;
    *  the scheduler treats the returned object as opaque mcpServer config. */
   buildWorkerMcp: (workerId: string) => unknown;
+  /** Optional computer-use MCP builder. When provided, workers with specialty
+   *  'computer-use' get this MCP server mounted alongside the standard
+   *  meeting-worker MCP, giving them screenshot/click/type/scroll tools. */
+  buildComputerUseMcp?: (workerId: string) => unknown;
   /** Talker accessor — used to push worker-update batches, file-collision
    *  warnings, task_done completions, and cascade-failure notes. Returns
    *  null when the talker hasn't started yet or has been torn down. */
@@ -89,6 +93,25 @@ export interface WorkerSchedulerOpts {
   getSpeechFilterMode: () => 'strict' | 'off';
 }
 
+const COMPUTER_USE_WORKER_PROMPT = `
+
+你拥有 Computer Use 能力——可以截屏、移动鼠标、点击、打字、按键、滚动来操控用户的桌面。
+
+工作流程：
+1. 先调 screenshot 截屏，观察当前屏幕状态
+2. 分析截图中的 UI 元素位置（坐标是屏幕像素）
+3. 使用 mouse_click / keyboard_type / keyboard_press / scroll 执行操作
+4. 再次 screenshot 验证操作结果
+5. 重复直到任务完成
+
+注意事项：
+- 坐标是 Retina 屏幕像素坐标，会自动缩放到逻辑坐标
+- 先 screenshot 看到界面后再操作，不要盲操作
+- 每步操作后 screenshot 验证，确保操作成功
+- 如果操作需要辅助功能权限（Accessibility），工具会返回错误提示
+- 不要在 screenshot 中暴露或朗读用户的敏感信息`;
+
+const MAX_CONCURRENT_WORKERS = 4;
 const QUEUED_UPDATE_FLUSH_MS = 1200;
 const QUEUED_UPDATE_MAX = 8;
 // B1 stall watchdog: a worker that produces no SDK event for this long while
@@ -177,6 +200,23 @@ export class WorkerScheduler {
       }
     }
     return out;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Computer Use screenshot injection
+
+  /** Inject a screenshot PNG into a specific worker's session input queue
+   *  as an image content block. Called by the computer-use MCP's screenshot
+   *  tool after capturing the screen — the tool result itself is text-only
+   *  (MCP doesn't support image content blocks), so we push the image
+   *  directly into the worker's conversation. */
+  injectScreenshotToWorker(workerId: string, data: { pngBase64: string; width: number; height: number }): void {
+    const handle = this.workers.get(workerId);
+    if (!handle?.session) return;
+    handle.session.sendUserContent([
+      { type: 'image', source: { type: 'base64', media_type: 'image/png', data: data.pngBase64 } },
+      { type: 'text', text: `Screenshot (${data.width}×${data.height}). Analyze this image to determine the next action.` },
+    ], 'normal');
   }
 
   // ---------------------------------------------------------------------------
@@ -665,16 +705,36 @@ export class WorkerScheduler {
     this.spawnWorker(handle);
   }
 
+  private countRunning(): number {
+    let n = 0;
+    for (const h of this.workers.values()) {
+      if (h.status === 'running') n++;
+    }
+    return n;
+  }
+
   private spawnReadyWorkers(): void {
     for (const handle of this.workers.values()) {
       if (handle.status !== 'pending') continue;
       const allDepsDone = handle.deps.every((d) => this.workers.get(d)?.status === 'done');
-      if (allDepsDone) this.spawnWorker(handle);
+      if (!allDepsDone) continue;
+      if (this.countRunning() >= MAX_CONCURRENT_WORKERS) break;
+      this.spawnWorker(handle);
     }
   }
 
   private spawnWorker(handle: WorkerHandle): void {
     const workerMcp = this.opts.buildWorkerMcp(handle.id);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const mcpServers: Record<string, any> = { 'meeting-worker': workerMcp as any };
+    let promptAppend = WORKER_PROMPT;
+
+    if (handle.specialty === 'computer-use' && this.opts.buildComputerUseMcp) {
+      const cuMcp = this.opts.buildComputerUseMcp(handle.id);
+      mcpServers['computer-use'] = cuMcp as any;
+      promptAppend += COMPUTER_USE_WORKER_PROMPT;
+    }
+
     try {
       handle.session = this.opts.sessionFactory({
         cwd: this.opts.cwd,
@@ -683,9 +743,8 @@ export class WorkerScheduler {
         confirmDestructive: this.opts.confirmDestructive,
         emit: (e) => this.onWorkerEvent(handle.id, e),
         sessionOptions: {
-          systemPrompt: { type: 'preset', preset: 'claude_code', append: WORKER_PROMPT },
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          mcpServers: { 'meeting-worker': workerMcp as any },
+          systemPrompt: { type: 'preset', preset: 'claude_code', append: promptAppend },
+          mcpServers,
         },
       });
       handle.status = 'running';

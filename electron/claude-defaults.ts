@@ -30,7 +30,7 @@ import { homedir } from 'node:os';
 // relative to .claude. Carving out `skills/ecc` and `rules/ecc` (rather than
 // the whole `skills/` / `rules/` tree) preserves any other skill/rule
 // vendors the user may have installed.
-const MERGE_DIRS = ['agents', 'commands', 'skills/ecc', 'rules/ecc'] as const;
+const MERGE_DIRS = ['agents', 'commands', 'skills/ecc', 'rules/ecc', 'plugins/superpowers'] as const;
 
 const MANIFEST_VERSION = 1;
 
@@ -225,13 +225,18 @@ export async function buildClaudeShadowHome(): Promise<ClaudeHomeResult> {
   // 3. Pass-through any other vendor subdirs under skills/ and rules/ that the
   //    user has (e.g. skills/their-vendor/), so we don't shadow them by
   //    accident when we mkdir'd skills/ in step 2.
-  for (const top of ['skills', 'rules'] as const) {
+  const VENDOR_PASSTHROUGH: Record<string, Set<string>> = {
+    skills: new Set(['ecc']),
+    rules: new Set(['ecc']),
+    plugins: new Set(['superpowers']),
+  };
+  for (const [top, managed] of Object.entries(VENDOR_PASSTHROUGH)) {
     const userDir = join(realDotClaude, top);
     if (!(await pathExists(userDir))) continue;
     try {
       const entries = await fs.readdir(userDir);
       for (const entry of entries) {
-        if (entry === 'ecc') continue; // already merged in step 2
+        if (managed.has(entry)) continue;
         if (await safeSymlink(join(userDir, entry), join(shadowDotClaude, top, entry))) passthrough++;
       }
     } catch { /* ignore */ }

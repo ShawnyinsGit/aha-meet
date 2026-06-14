@@ -10,7 +10,7 @@
 // by projectId first, then ranks within scope (recency or BM25-ish over
 // content+tags) and stops once an approximate token budget is consumed.
 
-import { app } from 'electron';
+import { app, dialog } from 'electron';
 import {
   createHash,
   randomUUID,
@@ -19,6 +19,7 @@ import {
   existsSync,
   readFileSync,
   realpathSync,
+  renameSync,
 } from 'node:fs';
 import { mkdir, rename, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
@@ -118,7 +119,23 @@ function readFromDisk(): MemoryFile {
     }
   } catch (err) {
     console.error('[memory] failed to parse memory.json, starting fresh:', err);
+    const bakPath = `${p}.bak`;
+    try {
+      renameSync(p, bakPath);
+      console.warn(`[memory] corrupt memory.json backed up to ${bakPath}`);
+    } catch (bakErr) {
+      console.error('[memory] could not back up corrupt memory.json:', bakErr);
+    }
     cachedFile = { entries: [] };
+    app.whenReady().then(() => {
+      dialog.showMessageBox({
+        type: 'warning',
+        title: '记忆文件损坏',
+        message: '记忆数据文件解析失败，已恢复为空记录。',
+        detail: `损坏的文件已备份至：${bakPath}`,
+        buttons: ['确定'],
+      }).catch(() => {});
+    });
   }
   return cachedFile;
 }

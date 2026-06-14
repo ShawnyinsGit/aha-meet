@@ -33,6 +33,7 @@ export const TALKER_TRANSCRIPT_MAX_ENTRIES = 200;
 // devops/docs checked before generic frontend/backend so that a "code review"
 // task isn't miscategorized as backend just because it mentions an API.
 const SPECIALTY_PATTERNS: Array<[WorkerSpecialtyKind, RegExp]> = [
+  ['computer-use', /\b(computer[\s-]*use|screen[\s-]*control|click|点击|填表|填写表单|自动操作|操控屏幕|mouse|鼠标|键盘操作|桌面自动化|desktop[\s-]*automat|帮我[点填按拖滚]|click.*button|fill.*form|type.*into)\b/i],
   ['review', /\b(code\s*review|review|审查|复审|复核|审阅|lint|reviewer|审一遍)\b/i],
   ['test', /\b(test|tests|spec|specs|coverage|e2e|playwright|jest|vitest|测试|跑测|单测|集成测试|tdd)\b/i],
   ['docs', /\b(docs?|documentation|readme|changelog|文档|说明|注释|docstring|codemap)\b/i],

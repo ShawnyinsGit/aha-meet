@@ -18,6 +18,7 @@ import {
 import type { CreateDecisionPayload } from './decisions.js';
 import type { MemoryCategory } from './memory.js';
 import type { WorkerSpecialtyKind } from './orchestrator-types.js';
+import { listAssets } from './attachments/assets.js';
 
 export interface DecisionCreationResult {
   id: string;
@@ -198,7 +199,7 @@ export function buildTalkerMcp(bridge: OrchestratorBridge) {
   });
 }
 
-export function buildWorkerMcp(bridge: OrchestratorBridge, workerId: string) {
+export function buildWorkerMcp(bridge: OrchestratorBridge, workerId: string, cwd: string) {
   return createSdkMcpServer({
     name: 'meeting-worker',
     version: '0.2.0',
@@ -224,6 +225,19 @@ export function buildWorkerMcp(bridge: OrchestratorBridge, workerId: string) {
           const r = await bridge.saveMemory(args);
           if (!r.ok) return { content: [{ type: 'text', text: `save_memory rejected: ${r.error}` }] };
           return { content: [{ type: 'text', text: `saved ${args.category}: ${r.preview ?? ''}` }] };
+        },
+      ),
+      tool(
+        'list_assets',
+        'List files in the .vibe-assets/ directory — images and documents the user shared during meetings. Returns [{name, sizeBytes}]. Use Read tool on <cwd>/.vibe-assets/<name> to access file contents.',
+        {},
+        async () => {
+          const entries = await listAssets(cwd);
+          if (entries.length === 0) {
+            return { content: [{ type: 'text', text: 'No assets found in .vibe-assets/' }] };
+          }
+          const lines = entries.map((e) => `${e.name} (${e.sizeBytes} bytes)`);
+          return { content: [{ type: 'text', text: lines.join('\n') }] };
         },
       ),
     ],

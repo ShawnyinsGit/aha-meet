@@ -13,7 +13,6 @@ interface DeliveryViewerProps {
     | { ok: true; route: 'worker' | 'talker'; queued?: boolean }
     | { ok: false; error: string }
   >;
-  onFileSelect?: (relativePath: string) => void;
 }
 
 export function DeliveryViewer({
@@ -22,7 +21,6 @@ export function DeliveryViewer({
   aiSpeaking,
   onAccept,
   onRevise,
-  onFileSelect,
 }: DeliveryViewerProps) {
   const files = delivery.files;
   const [activePath, setActivePath] = useState<string>(
@@ -44,7 +42,6 @@ export function DeliveryViewer({
   useEffect(() => {
     const first = files[0]?.snapshotRelativePath ?? files[0]?.path ?? '';
     setActivePath(first);
-    if (first) onFileSelect?.(first);
     setFeedback('');
     setFeedbackOpen(false);
     setToast(null);
@@ -142,7 +139,7 @@ export function DeliveryViewer({
                     <button
                       type="button"
                       className={`delivery-viewer-file${isActive ? ' is-active' : ''}`}
-                      onClick={() => { setActivePath(filePath); onFileSelect?.(filePath); }}
+                      onClick={() => { setActivePath(filePath); }}
                       title={f.path}
                     >
                       <span className="delivery-viewer-file-name">

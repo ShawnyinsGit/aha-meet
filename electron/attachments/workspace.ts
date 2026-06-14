@@ -10,19 +10,23 @@ const DIR_NAME = '.vibe-attachments';
 
 const gitignoreTouched = new Set<string>();
 
+export async function ensureDir(cwd: string, dirName: string): Promise<string | null> {
+  try {
+    const dir = path.join(cwd, dirName);
+    await fs.mkdir(dir, { recursive: true });
+    return dir;
+  } catch {
+    return null;
+  }
+}
+
 export interface WorkspaceWriteResult {
   absPath: string;
   finalName: string;
 }
 
 export async function ensureAttachmentsDir(cwd: string): Promise<string | null> {
-  try {
-    const dir = path.join(cwd, DIR_NAME);
-    await fs.mkdir(dir, { recursive: true });
-    return dir;
-  } catch {
-    return null;
-  }
+  return ensureDir(cwd, DIR_NAME);
 }
 
 export async function writeAttachmentSafely(
@@ -36,23 +40,28 @@ export async function writeAttachmentSafely(
 
   let candidate = safeBase;
   let n = 2;
-  while (existsSync(path.join(dir, candidate))) {
-    candidate = ext ? `${stem}-${n}.${ext}` : `${stem}-${n}`;
-    n++;
-    if (n > 9999) throw new Error('too many collisions writing attachment');
+  for (;;) {
+    const absPath = path.join(dir, candidate);
+    try {
+      await fs.writeFile(absPath, buffer, { flag: 'wx' });
+      return { absPath, finalName: candidate };
+    } catch (err: unknown) {
+      if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
+      candidate = ext ? `${stem}-${n}.${ext}` : `${stem}-${n}`;
+      n++;
+      if (n > 9999) throw new Error('too many collisions writing attachment');
+    }
   }
-  const absPath = path.join(dir, candidate);
-  await fs.writeFile(absPath, buffer);
-  return { absPath, finalName: candidate };
 }
 
-export async function maybeAppendGitignore(cwd: string): Promise<void> {
-  if (gitignoreTouched.has(cwd)) return;
-  gitignoreTouched.add(cwd);
+export async function maybeAppendGitignore(cwd: string, dirName: string = DIR_NAME): Promise<void> {
+  const key = `${cwd}\0${dirName}`;
+  if (gitignoreTouched.has(key)) return;
+  gitignoreTouched.add(key);
   if (!existsSync(path.join(cwd, '.git'))) return;
 
   const gitignorePath = path.join(cwd, '.gitignore');
-  const entry = `${DIR_NAME}/`;
+  const entry = `${dirName}/`;
   try {
     let current = '';
     try {
@@ -61,7 +70,7 @@ export async function maybeAppendGitignore(cwd: string): Promise<void> {
       current = '';
     }
     const lines = current.split(/\r?\n/).map((l) => l.trim());
-    if (lines.includes(entry) || lines.includes(DIR_NAME)) return;
+    if (lines.includes(entry) || lines.includes(dirName)) return;
     const sep = current.length > 0 && !current.endsWith('\n') ? '\n' : '';
     await fs.appendFile(gitignorePath, `${sep}${entry}\n`);
   } catch {
@@ -69,7 +78,7 @@ export async function maybeAppendGitignore(cwd: string): Promise<void> {
   }
 }
 
-function sanitizeFilename(name: string): string {
+export function sanitizeFilename(name: string): string {
   // strip path separators + control chars; keep dots so the extension survives.
   const stripped = name.replace(/[\/\\\x00-\x1f]/g, '_').trim();
   if (!stripped || stripped === '.' || stripped === '..') return `attachment-${Date.now()}`;

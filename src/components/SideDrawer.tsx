@@ -45,7 +45,7 @@ const ACCEPT_ATTR = [
   '.sh', '.bash', '.zsh', '.fish',
   '.sql', '.graphql', '.gql',
   '.csv', '.tsv',
-  '.docx', '.pdf',
+  '.docx', '.pdf', '.pptx', '.xlsx', '.xls',
   'image/png', 'image/jpeg', 'image/webp',
 ].join(',');
 
@@ -151,6 +151,7 @@ export function SideDrawer({
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [now, setNow] = useState(() => Date.now());
   const [staged, setStaged] = useState<StagedAttachment[]>([]);
+  const [previewImg, setPreviewImg] = useState<string | null>(null);
   const [rejected, setRejected] = useState<Array<{ id: string; name: string; reason: string }>>([]);
   const [staging, setStaging] = useState(false);
   const endRef = useRef<HTMLDivElement | null>(null);
@@ -324,7 +325,20 @@ export function SideDrawer({
                     )}
                   </div>
                   {e.imageUrl && (
-                    <img className="msg-image" src={e.imageUrl} alt={e.text || 'Shared screenshot'} />
+                    <img
+                      className="msg-image msg-image-clickable"
+                      src={e.imageUrl}
+                      alt={e.text || 'Shared screenshot'}
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => setPreviewImg(e.imageUrl!)}
+                      onKeyDown={(ev) => {
+                        if (ev.key === 'Enter' || ev.key === ' ') {
+                          ev.preventDefault();
+                          setPreviewImg(e.imageUrl!);
+                        }
+                      }}
+                    />
                   )}
                   {e.attachments && e.attachments.length > 0 && (
                     <div className="msg-attachments">
@@ -506,6 +520,32 @@ export function SideDrawer({
             sessionId={sessionId ?? null}
             onViewFile={(path) => onViewFile?.(path)}
             viewingPath={viewingFilePath ?? null}
+          />
+        </div>
+      )}
+
+      {previewImg && (
+        <div
+          className="img-preview-backdrop"
+          onClick={() => setPreviewImg(null)}
+          onKeyDown={(ev) => { if (ev.key === 'Escape') setPreviewImg(null); }}
+          role="dialog"
+          aria-label="图片预览"
+          tabIndex={-1}
+        >
+          <button
+            type="button"
+            className="img-preview-close"
+            onClick={() => setPreviewImg(null)}
+            aria-label="关闭预览"
+          >
+            <X size={20} aria-hidden="true" />
+          </button>
+          <img
+            className="img-preview-img"
+            src={previewImg}
+            alt="Preview"
+            onClick={(ev) => ev.stopPropagation()}
           />
         </div>
       )}

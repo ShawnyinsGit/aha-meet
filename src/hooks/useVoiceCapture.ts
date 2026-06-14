@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { MicVAD } from '@ricky0123/vad-web';
+import type { MicVAD } from '@ricky0123/vad-web';
 import { cosineSimilarity, embedSpeaker } from '../lib/speaker-embedding';
 
 // Below this many samples (~0.3s @ 16 kHz) we skip the voice-lock gate
@@ -24,6 +24,9 @@ interface UseVoiceCaptureOptions {
   onTranscript: (text: string) => void;
   onBargeIn?: () => void;
   lang?: 'auto' | 'zh' | 'en';
+  // When true, VAD stays alive but all speech segments are silently dropped.
+  // Used for spacebar mute — avoids the 200-500ms VAD destroy/recreate cost.
+  paused?: boolean;
   // When true, drop any speech segment that starts during this window. Used to
   // ignore the mic while TTS is playing back through the speakers — otherwise
   // the VAD trips on its own output, fires barge-in (cutting Claude off), and
@@ -60,6 +63,7 @@ export function useVoiceCapture({
   onTranscript,
   onBargeIn,
   lang = 'auto',
+  paused = false,
   suppressed = false,
   voiceLockEnabled = false,
   voicePrintEmbedding = null,
@@ -85,6 +89,7 @@ export function useVoiceCapture({
   const onBargeInRef = useRef(onBargeIn);
   const onVoiceLockRejectRef = useRef(onVoiceLockReject);
   const tapSegmentRef = useRef(tapSegment);
+  const pausedRef = useRef(paused);
   // Mirrored to a ref so VAD callbacks see the current value without
   // re-instantiating the VAD on every toggle.
   const suppressedRef = useRef(suppressed);
@@ -125,6 +130,9 @@ export function useVoiceCapture({
       segmentSuppressedRef.current = false;
     }
   }, [tapSegment]);
+  useEffect(() => {
+    pausedRef.current = paused;
+  }, [paused]);
   useEffect(() => {
     suppressedRef.current = suppressed;
   }, [suppressed]);
@@ -202,6 +210,7 @@ export function useVoiceCapture({
           return;
         }
 
+        const { MicVAD } = await import('@ricky0123/vad-web');
         const vad = await MicVAD.new({
           model: 'v5',
           baseAssetPath: VAD_ASSET_BASE,
@@ -230,6 +239,7 @@ export function useVoiceCapture({
           minSpeechMs: 100,
           preSpeechPadMs: 256,
           onSpeechStart: () => {
+            if (pausedRef.current) return;
             // Enrollment is a user-driven capture — never let TTS suppression
             // swallow it, otherwise the panel hangs at "waiting for mic" while
             // Claude is mid-greeting. Barge-in is also pointless here: the
@@ -253,6 +263,10 @@ export function useVoiceCapture({
             }
           },
           onSpeechEnd: async (audio: Float32Array) => {
+            if (pausedRef.current) {
+              setListening(false);
+              return;
+            }
             setListening(false);
 
             // Set once the suppressed-segment echo gate has already confirmed

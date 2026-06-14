@@ -1274,7 +1274,60 @@ button:disabled {
   object-fit: contain;
   background: var(--bg-elevated);
 }
+.msg-image-clickable {
+  cursor: pointer;
+  transition: opacity var(--transition), transform var(--transition);
+}
+.msg-image-clickable:hover {
+  opacity: 0.85;
+  transform: scale(1.02);
+}
+.msg-image-clickable:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
 .msg-user .msg-image { align-self: flex-end; }
+
+/* ─── Image preview lightbox ──────────────────────────────────────── */
+.img-preview-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgba(0, 0, 0, 0.82);
+  backdrop-filter: blur(8px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: zoom-out;
+}
+.img-preview-close {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background var(--transition);
+  z-index: 1;
+}
+.img-preview-close:hover {
+  background: rgba(255, 255, 255, 0.24);
+}
+.img-preview-img {
+  max-width: 92vw;
+  max-height: 90vh;
+  object-fit: contain;
+  border-radius: 6px;
+  cursor: default;
+  box-shadow: 0 24px 64px -16px rgba(0, 0, 0, 0.7);
+}
 .msg-assistant .msg-body { background: var(--bg-elevated); color: var(--text-primary); }
 .msg-system .msg-body {
   background: transparent; color: var(--text-muted);
@@ -2642,6 +2695,125 @@ button:disabled {
 .memory-textarea:focus,
 .memory-tag-input:focus { border-color: rgba(124, 198, 255, 0.55); }
 
+/* ----- Skill manager panel ----- */
+
+.skill-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 460px;
+}
+.skill-install-form {
+  display: flex;
+  gap: 6px;
+}
+.skill-install-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 6px 10px;
+  font-size: 12px;
+  color: var(--text-primary);
+  background: rgba(0, 0, 0, 0.30);
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  outline: none;
+}
+.skill-install-input:focus { border-color: rgba(124, 198, 255, 0.55); }
+.skill-install-btn {
+  flex: 0 0 auto;
+  padding: 6px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #fff;
+  background: var(--accent);
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: opacity var(--transition);
+}
+.skill-install-btn:hover { opacity: 0.85; }
+.skill-install-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.skill-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+.skill-error { color: #ff7a7a; }
+.skill-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 300px;
+  overflow-y: auto;
+}
+.skill-empty {
+  padding: 16px 0;
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.skill-item {
+  padding: 8px 10px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+}
+.skill-item-main {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.skill-item-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.skill-item-source {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-secondary);
+}
+.skill-item-desc {
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.skill-item-actions {
+  margin-top: 6px;
+  display: flex;
+  gap: 6px;
+}
+.skill-item-readonly {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.skill-btn {
+  padding: 3px 8px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border-soft);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background var(--transition);
+}
+.skill-btn:hover { background: rgba(255, 255, 255, 0.08); }
+.skill-btn-danger {
+  color: #ff7a7a;
+  border-color: rgba(255, 122, 122, 0.35);
+}
+.skill-btn-danger:hover { background: rgba(255, 122, 122, 0.12); }
+
 /* ----- Interactive tile (clickable self tile) ----- */
 .tile-interactive {
   cursor: pointer;
@@ -3685,4 +3857,76 @@ button:disabled {
 
 .file-viewer-md-body strong { font-weight: 600; }
 .file-viewer-md-body em { font-style: italic; }
+
+/* ─── FileViewer: action buttons & rich renderers ──────────────────── */
+.file-viewer-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.file-viewer-action-btn {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  transition: background var(--transition), color var(--transition);
+}
+.file-viewer-action-btn:hover {
+  background: rgba(255,255,255,0.1);
+  color: var(--text-primary);
+}
+
+.file-viewer-open-btn {
+  margin-top: 12px;
+  padding: 8px 18px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  background: rgba(255,255,255,0.06);
+  color: var(--text-primary);
+  border: 1px solid var(--border-soft);
+  cursor: pointer;
+  transition: background var(--transition), border-color var(--transition);
+}
+.file-viewer-open-btn:hover {
+  background: rgba(255,255,255,0.12);
+  border-color: var(--border-strong);
+}
+
+.file-viewer-binary {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 200px;
+}
+
+.file-viewer-docx {
+  flex: 1;
+  overflow: auto;
+  padding: 16px;
+  background: #fff;
+  border-radius: 4px;
+  margin: 8px;
+}
+.file-viewer-docx .docx-preview-body {
+  color: #222;
+}
+
+.file-viewer-pptx {
+  flex: 1;
+  overflow: auto;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
 

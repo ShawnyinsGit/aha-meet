@@ -49,7 +49,8 @@ function buildRows(workers: WorkerState[]): TaskRow[] {
       status: w.status,
       owner: w.id,
       detail: w.summary || w.lastText || '',
-    }));
+    }))
+    .reverse();
 }
 
 export function UserTasksPanel({ workers }: UserTasksPanelProps) {

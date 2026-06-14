@@ -11,6 +11,14 @@ export default defineConfig({
     emptyOutDir: true,
     rollupOptions: {
       input: resolve(__dirname, 'index.html'),
+      output: {
+        manualChunks: {
+          'react-vendor': ['react', 'react-dom'],
+          'ort': ['onnxruntime-web'],
+          'vad': ['@ricky0123/vad-web'],
+          'doc-preview': ['docx-preview', 'pptx-preview'],
+        },
+      },
     },
   },
   server: {

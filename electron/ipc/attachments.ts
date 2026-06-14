@@ -19,6 +19,7 @@ import {
   maybeAppendGitignore,
   writeAttachmentSafely,
 } from '../attachments/workspace.js';
+import { saveAttachmentToAssets } from '../attachments/assets.js';
 
 // Inline payloads travel through the Anthropic content array. The Talker runs
 // on a Haiku-class window (~200K tokens) shared with system prompt + memory +
@@ -109,6 +110,12 @@ export function registerAttachmentsIpc(ctx: IpcContext): void {
     let inlineTextUsed = 0; // running total of inline text chars across all attachments
     inlineTextUsed += caption.trim().length; // caption shares the same budget
     const cwd = slot.cwd;
+
+    if (cwd) {
+      for (const p of parsed) {
+        void saveAttachmentToAssets(cwd, p.name, p.buffer);
+      }
+    }
 
     for (const p of parsed) {
       const route = decideRoute(p, inlineTextUsed);

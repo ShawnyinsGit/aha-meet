@@ -8,30 +8,32 @@
 // Heavy: only initialized when something actually requests an embedding,
 // not on app startup. ~28 MB model + ~20-50 MB wasm runtime, ~500 ms first
 // hit, sub-100 ms per segment after warm-up.
+//
+// onnxruntime-web and fbank are dynamic-imported so they don't inflate the
+// main bundle — the ~400 KB ORT JS bindings + fft.js only load when voice-lock
+// is actually used.
 
-import * as ort from 'onnxruntime-web';
-import { computeFbank } from './fbank';
+import type { InferenceSession } from 'onnxruntime-web';
 
 export const SPEAKER_MODEL_ID = '3dspeaker-campplus-v1';
 const MODEL_URL = new URL('voice-id/3dspeaker_campplus_sv_zh_en_16k.onnx', document.baseURI).href;
 const WASM_BASE = new URL('vad/', document.baseURI).href;
 
-// Below this many frames (10ms each) the embedding is unstable enough that
-// we'd rather skip the gate than reject a legitimate short utterance.
 const MIN_FRAMES_FOR_EMBEDDING = 50; // 0.5s
 
-let sessionPromise: Promise<ort.InferenceSession> | null = null;
+let ortModule: typeof import('onnxruntime-web') | null = null;
 
-async function getSession(): Promise<ort.InferenceSession> {
+async function getOrt(): Promise<typeof import('onnxruntime-web')> {
+  if (!ortModule) ortModule = await import('onnxruntime-web');
+  return ortModule;
+}
+
+let sessionPromise: Promise<InferenceSession> | null = null;
+
+async function getSession(): Promise<InferenceSession> {
   if (sessionPromise) return sessionPromise;
-  // Reuse the wasm runtime files VAD already shipped, so we don't ship two
-  // copies of the ORT wasm. Safe because both libraries pin
-  // onnxruntime-web@^1.17 and the API surface we use is stable.
+  const ort = await getOrt();
   ort.env.wasm.wasmPaths = WASM_BASE;
-  // Threading off — Electron's renderer process isn't reliably cross-origin
-  // isolated, so SharedArrayBuffer isn't available and ORT would crash with
-  // numThreads > 1 anyway. Single-threaded CAM++ inference is ~50ms per
-  // segment which is well within VAD's redemption window.
   ort.env.wasm.numThreads = 1;
   sessionPromise = ort.InferenceSession.create(MODEL_URL, {
     executionProviders: ['wasm'],
@@ -40,38 +42,35 @@ async function getSession(): Promise<ort.InferenceSession> {
   return sessionPromise;
 }
 
-/**
- * Pre-warm the model so the first real embedding doesn't pay the
- * ~500 ms cold-start tax. Safe to call multiple times.
- */
 export function prewarmSpeakerModel(): Promise<void> {
   return getSession().then(() => undefined).catch((e) => {
-    // Don't poison the cache on transient errors — let the next caller retry.
     sessionPromise = null;
     throw e;
   });
 }
 
-/**
- * Extract a single speaker embedding from a Float32 PCM segment.
- *
- * @param samples 16 kHz mono Float32 PCM in [-1, 1].
- * @returns L2-normalized embedding (length 192 for CAM++), or null if the
- *          segment is too short for a reliable embedding.
- */
+export async function releaseSpeakerModel(): Promise<void> {
+  if (!sessionPromise) return;
+  try {
+    const session = await sessionPromise;
+    await session.release();
+  } catch { /* ignore */ }
+  sessionPromise = null;
+}
+
 export async function embedSpeaker(samples: Float32Array): Promise<Float32Array | null> {
+  const { computeFbank } = await import('./fbank');
   const { data: fbank, frames } = computeFbank(samples);
   if (frames < MIN_FRAMES_FOR_EMBEDDING) return null;
 
+  const ort = await getOrt();
   const session = await getSession();
   const inputName = session.inputNames[0];
   const outputName = session.outputNames[0];
 
-  // CAM++ expects [batch=1, T, 80].
   const tensor = new ort.Tensor('float32', fbank, [1, frames, 80]);
   const result = await session.run({ [inputName]: tensor });
   const raw = result[outputName].data as Float32Array;
-  // Copy out so the result's backing buffer can be GC'd; also detach from ORT.
   const emb = new Float32Array(raw.length);
   emb.set(raw);
   return l2Normalize(emb);
@@ -86,11 +85,6 @@ function l2Normalize(v: Float32Array): Float32Array {
   return out;
 }
 
-/**
- * Cosine similarity between two L2-normalized embedding vectors. With
- * unit-length inputs this is just a dot product, but we keep the explicit
- * form so the function is correct for non-normalized inputs too.
- */
 export function cosineSimilarity(a: Float32Array, b: Float32Array): number {
   if (a.length !== b.length) return 0;
   let dot = 0;
@@ -105,11 +99,6 @@ export function cosineSimilarity(a: Float32Array, b: Float32Array): number {
   return denom > 0 ? dot / denom : 0;
 }
 
-/**
- * Average multiple per-segment embeddings into one enrollment vector.
- * Re-normalizes after averaging so the result is unit-length and directly
- * comparable to single-segment embeddings via dot product.
- */
 export function averageEmbeddings(embeddings: Float32Array[]): Float32Array | null {
   if (embeddings.length === 0) return null;
   const dim = embeddings[0].length;

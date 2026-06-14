@@ -1,25 +1,10 @@
 import { app, BrowserWindow, dialog, shell, systemPreferences } from 'electron';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { disposeWhisper } from './whisper.js';
-import { startWhisperServer } from './whisper-server.js';
-import { buildClaudeShadowHome } from './claude-defaults.js';
 import type { AutoApproveScope } from './auto-approve-policy.js';
 import { SessionRegistry } from './sessions.js';
 import { flushSettingsWrites } from './store.js';
 import type { IpcContext, IpcEmittedEvent } from './ipc/context.js';
-import { registerSessionIpc } from './ipc/session.js';
-import { registerSessionsIpc, flushOpenTabsNow } from './ipc/sessions.js';
-import { registerAuthIpc } from './ipc/auth.js';
-import { registerDesktopIpc } from './ipc/desktop.js';
-import { registerAsrIpc } from './ipc/asr.js';
-import { registerSettingsIpc } from './ipc/settings.js';
-import { registerMemoryIpc } from './ipc/memory.js';
-import { registerDecisionIpc } from './ipc/decision.js';
-import { registerDialogIpc } from './ipc/dialog.js';
-import { registerAttachmentsIpc } from './ipc/attachments.js';
-import { registerDocumentsIpc } from './ipc/documents.js';
-import { registerTranscriptsIpc } from './ipc/transcripts.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -228,6 +213,18 @@ function summarizeToolInput(toolName: string, input: Record<string, unknown>): s
       return truncate(`Edit → ${str(input.file_path) || str(input.notebook_path)}`, 400);
     case 'SlashCommand':
       return truncate(`/${str(input.command)}`, 400);
+    case 'mcp__computer-use__screenshot':
+      return 'Screenshot';
+    case 'mcp__computer-use__mouse_click':
+      return truncate(`Click ${str(input.button) || 'left'} at (${input.x}, ${input.y})`, 400);
+    case 'mcp__computer-use__mouse_move':
+      return truncate(`Move to (${input.x}, ${input.y})`, 400);
+    case 'mcp__computer-use__keyboard_type':
+      return truncate(`Type: "${str(input.text)}"`, 400);
+    case 'mcp__computer-use__keyboard_press':
+      return truncate(`Press: ${str(input.key)}`, 400);
+    case 'mcp__computer-use__scroll':
+      return truncate(`Scroll ${str(input.direction)} at (${input.x}, ${input.y})`, 400);
     default:
       try {
         return truncate(JSON.stringify(input), 400);
@@ -291,60 +288,109 @@ const ipcCtx: IpcContext = {
   nativeConfirmDestructive,
 };
 
-registerSessionIpc(ipcCtx);
-registerSessionsIpc(ipcCtx);
-registerAuthIpc();
-registerDesktopIpc();
-registerAsrIpc();
-registerSettingsIpc();
-registerMemoryIpc(ipcCtx);
-registerDecisionIpc();
-registerDialogIpc(ipcCtx);
-registerAttachmentsIpc(ipcCtx);
-registerDocumentsIpc(ipcCtx);
-registerTranscriptsIpc(ipcCtx);
+// Resolved lazily inside whenReady(); cached here so before-quit can access it.
+let _flushOpenTabsNow: ((ctx: IpcContext) => void) | null = null;
+
+async function registerAllIpc(ctx: IpcContext): Promise<void> {
+  const [
+    { registerSessionIpc },
+    { registerSessionsIpc, flushOpenTabsNow },
+    { registerAuthIpc },
+    { registerDesktopIpc },
+    { registerAsrIpc },
+    { registerSettingsIpc },
+    { registerMemoryIpc },
+    { registerDecisionIpc },
+    { registerDialogIpc },
+    { registerAttachmentsIpc },
+    { registerDocumentsIpc },
+    { registerTranscriptsIpc },
+    { registerAccessibilityIpc },
+    { registerSkillsIpc },
+  ] = await Promise.all([
+    import('./ipc/session.js'),
+    import('./ipc/sessions.js'),
+    import('./ipc/auth.js'),
+    import('./ipc/desktop.js'),
+    import('./ipc/asr.js'),
+    import('./ipc/settings.js'),
+    import('./ipc/memory.js'),
+    import('./ipc/decision.js'),
+    import('./ipc/dialog.js'),
+    import('./ipc/attachments.js'),
+    import('./ipc/documents.js'),
+    import('./ipc/transcripts.js'),
+    import('./ipc/accessibility.js'),
+    import('./ipc/skills.js'),
+  ]);
+  _flushOpenTabsNow = flushOpenTabsNow;
+  registerSessionIpc(ctx);
+  registerSessionsIpc(ctx);
+  registerAuthIpc();
+  registerDesktopIpc();
+  registerAsrIpc();
+  registerSettingsIpc();
+  registerMemoryIpc(ctx);
+  registerDecisionIpc();
+  registerDialogIpc(ctx);
+  registerAttachmentsIpc(ctx);
+  registerDocumentsIpc(ctx);
+  registerTranscriptsIpc(ctx);
+  registerAccessibilityIpc();
+  registerSkillsIpc();
+}
 
 // ---- App lifecycle ----------------------------------------------------------
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
+  // Dynamic-import IPC modules so their transitive deps (orchestrator,
+  // claude-session, whisper, etc.) don't block the app-ready event.
+  // IPC handlers must be registered before createWindow() so the renderer
+  // can call them as soon as it loads — but the dynamic import resolves in
+  // <50ms (all local files, no network) which is faster than the original
+  // synchronous ESM resolution of the same tree.
+  await registerAllIpc(ipcCtx);
+
   // Kick the merged bundled+user .claude shadow tree build OFF the launch
   // critical path. createWindow() fires immediately so Chromium starts up in
   // parallel; sessions:open awaits the resulting promise the first time it
   // needs HOME (usually 1–3 s after launch — the build is done long before).
-  claudeShadowHomeReady = buildClaudeShadowHome().then(
-    (result) => {
-      claudeShadowHome = result.home;
-      if (claudeShadowHome) {
-        const cachedSuffix = result.stats.cached ? ' [cached]' : '';
-        console.log(
-          `[claude-defaults] shadow home at ${claudeShadowHome} ` +
-            `(bundled=${result.stats.bundled} userOverrides=${result.stats.userOverrides} passthrough=${result.stats.passthrough})${cachedSuffix}`,
-        );
-      } else {
-        console.log('[claude-defaults] dev mode or no bundled defaults; using real ~/.claude');
-      }
-      return claudeShadowHome;
-    },
-    (err) => {
-      console.error('[claude-defaults] failed to build shadow home:', err);
-      claudeShadowHome = null;
-      return null;
-    },
-  );
-  createWindow();
-
-  // Kick the whisper.cpp HTTP server off the launch critical path. It boots
-  // in ~1–3 s and warms the model with a brief 440 Hz tone so the first real
-  // user segment hits hot Metal shaders instead of paying 150–400 ms of cold
-  // load. Fire-and-forget: if it fails (binary missing, port wedged) the
-  // transcribe path silently falls back to per-call whisper-cli.
-  void startWhisperServer().then((r) => {
-    if (!r.ok) console.warn('[whisper-server] disabled:', r.reason);
+  import('./claude-defaults.js').then(({ buildClaudeShadowHome }) => {
+    claudeShadowHomeReady = buildClaudeShadowHome().then(
+      (result) => {
+        claudeShadowHome = result.home;
+        if (claudeShadowHome) {
+          import('./skills.js').then(({ setShadowSkillsDir }) => {
+            setShadowSkillsDir(claudeShadowHome);
+          });
+          const cachedSuffix = result.stats.cached ? ' [cached]' : '';
+          console.log(
+            `[claude-defaults] shadow home at ${claudeShadowHome} ` +
+              `(bundled=${result.stats.bundled} userOverrides=${result.stats.userOverrides} passthrough=${result.stats.passthrough})${cachedSuffix}`,
+          );
+        } else {
+          console.log('[claude-defaults] dev mode or no bundled defaults; using real ~/.claude');
+        }
+        return claudeShadowHome;
+      },
+      (err) => {
+        console.error('[claude-defaults] failed to build shadow home:', err);
+        claudeShadowHome = null;
+        return null;
+      },
+    );
   });
 
-  // Prompt for microphone access at launch. On macOS this shows the native
-  // system dialog when the status is 'not-determined'; on already-granted or
-  // denied systems it returns immediately without re-prompting.
+  createWindow();
+
+  // Kick the whisper.cpp HTTP server off the launch critical path.
+  import('./whisper-server.js').then(({ startWhisperServer }) => {
+    void startWhisperServer().then((r) => {
+      if (!r.ok) console.warn('[whisper-server] disabled:', r.reason);
+    });
+  });
+
+  // Prompt for microphone access at launch.
   if (process.platform === 'darwin') {
     void systemPreferences.askForMediaAccess('microphone').then((granted) => {
       console.log('[mic-permission] launch-time request result:', granted);
@@ -353,11 +399,10 @@ app.whenReady().then(() => {
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
-    // A macOS window-close stops the ASR server non-permanently (see
-    // window-all-closed). When the dock rebuilds the window, bring it back up.
-    // No-op if it's still running or already starting.
-    void startWhisperServer().then((r) => {
-      if (!r.ok) console.warn('[whisper-server] activate restart skipped:', r.reason);
+    import('./whisper-server.js').then(({ startWhisperServer }) => {
+      void startWhisperServer().then((r) => {
+        if (!r.ok) console.warn('[whisper-server] activate restart skipped:', r.reason);
+      });
     });
   });
 });
@@ -387,21 +432,15 @@ function shutdownAllSlots(): Promise<void> {
 }
 
 app.on('window-all-closed', () => {
-  // Fire-and-forget on this path: the relevant subprocess kills land
-  // synchronously inside end() (scheduler.endAll + talker.end), so even
-  // without awaiting we don't strand zombies. Recap continues in background.
   void shutdownAllSlots();
-  // Reap any in-flight whisper-cli child so it doesn't strand a transcription
-  // run past window close (B1). On macOS the process stays alive and the dock
-  // can rebuild the window, so stop the server NON-permanently — `activate`
-  // revives it. On other platforms we're about to quit, so a permanent stop is
-  // fine and before-quit handles the rest.
-  if (process.platform === 'darwin') {
-    void disposeWhisper(false);
-  } else {
-    void disposeWhisper();
-    app.quit();
-  }
+  import('./whisper.js').then(({ disposeWhisper }) => {
+    if (process.platform === 'darwin') {
+      void disposeWhisper(false);
+    } else {
+      void disposeWhisper();
+      app.quit();
+    }
+  });
 });
 
 // Final safety net: even on cmd-Q with the dock alive (macOS) the window-all-
@@ -425,17 +464,9 @@ app.on('before-quit', (event) => {
     try {
       await Promise.race([shutdownAllSlots(), sleepMs(5000)]);
     } finally {
-      // disposeWhisper() reaps the CLI child AND permanently stops the server,
-      // returning the server's shutdown promise. Await it (capped at 1.5 s) so
-      // the SIGTERM→SIGKILL grace (≤ ~1.2 s) completes before app.exit(0) yanks
-      // the process — otherwise a half-killed whisper-server can outlive
-      // Electron.
+      const { disposeWhisper } = await import('./whisper.js');
       await Promise.race([disposeWhisper(), sleepMs(1500)]);
-      // Synchronously fire the pending debounced openTabs snapshot, then drain
-      // setting writes so the last snapshot lands on disk before we yank the
-      // process. Without flushOpenTabsNow a close-then-quit-within-100ms loses
-      // the close from the manifest (the debounce timer never gets to fire).
-      flushOpenTabsNow(ipcCtx);
+      if (_flushOpenTabsNow) _flushOpenTabsNow(ipcCtx);
       await flushSettingsWrites();
       app.exit(0);
     }

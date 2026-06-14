@@ -15,8 +15,8 @@
 // to drain so `before-quit` can't return before the last openTabs snapshot
 // hits disk.
 
-import { app, safeStorage } from 'electron';
-import { copyFileSync, existsSync, readFileSync } from 'node:fs';
+import { app, dialog, safeStorage } from 'electron';
+import { existsSync, readFileSync, renameSync } from 'node:fs';
 import { promises as fsp } from 'node:fs';
 import { dirname, join } from 'node:path';
 
@@ -182,11 +182,23 @@ function load(): Settings {
     cached = typeof parsed === 'object' && parsed !== null ? (parsed as Settings) : {};
   } catch (err) {
     console.error('[store] failed to parse settings.json, starting fresh:', err);
+    const bakPath = `${p}.bak`;
     try {
-      copyFileSync(p, `${p}.corrupt-backup`);
-      console.warn(`[store] corrupt settings.json backed up to ${p}.corrupt-backup`);
-    } catch { /* best-effort */ }
+      renameSync(p, bakPath);
+      console.warn(`[store] corrupt settings.json backed up to ${bakPath}`);
+    } catch (bakErr) {
+      console.error('[store] could not back up corrupt settings.json:', bakErr);
+    }
     cached = {};
+    app.whenReady().then(() => {
+      dialog.showMessageBox({
+        type: 'warning',
+        title: '配置文件损坏',
+        message: '设置文件解析失败，已恢复为默认设置。',
+        detail: `损坏的配置已备份至：${bakPath}`,
+        buttons: ['确定'],
+      }).catch(() => {});
+    });
   }
   // One-shot migration: pre-multi-tab versions only kept lastCwd. Promote it
   // into recentCwds so the Lobby has something to show, then drop the field

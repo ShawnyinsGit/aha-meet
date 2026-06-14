@@ -17,6 +17,9 @@ interface UseAsrOptions {
   onTranscript: (text: string) => void;
   onBargeIn?: () => void;
   lang?: 'auto' | 'zh' | 'en';
+  // When true, VAD stays alive but speech segments are dropped. Used for
+  // spacebar mute so the toggle is instant (no VAD destroy/recreate).
+  paused?: boolean;
   suppressed?: boolean;
   voiceLockEnabled?: boolean;
   voicePrintEmbedding?: Float32Array | null;
@@ -41,6 +44,7 @@ export function useAsr({
   onTranscript,
   onBargeIn,
   lang,
+  paused,
   suppressed,
   voiceLockEnabled,
   voicePrintEmbedding,
@@ -94,6 +98,7 @@ export function useAsr({
     onTranscript,
     onBargeIn,
     lang,
+    paused,
     suppressed,
     voiceLockEnabled,
     voicePrintEmbedding,

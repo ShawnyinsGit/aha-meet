@@ -3,10 +3,11 @@
 // so electron-builder's extraResources can pick them up.
 //
 // What we copy (matches the ECC repo):
-//   agents/         — 60 sub-agents
-//   skills/ecc/     — 181 skills (only the ECC namespace)
-//   commands/       — 75 slash commands
-//   rules/ecc/      — language rule packs
+//   agents/              — 60 sub-agents
+//   skills/ecc/          — 181 skills (only the ECC namespace)
+//   commands/            — 75 slash commands
+//   rules/ecc/           — language rule packs
+//   plugins/superpowers/ — obra/superpowers plugin (14 skills)
 //
 // Explicitly NOT copied:
 //   hooks/, scripts/, ecc/install-state.json, settings*.json, *.bak — runtime
@@ -26,6 +27,7 @@ const sources = [
   { from: 'commands', to: 'commands' },
   { from: 'skills/ecc', to: 'skills/ecc' },
   { from: 'rules/ecc', to: 'rules/ecc' },
+  { from: 'plugins/superpowers', to: 'plugins/superpowers' },
 ];
 
 const realDotClaude = join(homedir(), '.claude');
