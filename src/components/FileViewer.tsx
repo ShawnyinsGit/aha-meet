@@ -385,7 +385,8 @@ function DocxRenderer({ data }: { data: Uint8Array }) {
         inWrapper: true,
         ignoreWidth: false,
         ignoreHeight: false,
-      });
+        useBase64URL: true,
+      } as Parameters<typeof renderAsync>[3]);
     }).catch((err: unknown) => {
       if (!cancelled) setError(err instanceof Error ? err.message : 'DOCX 渲染失败');
     });
