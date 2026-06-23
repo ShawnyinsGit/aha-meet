@@ -8,7 +8,7 @@ import { BrowserWindow, dialog, ipcMain } from 'electron';
 import { formatError } from '../format-error.js';
 import type { AutoApproveScope } from '../auto-approve-policy.js';
 import type { IpcContext } from './context.js';
-import { saveImageToAssets } from '../attachments/assets.js';
+import { saveImageToMaterials } from '../materials.js';
 
 const PERMISSION_MODES = new Set(['default', 'acceptEdits', 'bypassPermissions', 'plan'] as const);
 type PermissionMode = 'default' | 'acceptEdits' | 'bypassPermissions' | 'plan';
@@ -177,7 +177,11 @@ export function registerSessionIpc(ctx: IpcContext): void {
         ]);
         ctx.registry.touch(slot.id);
         if (slot.cwd) {
-          void saveImageToAssets(slot.cwd, b64, mediaType);
+          saveImageToMaterials({ cwd: slot.cwd, base64: b64, mediaType }).catch((err: unknown) => {
+            console.warn('[session] saveImageToMaterials failed:', formatError(err));
+          });
+        } else {
+          console.warn('[session] No cwd available, screenshot not saved to materials');
         }
       } catch (err: unknown) {
         return { ok: false, error: `Send failed: ${formatError(err)}` };

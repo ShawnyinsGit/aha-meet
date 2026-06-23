@@ -17,6 +17,7 @@ import {
 } from '../transcript-store.js';
 import { errorMessage } from '../format-error.js';
 import type { IpcContext } from './context.js';
+import { saveChatMessage } from '../materials.js';
 
 function isNonEmptyString(v: unknown): v is string {
   return typeof v === 'string' && v.length > 0;
@@ -114,6 +115,17 @@ export function registerTranscriptsIpc(ctx: IpcContext): void {
     const cleaned = sanitizeEntry(p.entry);
     appendTranscript(cwd, cleaned).catch((err: unknown) => {
       console.error('[transcripts] append failed:', errorMessage(err));
+    });
+    // Also save to local materials directory for persistent reference.
+    saveChatMessage({
+      cwd,
+      role: cleaned.role,
+      text: cleaned.text,
+      ts: cleaned.ts,
+      imageUrl: cleaned.imageUrl,
+      attachments: cleaned.attachments,
+    }).catch((err: unknown) => {
+      console.warn('[transcripts] saveChatMessage failed:', errorMessage(err));
     });
   });
 

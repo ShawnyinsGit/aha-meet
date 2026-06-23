@@ -1,6 +1,6 @@
 {
   "name": "aha-meet",
-  "version": "0.9.7",
+  "version": "0.9.8",
   "description": "Real-time meeting-style collaboration with Claude Code",
   "private": true,
   "type": "module",

@@ -19,7 +19,7 @@ import {
   maybeAppendGitignore,
   writeAttachmentSafely,
 } from '../attachments/workspace.js';
-import { saveAttachmentToAssets } from '../attachments/assets.js';
+import { saveFileToMaterials } from '../materials.js';
 
 // Inline payloads travel through the Anthropic content array. The Talker runs
 // on a Haiku-class window (~200K tokens) shared with system prompt + memory +
@@ -111,9 +111,15 @@ export function registerAttachmentsIpc(ctx: IpcContext): void {
     inlineTextUsed += caption.trim().length; // caption shares the same budget
     const cwd = slot.cwd;
 
+    // Save all attachments to materials directory for persistent reference.
+    // Use await to ensure completion; surface errors via console.warn.
     if (cwd) {
       for (const p of parsed) {
-        void saveAttachmentToAssets(cwd, p.name, p.buffer);
+        try {
+          await saveFileToMaterials({ cwd, name: p.name, buffer: p.buffer });
+        } catch (err: unknown) {
+          console.warn('[attachments] saveFileToMaterials failed for', p.name, ':', formatError(err));
+        }
       }
     }
 

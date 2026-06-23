@@ -26,6 +26,10 @@ const sources = [
   { from: 'agents', to: 'agents' },
   { from: 'commands', to: 'commands' },
   { from: 'skills/ecc', to: 'skills/ecc' },
+  { from: 'skills/llm-wiki', to: 'skills/llm-wiki' },
+  { from: 'skills/second-brain', to: 'skills/second-brain' },
+  { from: 'skills/fbi-skill', to: 'skills/fbi-skill' },
+  { from: 'skills/devix-dingtalk-skill', to: 'skills/devix-dingtalk-skill' },
   { from: 'rules/ecc', to: 'rules/ecc' },
   { from: 'plugins/superpowers', to: 'plugins/superpowers' },
 ];
