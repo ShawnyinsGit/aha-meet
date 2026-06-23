@@ -349,8 +349,15 @@ export class WorkerScheduler {
     // user expects from the just-completed turn. Snapshot to an array; the
     // Set is cleared as part of the snapshot to avoid leaking into the next
     // task if this handle is reassigned.
-    const deliveredPaths = Array.from(handle.deliveries);
+    // Explicit deliveries (declared via submit_delivery tool) override the
+    // auto-tracked edit set. When the worker called submit_delivery, it is
+    // telling us exactly which files are the real deliverables — honor that
+    // and skip the intermediate scripts/temp files the auto-tracker caught.
+    const deliveredPaths = handle.explicitDeliveries.length > 0
+      ? [...handle.explicitDeliveries]
+      : Array.from(handle.deliveries);
     handle.deliveries.clear();
+    handle.explicitDeliveries = [];
 
     const snapshotMap = snapshotDeliveryFilesSync(this.opts.cwd, handle.title, deliveredPaths);
 
@@ -405,6 +412,24 @@ export class WorkerScheduler {
     this.disposeWorker(handle, 'done', summary);
     this.emitPlanUpdate();
     this.spawnReadyWorkers();
+  }
+
+  submitWorkerDelivery(workerId: string, files: string[]): void {
+    const handle = this.workers.get(workerId);
+    if (!handle) {
+      console.warn('[scheduler] submit_delivery from unknown worker', { workerId, files });
+      return;
+    }
+    // De-duplicate while preserving order. Workers may call submit_delivery
+    // more than once (e.g. after generating additional artifacts) — later
+    // calls append rather than replace so the final set is the union.
+    const seen = new Set(handle.explicitDeliveries);
+    for (const f of files) {
+      if (!seen.has(f)) {
+        handle.explicitDeliveries.push(f);
+        seen.add(f);
+      }
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -641,6 +666,7 @@ export class WorkerScheduler {
       taskSeq: 1,
       taskHistory: [],
       deliveries: new Set<string>(),
+      explicitDeliveries: [],
       stallNotified: false,
       stallNudged: false,
     };
@@ -695,6 +721,7 @@ export class WorkerScheduler {
     handle.queuedAddenda = [];
     handle.pendingDelegateAck = false;
     handle.deliveries.clear();
+    handle.explicitDeliveries = [];
     handle.stallNotified = false;
     handle.stallNudged = false;
     if (handle.flushTimer) {

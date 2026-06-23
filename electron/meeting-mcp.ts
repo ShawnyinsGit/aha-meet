@@ -12,6 +12,7 @@ import {
   planMeetingArgsSchema,
   delegateToArgsSchema,
   taskDoneArgsSchema,
+  submitDeliveryArgsSchema,
   requestDecisionArgsSchema,
   type PlanMeetingTask,
 } from './meeting-tools.js';
@@ -60,6 +61,7 @@ export interface OrchestratorBridge {
 
   // Worker tools
   markWorkerTaskDone(workerId: string, summary: string): void;
+  submitWorkerDelivery(workerId: string, files: string[]): void;
 }
 
 export function buildTalkerMcp(bridge: OrchestratorBridge) {
@@ -211,6 +213,15 @@ export function buildWorkerMcp(bridge: OrchestratorBridge, workerId: string, cwd
         async ({ summary }) => {
           bridge.markWorkerTaskDone(workerId, summary);
           return { content: [{ type: 'text', text: 'recorded' }] };
+        },
+      ),
+      tool(
+        MEETING_TOOLS.SUBMIT_DELIVERY,
+        'Explicitly declare which files are the final deliverables for user acceptance. Use this when you have produced documents, code, or other artifacts that the user should review. Paths must be absolute. Call this before task_done if you want to override the automatic file tracking.',
+        submitDeliveryArgsSchema,
+        async ({ files }) => {
+          bridge.submitWorkerDelivery(workerId, files);
+          return { content: [{ type: 'text', text: `submitted ${files.length} file(s) for delivery` }] };
         },
       ),
       tool(

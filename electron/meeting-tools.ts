@@ -12,6 +12,7 @@ export const MEETING_TOOLS = {
   PLAN_MEETING: 'plan_meeting',
   DELEGATE_TO: 'delegate_to',
   TASK_DONE: 'task_done',
+  SUBMIT_DELIVERY: 'submit_delivery',
   REQUEST_DECISION: 'request_user_decision',
 } as const;
 
@@ -41,6 +42,10 @@ export const delegateToArgsSchema = {
 
 export const taskDoneArgsSchema = {
   summary: z.string().min(1).describe('One-line summary of what changed; surfaced to Talker context.'),
+};
+
+export const submitDeliveryArgsSchema = {
+  files: z.array(z.string().min(1)).min(1).describe('Absolute paths to the final deliverable files (documents, code, etc.) that the user should review. Use this to explicitly declare what you are delivering for acceptance.'),
 };
 
 export const decisionOptionSchema = z.object({

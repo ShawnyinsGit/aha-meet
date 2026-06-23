@@ -450,6 +450,10 @@ export class Orchestrator implements OrchestratorBridge {
     this.scheduler.markTaskDone(workerId, summary);
   }
 
+  submitWorkerDelivery(workerId: string, files: string[]): void {
+    this.scheduler.submitWorkerDelivery(workerId, files);
+  }
+
   // ===========================================================================
 
   /**

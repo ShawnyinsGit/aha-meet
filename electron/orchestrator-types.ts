@@ -109,6 +109,11 @@ export interface WorkerHandle {
    *  and cleared by `markTaskDone` to emit a `worker-delivery` event. Reset on
    *  `reassignWorker` when the same handle picks up a new task. */
   deliveries: Set<string>;
+  /** Explicitly submitted deliverables via `submit_delivery` tool. When non-empty,
+   *  these override the auto-tracked `deliveries` set. Workers use this to declare
+   *  final artifacts (documents, code) rather than letting the system include
+   *  intermediate scripts and temp files. */
+  explicitDeliveries: string[];
   /** B1 stall watchdog: set true once a `worker-stalled` event has fired for
    *  the current idle stretch, cleared on the next activity (lastUpdateTs bump)
    *  so each distinct stall is announced exactly once, not every sweep tick. */
