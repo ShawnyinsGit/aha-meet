@@ -379,7 +379,8 @@ function DocxRenderer({ data }: { data: Uint8Array }) {
     el.innerHTML = '';
     import('docx-preview').then(({ renderAsync }) => {
       if (cancelled) return;
-      return renderAsync(data.buffer as ArrayBuffer, el, undefined, {
+      const buffer = data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength) as ArrayBuffer;
+      return renderAsync(buffer, el, undefined, {
         className: 'docx-preview-body',
         inWrapper: true,
         ignoreWidth: false,
@@ -410,7 +411,8 @@ function PptxRenderer({ data }: { data: Uint8Array }) {
       const width = el.clientWidth - 48;
       const height = Math.round(width * 9 / 16);
       pptx.init(el, width, height);
-      return pptx.preview(data.buffer as ArrayBuffer);
+      const buffer = data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength) as ArrayBuffer;
+      return pptx.preview(buffer);
     }).catch((err: unknown) => {
       if (!cancelled) setError(err instanceof Error ? err.message : 'PPTX 渲染失败');
     });
