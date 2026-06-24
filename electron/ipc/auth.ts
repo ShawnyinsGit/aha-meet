@@ -10,13 +10,14 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 function unpackify(p: string): string {
-  return p.includes('/app.asar/') ? p.replace('/app.asar/', '/app.asar.unpacked/') : p;
+  return p.replace(/[\\/]app\.asar[\\/]/, (_, sep) => `${sep}app.asar.unpacked${sep}`);
 }
 
 /** Resolve the bundled claude binary. Tries multiple strategies so both dev
  *  (node_modules on disk) and production (app.asar.unpacked) work. */
 async function resolveClaudeBin(): Promise<string | undefined> {
-  const arch = process.arch === 'x64' ? 'darwin-x64' : 'darwin-arm64';
+  const platform = process.platform;
+  const arch = process.arch === 'x64' ? `${platform}-x64` : `${platform}-arm64`;
   const relPath = `node_modules/@anthropic-ai/claude-agent-sdk/node_modules/@anthropic-ai/claude-agent-sdk-${arch}/claude`;
   const relPathFlat = `node_modules/@anthropic-ai/claude-agent-sdk-${arch}/claude`;
 

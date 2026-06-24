@@ -14,6 +14,11 @@ const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(here, '..');
 const outDir = join(repoRoot, 'build', 'whisper');
 
+// Platform and architecture detection for cross-platform binary acquisition
+const platform = process.platform;
+const arch = process.arch; // 'x64' | 'arm64'
+const BINARY_EXT = platform === 'win32' ? '.exe' : '';
+
 const MODEL_NAME = 'ggml-small-q5_1.bin';
 const MODEL_SIZE = 190_085_487; // verified from upstream Content-Length
 const MODEL_MIN_SIZE = MODEL_SIZE - 1_000_000; // tolerate small variance
@@ -22,6 +27,40 @@ const MODEL_MIRRORS = [
   `https://hf-mirror.com/ggerganov/whisper.cpp/resolve/main/${MODEL_NAME}`,
   `https://huggingface.co/ggerganov/whisper.cpp/resolve/main/${MODEL_NAME}`,
 ];
+
+// Prebuilt whisper.cpp binaries from GitHub releases (cross-platform)
+const WHISPER_RELEASES = {
+  darwin: {
+    x64: {
+      'whisper-cli': 'https://github.com/ggerganov/whisper.cpp/releases/download/v1.7.4/whisper-cli-v1.7.4-macos-x64.zip',
+      'whisper-server': 'https://github.com/ggerganov/whisper.cpp/releases/download/v1.7.4/whisper-server-v1.7.4-macos-x64.zip'
+    },
+    arm64: {
+      'whisper-cli': 'https://github.com/ggerganov/whisper.cpp/releases/download/v1.7.4/whisper-cli-v1.7.4-macos-arm64.zip',
+      'whisper-server': 'https://github.com/ggerganov/whisper.cpp/releases/download/v1.7.4/whisper-server-v1.7.4-macos-arm64.zip'
+    }
+  },
+  win32: {
+    x64: {
+      'whisper-cli': 'https://github.com/ggerganov/whisper.cpp/releases/download/v1.7.4/whisper-cli-v1.7.4-win-x64.zip',
+      'whisper-server': 'https://github.com/ggerganov/whisper.cpp/releases/download/v1.7.4/whisper-server-v1.7.4-win-x64.zip'
+    },
+    arm64: {
+      'whisper-cli': 'https://github.com/ggerganov/whisper.cpp/releases/download/v1.7.4/whisper-cli-v1.7.4-win-arm64.zip',
+      'whisper-server': 'https://github.com/ggerganov/whisper.cpp/releases/download/v1.7.4/whisper-server-v1.7.4-win-arm64.zip'
+    }
+  },
+  linux: {
+    x64: {
+      'whisper-cli': 'https://github.com/ggerganov/whisper.cpp/releases/download/v1.7.4/whisper-cli-v1.7.4-linux-x64.tar.gz',
+      'whisper-server': 'https://github.com/ggerganov/whisper.cpp/releases/download/v1.7.4/whisper-server-v1.7.4-linux-x64.tar.gz'
+    },
+    arm64: {
+      'whisper-cli': 'https://github.com/ggerganov/whisper.cpp/releases/download/v1.7.4/whisper-cli-v1.7.4-linux-arm64.tar.gz',
+      'whisper-server': 'https://github.com/ggerganov/whisper.cpp/releases/download/v1.7.4/whisper-server-v1.7.4-linux-arm64.tar.gz'
+    }
+  }
+};
 
 const BREW_CANDIDATES = {
   'whisper-cli': [
@@ -83,6 +122,35 @@ async function downloadWithCurl(url, dest) {
     });
     p.on('error', reject);
   });
+}
+
+async function downloadAndExtract(url, destDir, binaryName) {
+  const ext = url.endsWith('.zip') ? '.zip' : '.tar.gz';
+  const archive = `${destDir}/${binaryName}${ext}`;
+
+  log(`downloading ${binaryName} from ${url}`);
+  await downloadWithCurl(url, archive);
+
+  log(`extracting ${archive}`);
+  if (ext === '.zip') {
+    const r = spawnSync('unzip', ['-o', archive, '-d', destDir], { encoding: 'utf8' });
+    if (r.status !== 0) throw new Error(`unzip failed: ${r.stderr}`);
+  } else {
+    const r = spawnSync('tar', ['-xzf', archive, '-C', destDir], { encoding: 'utf8' });
+    if (r.status !== 0) throw new Error(`tar failed: ${r.stderr}`);
+  }
+
+  // Clean up archive
+  try { spawnSync('rm', ['-f', archive]); } catch { /* ignore */ }
+
+  // Ensure binary has execute permission
+  const binPath = join(destDir, binaryName);
+  if (existsSync(binPath)) {
+    chmodSync(binPath, 0o755);
+    log(`extracted ${binaryName} → ${binPath}`);
+  } else {
+    log(`warn: ${binaryName} not found after extraction`);
+  }
 }
 
 async function ensureModel() {
@@ -272,6 +340,40 @@ async function ensureBinary() {
   const copied = [];
   let anyCopied = false;
 
+  // Cross-platform: download prebuilt binaries from GitHub releases
+  if (platform !== 'darwin') {
+    for (const name of targets) {
+      const destBin = join(outDir, name + BINARY_EXT);
+      if (existsSync(destBin)) {
+        log(`${name} already present — skip`);
+        copied.push(name);
+        continue;
+      }
+      const url = WHISPER_RELEASES[platform]?.[arch]?.[name];
+      if (!url) {
+        log(`warn: no prebuilt ${name} for ${platform}-${arch} — skipping`);
+        if (name === 'whisper-cli') {
+          log('The app will fall back to webkitSpeechRecognition.');
+        }
+        continue;
+      }
+      try {
+        await downloadAndExtract(url, outDir, name + BINARY_EXT);
+        copied.push(name);
+        anyCopied = true;
+      } catch (e) {
+        log(`download failed for ${name}: ${e.message}`);
+        if (name === 'whisper-cli') {
+          log('The app will fall back to webkitSpeechRecognition.');
+          return;
+        }
+      }
+    }
+    log(`platform ${platform}-${arch}: no macOS-specific relinking needed`);
+    return;
+  }
+
+  // macOS: use Homebrew or build from source
   for (const name of targets) {
     const destBin = join(outDir, name);
     if (existsSync(destBin)) {

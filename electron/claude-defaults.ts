@@ -55,10 +55,33 @@ interface ManifestSnapshot {
 
 async function safeSymlink(target: string, link: string): Promise<boolean> {
   try {
+    // Windows: use junction points for directories (no admin required)
+    if (process.platform === 'win32') {
+      const st = await fs.stat(target).catch(() => null);
+      if (st?.isDirectory()) {
+        await fs.symlink(target, link, 'junction');
+        return true;
+      }
+      // Junction points only work for directories; fall back to copy for files
+      await fs.copyFile(target, link);
+      return true;
+    }
     await fs.symlink(target, link);
     return true;
   } catch {
-    return false;
+    // Final fallback: copy if symlink/junction fails
+    try {
+      const st = await fs.stat(target).catch(() => null);
+      if (!st) return false;
+      if (st.isDirectory()) {
+        await fs.cp(target, link, { recursive: true, force: true });
+      } else {
+        await fs.copyFile(target, link);
+      }
+      return true;
+    } catch {
+      return false;
+    }
   }
 }
 

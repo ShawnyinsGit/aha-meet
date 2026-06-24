@@ -18,13 +18,16 @@
     "prebuild:claude-defaults": "node scripts/bundle-claude-defaults.mjs",
     "prebuild:speaker": "node scripts/fetch-speaker-model.mjs",
     "dist": "npm run prebuild:whisper && npm run prebuild:speaker && npm run prebuild:claude-defaults && npm run build && electron-builder --mac --arm64",
-    "dist:dmg": "npm run prebuild:whisper && npm run prebuild:speaker && npm run prebuild:claude-defaults && npm run build && electron-builder --mac --arm64 --publish never"
+    "dist:dmg": "npm run prebuild:whisper && npm run prebuild:speaker && npm run prebuild:claude-defaults && npm run build && electron-builder --mac --arm64 --publish never",
+    "dist:win": "npm run prebuild:whisper && npm run prebuild:speaker && npm run prebuild:claude-defaults && npm run build && electron-builder --win --publish never",
+    "dist:linux": "npm run prebuild:whisper && npm run prebuild:speaker && npm run prebuild:claude-defaults && npm run build && electron-builder --linux --publish never",
+    "dist:all": "npm run dist:dmg && npm run dist:win && npm run dist:linux"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.150",
     "@ricky0123/vad-web": "^0.0.30",
-    "fft.js": "^4.0.4",
     "docx-preview": "^0.3.3",
+    "fft.js": "^4.0.4",
     "lucide-react": "^1.16.0",
     "mammoth": "^1.12.0",
     "pdfjs-dist": "^5.7.284",
@@ -41,6 +44,7 @@
     "@vitejs/plugin-react": "^4.3.4",
     "electron": "^42.0.0",
     "electron-builder": "^26.8.1",
+    "png-to-ico": "^3.0.1",
     "typescript": "^5.7.2",
     "vite": "^6.0.3"
   }

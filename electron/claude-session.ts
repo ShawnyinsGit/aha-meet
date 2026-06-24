@@ -9,11 +9,12 @@ import { createRequire } from 'node:module';
 const require_ = createRequire(import.meta.url);
 
 function unpackify(p: string): string {
-  return p.includes('/app.asar/') ? p.replace('/app.asar/', '/app.asar.unpacked/') : p;
+  return p.replace(/[\\/]app\.asar[\\/]/, (_, sep) => `${sep}app.asar.unpacked${sep}`);
 }
 
 function resolveClaudeBinary(): string | undefined {
-  const arch = process.arch === 'x64' ? 'darwin-x64' : 'darwin-arm64';
+  const platform = process.platform;
+  const arch = process.arch === 'x64' ? `${platform}-x64` : `${platform}-arm64`;
   const subpkg = `@anthropic-ai/claude-agent-sdk-${arch}/claude`;
 
   // 1. Try resolving from the SDK package's own location (handles nested install).
