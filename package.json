@@ -2,6 +2,10 @@
   "name": "aha-meet",
   "version": "0.9.9",
   "description": "Real-time meeting-style collaboration with Claude Code",
+  "author": {
+    "name": "AhaMeet",
+    "email": "contact@ahameet.com"
+  },
   "private": true,
   "type": "module",
   "main": "dist-electron/main.js",
