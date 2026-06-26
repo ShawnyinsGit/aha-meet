@@ -160,3 +160,79 @@ jobs:
           path: release/*.deb
           retention-days: 30
           if-no-files-found: ignore
+
+  release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    needs: [macos, windows, linux]
+    if: startsWith(github.ref, 'refs/tags/v') && !contains(github.ref, '-test')
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: List artifacts
+        run: find artifacts -type f -name '*.dmg' -o -name '*.exe' -o -name '*.AppImage' -o -name '*.deb'
+
+      - name: Extract version from tag
+        id: get_version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - name: Generate release notes
+        id: release_notes
+        run: |
+          cat > release_notes.md << 'EOF'
+          ## 🚀 AhaMeet ${{ steps.get_version.outputs.VERSION }}
+
+          ### 📦 Downloads
+
+          **macOS (Apple Silicon)**
+          - `AhaMeet-${{ steps.get_version.outputs.VERSION }}-arm64.dmg`
+
+          **Windows (x64 + arm64)**
+          - `AhaMeet Setup ${{ steps.get_version.outputs.VERSION }}.exe`
+
+          **Linux (x64 + arm64)**
+          - `AhaMeet-${{ steps.get_version.outputs.VERSION }}.AppImage`
+          - `AhaMeet-${{ steps.get_version.outputs.VERSION }}.deb`
+
+          ### 📝 Installation
+
+          **macOS**: Open the DMG and drag AhaMeet to Applications
+
+          **Windows**: Run the installer (may show SmartScreen warning for unsigned app)
+
+          **Linux**:
+          - AppImage: `chmod +x *.AppImage && ./*.AppImage`
+          - Deb: `sudo dpkg -i *.deb`
+
+          ### 🔑 Requirements
+
+          - Anthropic API key or Claude Pro subscription
+          - Internet connection for Claude Agent SDK
+
+          ### 🎙️ Voice Recognition
+
+          - macOS: Native whisper-cpp support
+          - Windows/Linux: Browser-based ASR fallback (or whisper if binaries available)
+          EOF
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.get_version.outputs.VERSION }}
+          name: AhaMeet ${{ steps.get_version.outputs.VERSION }}
+          body_path: release_notes.md
+          draft: false
+          prerelease: false
+          files: |
+            artifacts/macos-dmg-arm64/*.dmg
+            artifacts/windows-nsis/*.exe
+            artifacts/linux-appimage/*.AppImage
+            artifacts/linux-deb/*.deb
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
