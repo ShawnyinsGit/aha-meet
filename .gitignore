@@ -5,10 +5,9 @@ release/
 .DS_Store
 *.log
 .vite/
+.asset-cache/
 build/whisper/
 build/claude-defaults/
-build/icon.icns
-build/icon.png
 audit/
 screenshot/
 deliveries/

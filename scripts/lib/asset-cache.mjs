@@ -9,8 +9,12 @@ import { homedir, platform } from 'node:os';
 
 const CACHE_ROOT = (() => {
   if (process.env.VIBE_MEET_CACHE_DIR) return process.env.VIBE_MEET_CACHE_DIR;
-  if (platform() === 'darwin') {
+  const p = platform();
+  if (p === 'darwin') {
     return join(homedir(), 'Library', 'Caches', 'vibe-meet');
+  }
+  if (p === 'win32' && process.env.LOCALAPPDATA) {
+    return join(process.env.LOCALAPPDATA, 'vibe-meet');
   }
   const xdg = process.env.XDG_CACHE_HOME || join(homedir(), '.cache');
   return join(xdg, 'vibe-meet');
