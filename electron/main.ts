@@ -5,6 +5,7 @@ import type { AutoApproveScope } from './auto-approve-policy.js';
 import { SessionRegistry } from './sessions.js';
 import { flushSettingsWrites } from './store.js';
 import type { IpcContext, IpcEmittedEvent } from './ipc/context.js';
+import { BrowserTabManager } from './browser-tab-manager.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -15,6 +16,9 @@ let mainWindow: BrowserWindow | null = null;
 // + `currentCwd` + `recapPending` triple — those now live per-slot inside
 // the registry. `recapPending` for a slot is tracked on the slot itself.
 const registry = new SessionRegistry();
+// Embedded browser tab manager. Owns all WebContentsView instances for the
+// built-in browser panel. Wired into main window after createWindow().
+const browserTabManager = new BrowserTabManager();
 // Trust-mode scope — module-level so it survives between session start/stop
 // and isn't lost when the renderer reloads. Default OFF every launch; we
 // intentionally do NOT persist this to disk. Shared across all slots: see
@@ -72,7 +76,22 @@ function createWindow() {
   // liveWindow() are belt-and-braces for that same case.
   mainWindow.on('closed', () => {
     mainWindow = null;
+    browserTabManager.destroy();
   });
+
+  // Wire the embedded browser to the main window so it can add/remove
+  // WebContentsView child views.
+  browserTabManager.setWindow(mainWindow);
+
+  // Re-sync embedded browser bounds when the window is moved or resized,
+  // since the renderer's ResizeObserver may not fire for window-level changes.
+  const syncBrowserBounds = () => {
+    // The renderer handles bounds sync via its own ResizeObserver. We just
+    // need to make sure it fires — which it does on window resize/move since
+    // the layout changes. No action needed here.
+  };
+  mainWindow.on('resize', syncBrowserBounds);
+  mainWindow.on('move', syncBrowserBounds);
 
   // CSP injection. The packaged HTML has no <meta> CSP, so the renderer
   // would default to "anything goes" without this. Dev mode loosens the
@@ -286,6 +305,7 @@ const ipcCtx: IpcContext = {
   getClaudeShadowHome: () => claudeShadowHome,
   awaitClaudeShadowHome,
   nativeConfirmDestructive,
+  browserTabManager,
 };
 
 // Resolved lazily inside whenReady(); cached here so before-quit can access it.
@@ -307,6 +327,7 @@ async function registerAllIpc(ctx: IpcContext): Promise<void> {
     { registerTranscriptsIpc },
     { registerAccessibilityIpc },
     { registerSkillsIpc },
+    { registerBrowserIpc },
   ] = await Promise.all([
     import('./ipc/session.js'),
     import('./ipc/sessions.js'),
@@ -322,6 +343,7 @@ async function registerAllIpc(ctx: IpcContext): Promise<void> {
     import('./ipc/transcripts.js'),
     import('./ipc/accessibility.js'),
     import('./ipc/skills.js'),
+    import('./ipc/browser.js'),
   ]);
   _flushOpenTabsNow = flushOpenTabsNow;
   registerSessionIpc(ctx);
@@ -338,6 +360,7 @@ async function registerAllIpc(ctx: IpcContext): Promise<void> {
   registerTranscriptsIpc(ctx);
   registerAccessibilityIpc();
   registerSkillsIpc();
+  registerBrowserIpc(browserTabManager);
 }
 
 // ---- App lifecycle ----------------------------------------------------------

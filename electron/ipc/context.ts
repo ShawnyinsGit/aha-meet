@@ -16,6 +16,7 @@ import type { BrowserWindow } from 'electron';
 import type { AutoApproveScope } from '../auto-approve-policy.js';
 import type { Orchestrator, OrchestratorEvent } from '../orchestrator.js';
 import type { SessionRegistry, SessionSlot } from '../sessions.js';
+import type { BrowserTabManager } from '../browser-tab-manager.js';
 
 /** OrchestratorEvent annotated with the sessionId of the slot that emitted
  *  it. The renderer uses this to route the event to the right MeetingState
@@ -51,4 +52,7 @@ export interface IpcContext {
     toolName: string,
     input: Record<string, unknown>,
   ) => Promise<boolean>;
+  /** Embedded browser tab manager for MCP browser tools. Optional — when
+   *  provided, all workers get browser_navigate/screenshot/click/type tools. */
+  browserTabManager?: BrowserTabManager;
 }

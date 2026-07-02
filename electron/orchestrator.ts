@@ -55,6 +55,8 @@ import {
   type SteerResult,
 } from './meeting-mcp.js';
 import { buildComputerUseMcp, type ComputerUseBridge } from './computer-use-mcp.js';
+import { buildBrowserMcp, type BrowserMcpBridge } from './browser-mcp.js';
+import { BrowserTabManager } from './browser-tab-manager.js';
 import { startRecap, type RecapHandle } from './recap.js';
 import { WorkerScheduler, type SessionFactory } from './worker-scheduler.js';
 import type {
@@ -94,6 +96,9 @@ interface OrchestratorOpts {
    *  on. Main wires this to dialog.showMessageBox so a compromised renderer
    *  cannot fake the approval. Threaded through to every ClaudeSession. */
   confirmDestructive?: (toolName: string, input: Record<string, unknown>) => Promise<boolean>;
+  /** Optional browser tab manager for embedded browser MCP tools. When
+   *  provided, all workers get browser_navigate/screenshot/click/type tools. */
+  browserTabManager?: BrowserTabManager;
 }
 
 export class Orchestrator implements OrchestratorBridge {
@@ -105,6 +110,7 @@ export class Orchestrator implements OrchestratorBridge {
   private workerEnv: NodeJS.ProcessEnv | undefined;
   private talkerModel: string | undefined;
   private confirmDestructive: ((toolName: string, input: Record<string, unknown>) => Promise<boolean>) | undefined;
+  private browserTabManager: BrowserTabManager | undefined;
   private closed = false;
   private projectId: string;
   private meetingId: string;
@@ -158,10 +164,16 @@ export class Orchestrator implements OrchestratorBridge {
     this.workerEnv = opts.workerEnv;
     this.talkerModel = opts.talkerModel;
     this.confirmDestructive = opts.confirmDestructive;
+    this.browserTabManager = opts.browserTabManager;
     this.projectId = computeProjectId(this.cwd);
     this.meetingId = randomUUID();
     this.sessionFactory = opts.sessionFactory ?? ((o) => new ClaudeSession(o));
     const cuBridge: ComputerUseBridge = {
+      injectScreenshot: (workerId, data) => {
+        this.scheduler.injectScreenshotToWorker(workerId, data);
+      },
+    };
+    const browserBridge: BrowserMcpBridge = {
       injectScreenshot: (workerId, data) => {
         this.scheduler.injectScreenshotToWorker(workerId, data);
       },
@@ -175,6 +187,9 @@ export class Orchestrator implements OrchestratorBridge {
       sessionFactory: this.sessionFactory,
       buildWorkerMcp: (workerId) => buildWorkerMcp(this, workerId, this.cwd),
       buildComputerUseMcp: (workerId) => buildComputerUseMcp(cuBridge, workerId),
+      buildBrowserMcp: this.browserTabManager
+        ? (workerId) => buildBrowserMcp(this.browserTabManager!, browserBridge, workerId)
+        : undefined,
       getTalker: () => this.talker,
       isClosed: () => this.closed,
       getSpeechFilterMode: () => (getSettings().speechFilterMode === 'off' ? 'off' : 'strict'),

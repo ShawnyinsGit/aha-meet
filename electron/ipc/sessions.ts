@@ -125,6 +125,7 @@ export function registerSessionsIpc(ctx: IpcContext): void {
         workerEnv,
         talkerModel,
         confirmDestructive: ctx.nativeConfirmDestructive,
+        browserTabManager: ctx.browserTabManager,
       });
 
       const result = ctx.registry.open(sessionId, resolvedCwd, orch);

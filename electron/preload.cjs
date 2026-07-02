@@ -85,6 +85,24 @@ const api = {
     install: (source) => ipcRenderer.invoke('skills:install', source),
     uninstall: (name) => ipcRenderer.invoke('skills:uninstall', name),
   },
+  browser: {
+    openTab: (url) => ipcRenderer.invoke('browser:open-tab', { url }),
+    closeTab: (tabId) => ipcRenderer.invoke('browser:close-tab', { tabId }),
+    setActive: (tabId) => ipcRenderer.invoke('browser:set-active', { tabId }),
+    navigate: (tabId, url) => ipcRenderer.invoke('browser:navigate', { tabId, url }),
+    back: (tabId) => ipcRenderer.invoke('browser:back', { tabId }),
+    forward: (tabId) => ipcRenderer.invoke('browser:forward', { tabId }),
+    reload: (tabId) => ipcRenderer.invoke('browser:reload', { tabId }),
+    setBounds: (bounds) => ipcRenderer.invoke('browser:set-bounds', bounds),
+    setVisible: (visible) => ipcRenderer.invoke('browser:set-visible', { visible }),
+    getState: () => ipcRenderer.invoke('browser:get-state'),
+    capturePage: (tabId) => ipcRenderer.invoke('browser:capture-page', { tabId }),
+    onStateUpdate: (cb) => {
+      const listener = (_, state) => cb(state);
+      ipcRenderer.on('browser:state-update', listener);
+      return () => ipcRenderer.removeListener('browser:state-update', listener);
+    },
+  },
   steerWorker: (sessionId, workerId, addendum) =>
     ipcRenderer.invoke('session:steer-worker', { sessionId, workerId, addendum }),
   onEvent: (cb) => {

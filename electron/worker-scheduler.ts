@@ -77,6 +77,10 @@ export interface WorkerSchedulerOpts {
    *  'computer-use' get this MCP server mounted alongside the standard
    *  meeting-worker MCP, giving them screenshot/click/type/scroll tools. */
   buildComputerUseMcp?: (workerId: string) => unknown;
+  /** Optional browser MCP builder. When provided, ALL workers get this MCP
+   *  server mounted, giving them browser_navigate/screenshot/click/type tools
+   *  to interact with the embedded browser. */
+  buildBrowserMcp?: (workerId: string) => unknown;
   /** Talker accessor — used to push worker-update batches, file-collision
    *  warnings, task_done completions, and cascade-failure notes. Returns
    *  null when the talker hasn't started yet or has been torn down. */
@@ -760,6 +764,12 @@ export class WorkerScheduler {
       const cuMcp = this.opts.buildComputerUseMcp(handle.id);
       mcpServers['computer-use'] = cuMcp as any;
       promptAppend += COMPUTER_USE_WORKER_PROMPT;
+    }
+
+    // Browser MCP is available to ALL workers (not just a specialty)
+    if (this.opts.buildBrowserMcp) {
+      const browserMcp = this.opts.buildBrowserMcp(handle.id);
+      mcpServers['browser'] = browserMcp as any;
     }
 
     try {

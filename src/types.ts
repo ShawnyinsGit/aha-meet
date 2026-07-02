@@ -201,6 +201,36 @@ export interface SkillsApi {
   uninstall: (name: string) => Promise<{ ok: true } | { ok: false; error: string }>;
 }
 
+export interface BrowserTabInfo {
+  id: string;
+  url: string;
+  title: string;
+  isLoading: boolean;
+  canGoBack: boolean;
+  canGoForward: boolean;
+}
+
+export interface BrowserStateSnapshot {
+  tabs: BrowserTabInfo[];
+  activeTabId: string | null;
+  visible: boolean;
+}
+
+export interface BrowserApi {
+  openTab: (url?: string) => Promise<{ ok: true; tab: BrowserTabInfo } | { ok: false; error: string }>;
+  closeTab: (tabId: string) => Promise<{ ok: true } | { ok: false; error: string }>;
+  setActive: (tabId: string) => Promise<{ ok: true } | { ok: false; error: string }>;
+  navigate: (tabId: string, url: string) => Promise<{ ok: boolean }>;
+  back: (tabId: string) => Promise<{ ok: true } | { ok: false; error: string }>;
+  forward: (tabId: string) => Promise<{ ok: true } | { ok: false; error: string }>;
+  reload: (tabId: string) => Promise<{ ok: true } | { ok: false; error: string }>;
+  setBounds: (bounds: { x: number; y: number; width: number; height: number; dpr: number }) => Promise<{ ok: true } | { ok: false; error: string }>;
+  setVisible: (visible: boolean) => Promise<{ ok: true } | { ok: false; error: string }>;
+  getState: () => Promise<BrowserStateSnapshot>;
+  capturePage: (tabId?: string) => Promise<{ ok: true; pngBase64: string; width: number; height: number } | { ok: false; error: string }>;
+  onStateUpdate: (cb: (state: BrowserStateSnapshot) => void) => () => void;
+}
+
 export interface VibeMeetApi {
   sessions: SessionsApi;
   sendUserText: (sessionId: string | null, text: string) => Promise<{ ok: boolean; error?: string }>;
@@ -248,6 +278,7 @@ export interface VibeMeetApi {
     request: () => Promise<{ granted: boolean }>;
   };
   skills: SkillsApi;
+  browser: BrowserApi;
   steerWorker: (
     sessionId: string | null,
     workerId: string,

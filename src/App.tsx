@@ -3,6 +3,7 @@ import { useClaude } from './hooks/useClaude';
 import { useWorkers } from './hooks/useWorkers';
 import { useTabs } from './hooks/useTabs';
 import { useScreenShare } from './hooks/useScreenShare';
+import { useBrowser } from './hooks/useBrowser';
 import { useElapsedSeconds } from './hooks/useTimer';
 import { cancelSpeech, enqueueConversational, isSpeechActive, markTurnComplete, setSelectedVoiceName, setSpeechFilterMode, speakConversational, useVoices, warmupTTS } from './hooks/useSpeech';
 import type { SpeakHandle } from './hooks/useSpeech';
@@ -52,6 +53,7 @@ export function App() {
   const workers = useWorkers();
   const tabs = useTabs();
   const { state: share, start: startShare, startSystemPicker, stop: stopShare, captureFrame, videoRef } = useScreenShare();
+  const browser = useBrowser();
 
   // Derived UI predicates:
   //   hasTabs       — any open tab (live or placeholder); drives Lobby vs Shell branch
@@ -781,6 +783,17 @@ ${trimmed}`
             aiSpeaking={aiSpeaking}
             viewingFile={viewingFile}
             onCloseFileView={() => setViewingFile(null)}
+            browserVisible={browser.state.visible}
+            browserTabs={browser.state.tabs}
+            browserActiveTabId={browser.state.activeTabId}
+            browserViewportRef={browser.viewportRef}
+            onBrowserOpenTab={() => browser.openTab()}
+            onBrowserCloseTab={browser.closeTab}
+            onBrowserSetActive={browser.setActiveTab}
+            onBrowserNavigate={browser.navigate}
+            onBrowserBack={browser.goBack}
+            onBrowserForward={browser.goForward}
+            onBrowserReload={browser.reload}
             defaultContent={
               <ParticipantPanel
                 workers={workers.workerList}
@@ -840,6 +853,8 @@ ${trimmed}`
         onInterrupt={interrupt}
         chatOpen={drawerOpen}
         onToggleChat={() => setDrawerOpen((v) => !v)}
+        browserOpen={browser.state.visible}
+        onToggleBrowser={browser.toggleVisible}
         onLeave={leave}
       />
 

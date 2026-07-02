@@ -3,7 +3,7 @@ import type { ReactElement, ReactNode } from 'react';
 import { ChevronUp, ChevronDown } from 'lucide-react';
 import type { DeliverySnapshot, WorkerState } from '../lib/meeting-store';
 import type { MeetingPlan } from '../types';
-import { ClaudeWorkspace } from './ClaudeWorkspace';
+import { ParticipantContentTabs } from './ParticipantContentTabs';
 import { WorkerCard } from './WorkerCard';
 import { UserTasksPanel } from './UserTasksPanel';
 
@@ -137,38 +137,13 @@ export function ParticipantPanel({
         {effectiveSelected === USER_SLOT ? (
           <UserTasksPanel workers={workers} />
         ) : selectedWorker && (
-          <ClaudeWorkspace
+          <ParticipantContentTabs
             key={selectedWorker.id}
-            speaking={selectedWorker.role === 'talker' && aiSpeaking}
-            awaitingPermission={Boolean(selectedWorker.pendingPermission)}
+            worker={selectedWorker}
             running={running}
-            transcript={selectedWorker.transcript}
-            activity={selectedWorker.activity}
-            name={selectedWorker.title}
-            subtitle={selectedWorker.role === 'talker' ? 'Host · Talker' : 'Worker'}
-            avatar={selectedWorker.role === 'talker' ? 'claude' : 'worker'}
-            initial={selectedWorker.title.trim().slice(0, 1).toUpperCase()}
-            hideHero
-            task={
-              selectedWorker.role === 'talker'
-                ? (selectedWorker.lastText || 'Ready')
-                : selectedWorker.title
-            }
-            taskStatus={
-              selectedWorker.role === 'talker'
-                ? (aiSpeaking ? 'speaking' : running ? 'running' : 'idle')
-                : (selectedWorker.role === 'worker' && aiSpeaking ? 'speaking' : selectedWorker.status)
-            }
-            taskSpecialty={selectedWorker.role === 'talker' ? undefined : selectedWorker.specialty}
-            taskDeps={selectedWorker.role === 'talker' ? undefined : selectedWorker.deps}
-            taskHistory={selectedWorker.role === 'talker' ? undefined : selectedWorker.taskHistory}
-            currentTool={selectedWorker.currentTool}
-            currentToolInput={selectedWorker.currentToolInput}
-            lastText={selectedWorker.lastText}
-            startedAt={selectedWorker.startedAt}
-            pendingPermissionTool={selectedWorker.pendingPermission?.toolName ?? null}
-            deliveryHistory={selectedWorker.role === 'talker' ? deliveryHistory : undefined}
-            onAcceptDelivery={selectedWorker.role === 'talker' ? onAcceptDelivery : undefined}
+            aiSpeaking={aiSpeaking}
+            deliveryHistory={deliveryHistory}
+            onAcceptDelivery={onAcceptDelivery}
           />
         )}
       </div>
