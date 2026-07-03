@@ -25,11 +25,11 @@ export function useStageWindows() {
   }, []);
 
   const openFile = useCallback((filePath: string) => {
-    stageWindowStore.openFile(filePath);
+    void stageWindowStore.openFile(filePath);
   }, []);
 
   const openDelivery = useCallback(() => {
-    stageWindowStore.openDelivery();
+    void stageWindowStore.openDelivery();
   }, []);
 
   return {

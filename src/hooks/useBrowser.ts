@@ -12,6 +12,10 @@ export function useBrowser() {
   const syncBounds = useCallback(() => {
     const el = viewportRef.current;
     if (!el) return;
+    // Skip bounds sync when browser overlay is hidden — prevents race where
+    // setBounds repositions the WebContentsView after setVisible(false) was
+    // sent but before the main process has processed it.
+    if (!state.visible) return;
     const rect = el.getBoundingClientRect();
     // The viewport div's position relative to the window content area.
     // Electron's WebContentsView uses coordinates relative to the BrowserWindow's
@@ -32,7 +36,10 @@ export function useBrowser() {
 
     // Sync bounds on resize and window move
     const observer = new ResizeObserver(() => {
-      syncBounds();
+      // Defer bounds sync until after layout settles — prevents race where
+      // gallery expansion triggers ResizeObserver before the browser has
+      // finished recalculating the viewport's position.
+      requestAnimationFrame(syncBounds);
     });
     observer.observe(el);
 

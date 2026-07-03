@@ -157,16 +157,23 @@ class StageWindowStore {
     });
   }
 
-  openFile(filePath: string): void {
+  async openFile(filePath: string): Promise<void> {
     const existing = this.state.windows.find((w) => w.type === 'file' && w.filePath === filePath);
     if (existing) {
-      this.setActiveWindow(existing.id);
+      await this.setActiveWindow(existing.id);
       return;
     }
     const fileWindows = this.state.windows.filter((w) => w.type === 'file');
     for (const fw of fileWindows) {
-      void this.closeWindow(fw.id);
+      await this.closeWindow(fw.id);
     }
+
+    // Hide browser overlay if currently active
+    const prevWin = this.state.windows.find((w) => w.id === this.state.activeWindowId);
+    if (prevWin?.type === 'browser') {
+      await browserStore.setVisible(false);
+    }
+
     const id = genId();
     const fileName = filePath.split('/').pop() || filePath;
     const window: StageWindow = { id, type: 'file', title: fileName, filePath };
@@ -176,12 +183,19 @@ class StageWindowStore {
     });
   }
 
-  openDelivery(): void {
+  async openDelivery(): Promise<void> {
     const existing = this.state.windows.find((w) => w.type === 'delivery');
     if (existing) {
-      this.setActiveWindow(existing.id);
+      await this.setActiveWindow(existing.id);
       return;
     }
+
+    // Hide browser overlay if currently active
+    const prevWin = this.state.windows.find((w) => w.id === this.state.activeWindowId);
+    if (prevWin?.type === 'browser') {
+      await browserStore.setVisible(false);
+    }
+
     const id = genId();
     const window: StageWindow = { id, type: 'delivery', title: '交付验收' };
     this.update({
