@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { memo, useMemo } from 'react';
 import { Terminal as TerminalIcon, ChevronRight } from 'lucide-react';
 import type { ActivityEntry } from '../types';
 
@@ -14,7 +14,7 @@ interface TerminalBlock {
   ts: number;
 }
 
-export function TerminalPanel({ activity }: TerminalPanelProps) {
+export const TerminalPanel = memo(function TerminalPanel({ activity }: TerminalPanelProps) {
   const blocks = useMemo(() => {
     const result: TerminalBlock[] = [];
     const calls = activity.filter((a) => a.kind === 'tool-call' && a.title === 'Tool: Bash');
@@ -66,7 +66,7 @@ export function TerminalPanel({ activity }: TerminalPanelProps) {
       ))}
     </div>
   );
-}
+});
 
 function tryParseJson(s: string): { command?: string } | null {
   try {

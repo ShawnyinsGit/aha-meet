@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { memo, useMemo } from 'react';
 import { ChevronUp, ChevronDown } from 'lucide-react';
 import { useState } from 'react';
 import type { WorkerState } from '../lib/meeting-store';
@@ -14,7 +14,7 @@ interface ParticipantPanelProps {
   onResolvePermission: (id: string, decision: 'allow' | 'deny') => void;
 }
 
-export function ParticipantPanel({
+export const ParticipantPanel = memo(function ParticipantPanel({
   workers,
   plan,
   running,
@@ -82,4 +82,4 @@ export function ParticipantPanel({
       </button>
     </div>
   );
-}
+});

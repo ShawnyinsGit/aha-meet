@@ -124,6 +124,9 @@ class StageWindowStore {
       const nextWin = newWindows.find((w) => w.id === newActiveId);
       if (nextWin?.type === 'browser' && nextWin.browserTabId) {
         await browserStore.setActiveTab(nextWin.browserTabId);
+        await browserStore.setVisible(true);
+      } else {
+        await browserStore.setVisible(false);
       }
     }
   }
@@ -131,6 +134,12 @@ class StageWindowStore {
   async setActiveWindow(id: string): Promise<void> {
     const win = this.state.windows.find((w) => w.id === id);
     if (!win) return;
+
+    // Hide browser overlay when switching away from a browser tab
+    const prevWin = this.state.windows.find((w) => w.id === this.state.activeWindowId);
+    if (prevWin?.type === 'browser' && win.type !== 'browser') {
+      await browserStore.setVisible(false);
+    }
 
     this.update({ activeWindowId: id });
 

@@ -651,7 +651,7 @@ button:disabled {
   overflow: hidden;
 }
 
-.stage-wrap { position: relative; min-height: 0; min-width: 0; }
+.stage-wrap { position: relative; min-height: 0; min-width: 0; height: 100%; }
 
 .stage {
   position: relative;

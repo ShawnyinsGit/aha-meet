@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { ExternalLink, X } from 'lucide-react';
 import type { DeliveryFileKind, DocumentReadResult } from '../types';
 
@@ -49,7 +49,7 @@ const MARKDOWN_EXTS = new Set(['md', 'markdown', 'mdx']);
 const HTML_EXTS = new Set(['html', 'htm']);
 const SVG_EXT = 'svg';
 
-export function FileViewer({ relativePath, sessionId, onClose }: FileViewerProps) {
+export const FileViewer = memo(function FileViewer({ relativePath, sessionId, onClose }: FileViewerProps) {
   const [state, setState] = useState<ViewState>({ phase: 'loading' });
   const loadTokenRef = useRef(0);
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -121,7 +121,7 @@ export function FileViewer({ relativePath, sessionId, onClose }: FileViewerProps
       </div>
     </div>
   );
-}
+});
 
 export function FileContent({
   state,

@@ -2,7 +2,7 @@
 // The viewport div is measured by the ResizeObserver in useBrowser to
 // position the WebContentsView overlay in the main process.
 
-import { type RefObject } from 'react';
+import { memo, type RefObject } from 'react';
 import type { BrowserTabInfo } from '../types';
 import { BrowserToolbar } from './BrowserToolbar';
 
@@ -19,7 +19,7 @@ interface BrowserStageProps {
   onReload: (tabId: string) => void;
 }
 
-export function BrowserStage({
+export const BrowserStage = memo(function BrowserStage({
   tabs,
   activeTabId,
   viewportRef,
@@ -47,4 +47,4 @@ export function BrowserStage({
       <div className="browser-viewport" ref={viewportRef} />
     </div>
   );
-}
+});

@@ -6,9 +6,6 @@ import {
   ArrowLeft,
   ArrowRight,
   RotateCw,
-  Plus,
-  X,
-  Loader2,
 } from 'lucide-react';
 import type { BrowserTabInfo } from '../types';
 
@@ -63,38 +60,7 @@ export function BrowserToolbar({
 
   return (
     <div className="browser-toolbar">
-      {/* Tab strip */}
-      <div className="browser-tabs">
-        {tabs.map((tab) => (
-          <div
-            key={tab.id}
-            className={`browser-tab ${tab.id === activeTabId ? 'browser-tab-active' : ''}`}
-            onClick={() => onSetActive(tab.id)}
-          >
-            {tab.isLoading ? (
-              <Loader2 size={12} className="browser-tab-spinner" />
-            ) : (
-              <span className="browser-tab-favicon" />
-            )}
-            <span className="browser-tab-title">
-              {tab.title || tab.url || 'New Tab'}
-            </span>
-            {tabs.length > 1 && (
-              <button
-                className="browser-tab-close"
-                onClick={(e) => { e.stopPropagation(); onCloseTab(tab.id); }}
-              >
-                <X size={12} />
-              </button>
-            )}
-          </div>
-        ))}
-        <button className="browser-tab-add" onClick={onOpenTab} title="New tab">
-          <Plus size={14} />
-        </button>
-      </div>
-
-      {/* Navigation bar */}
+      {/* Navigation bar — tabs are managed by the stage tab bar above */}
       <div className="browser-navbar">
         <button
           className="browser-nav-btn"

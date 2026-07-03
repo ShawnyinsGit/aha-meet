@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import type {
   ActivityEntry,
@@ -109,7 +109,7 @@ interface FeedRow {
   pill?: { label: string; tone: 'done' | 'failed' | 'running' | 'pending' };
 }
 
-export function ClaudeWorkspace({
+export const ClaudeWorkspace = memo(function ClaudeWorkspace({
   speaking,
   awaitingPermission,
   running,
@@ -471,4 +471,4 @@ export function ClaudeWorkspace({
       </section>
     </div>
   );
-}
+});
