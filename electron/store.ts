@@ -65,6 +65,11 @@ export interface Settings {
   // TTS noise filter: 'strict' drops English-only sentences and worker
   // tool-call narration before playback (default); 'off' speaks raw.
   speechFilterMode?: 'strict' | 'off';
+  // Voice polish: when true, raw ASR output is run through the configured LLM
+  // to convert colloquial spoken language into clean written form before
+  // sending to the Talker. Uses the same API credentials as the rest of the
+  // app. Persists via settings:get/set-voice-pref.
+  voicePolishEnabled?: boolean;
   // Claude authentication: 'apikey' uses a manually-entered API key;
   // 'subscription' relies on the claude CLI's own OAuth credentials.
   authMode?: 'apikey' | 'subscription';

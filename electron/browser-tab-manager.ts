@@ -6,8 +6,8 @@
 // (cookies, history, scroll position) survives.
 //
 // Bounds synchronization: the renderer measures its .browser-viewport div with
-// a ResizeObserver and sends CSS-pixel bounds via browser:set-bounds. We
-// convert to physical pixels using the reported DPR before calling setBounds().
+// a ResizeObserver and sends CSS-pixel bounds via browser:set-bounds. We round
+// and pass them directly to setBounds() (which operates in logical points).
 
 import { BrowserWindow, WebContentsView, session } from 'electron';
 import { randomUUID } from 'node:crypto';
@@ -392,12 +392,11 @@ export class BrowserTabManager {
   }
 
   private physicalBounds(): { x: number; y: number; width: number; height: number } {
-    const s = this.dpr;
     return {
-      x: Math.round(this.currentBounds.x * s),
-      y: Math.round(this.currentBounds.y * s),
-      width: Math.round(this.currentBounds.width * s),
-      height: Math.round(this.currentBounds.height * s),
+      x: Math.round(this.currentBounds.x),
+      y: Math.round(this.currentBounds.y),
+      width: Math.round(this.currentBounds.width),
+      height: Math.round(this.currentBounds.height),
     };
   }
 
@@ -420,5 +419,11 @@ export class BrowserTabManager {
     wc.on('did-start-loading', updateInfo);
     wc.on('did-stop-loading', updateInfo);
     wc.on('did-fail-load', updateInfo);
+
+    // Intercept window.open() to open new tabs instead of popup windows
+    wc.setWindowOpenHandler(({ url }) => {
+      void this.openTab(url);
+      return { action: 'deny' };
+    });
   }
 }

@@ -1,23 +1,17 @@
-import { cloneElement, isValidElement, useCallback, useEffect, useMemo, useState } from 'react';
-import type { ReactElement, ReactNode } from 'react';
+import { useMemo } from 'react';
 import { ChevronUp, ChevronDown } from 'lucide-react';
-import type { DeliverySnapshot, WorkerState } from '../lib/meeting-store';
+import { useState } from 'react';
+import type { WorkerState } from '../lib/meeting-store';
 import type { MeetingPlan } from '../types';
-import { ParticipantContentTabs } from './ParticipantContentTabs';
 import { WorkerCard } from './WorkerCard';
-import { UserTasksPanel } from './UserTasksPanel';
-
-const USER_SLOT = 'user';
 
 interface ParticipantPanelProps {
   workers: WorkerState[];
   plan: MeetingPlan | null;
   running: boolean;
   aiSpeaking: boolean;
-  selfTile: ReactNode;
+  selfTile: React.ReactNode;
   onResolvePermission: (id: string, decision: 'allow' | 'deny') => void;
-  deliveryHistory?: DeliverySnapshot[];
-  onAcceptDelivery?: () => void;
 }
 
 export function ParticipantPanel({
@@ -27,16 +21,8 @@ export function ParticipantPanel({
   aiSpeaking,
   selfTile,
   onResolvePermission,
-  deliveryHistory,
-  onAcceptDelivery,
 }: ParticipantPanelProps) {
   const sortedWorkers = useMemo(() => {
-    // Priority order:
-    // 0 = talker (host, always first)
-    // 1 = running workers (active, most relevant)
-    // 2 = pending workers (queued, about to run)
-    // 3 = idle workers
-    // 4 = done / failed (finished, pushed to end)
     const statusPriority = (w: WorkerState): number => {
       if (w.role === 'talker') return 0;
       switch (w.status) {
@@ -52,7 +38,6 @@ export function ParticipantPanel({
       const pa = statusPriority(a);
       const pb = statusPriority(b);
       if (pa !== pb) return pa - pb;
-      // Within the same priority bucket, sort by first-activity timestamp (earliest first)
       const aTs = a.activity.length > 0 ? a.activity[0].ts : 0;
       const bTs = b.activity.length > 0 ? b.activity[0].ts : 0;
       if (aTs !== bTs) return aTs - bTs;
@@ -67,86 +52,34 @@ export function ParticipantPanel({
     return map;
   }, [plan, workers]);
 
-  // Default: host (talker) workspace expanded. Selection only changes when the
-  // user explicitly clicks a tile. The synthetic USER_SLOT id corresponds to
-  // clicking your own avatar — renders the user-task list in the detail area.
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (selectedId && selectedId !== USER_SLOT && !workers.some((w) => w.id === selectedId)) {
-      setSelectedId(null);
-    }
-  }, [selectedId, workers]);
-
-  const effectiveSelected = selectedId ?? 'talker';
-  const selectedWorker =
-    effectiveSelected === USER_SLOT
-      ? null
-      : (sortedWorkers.find((w) => w.id === effectiveSelected) ?? sortedWorkers[0] ?? null);
-
-  const handleSelectUser = useCallback(() => setSelectedId(USER_SLOT), []);
-
-  // Inject selection + click handler into the caller-provided self tile so it
-  // behaves the same as any worker tile. The caller can still pass its own
-  // onClick — we wrap it.
-  const wrappedSelfTile = useMemo(() => {
-    if (!isValidElement(selfTile)) return selfTile;
-    const el = selfTile as ReactElement<Record<string, unknown>>;
-    const props = el.props ?? {};
-    const existingClick = props.onClick as (() => void) | undefined;
-    return cloneElement(el, {
-      selected: effectiveSelected === USER_SLOT,
-      onClick: () => {
-        existingClick?.();
-        handleSelectUser();
-      },
-    });
-  }, [selfTile, effectiveSelected, handleSelectUser]);
-
   const [barCollapsed, setBarCollapsed] = useState(false);
 
   return (
-    <aside className="tiles tiles--stack">
-      <div className={`tiles-bar ${barCollapsed ? 'tiles-bar-collapsed' : ''}`}>
-        <div className="tiles-bar-scroll">
-          <div className="tiles-bar-self">{wrappedSelfTile}</div>
-          {sortedWorkers.map((w) => (
-            <WorkerCard
-              key={w.id}
-              worker={w}
-              depTitles={depTitles}
-              mode="gallery"
-              selected={w.id === effectiveSelected}
-              speaking={w.role === 'talker' && aiSpeaking}
-              onSelect={() => setSelectedId(w.id)}
-              onResolvePermission={onResolvePermission}
-            />
-          ))}
-        </div>
-        <button
-          type="button"
-          className="tiles-bar-collapse"
-          onClick={() => setBarCollapsed((v) => !v)}
-          aria-label={barCollapsed ? '展开参会人' : '收起参会人'}
-          title={barCollapsed ? '展开参会人' : '收起参会人'}
-        >
-          {barCollapsed ? <ChevronDown size={16} /> : <ChevronUp size={16} />}
-        </button>
-      </div>
-      <div className="tiles-detail">
-        {effectiveSelected === USER_SLOT ? (
-          <UserTasksPanel workers={workers} />
-        ) : selectedWorker && (
-          <ParticipantContentTabs
-            key={selectedWorker.id}
-            worker={selectedWorker}
-            running={running}
-            aiSpeaking={aiSpeaking}
-            deliveryHistory={deliveryHistory}
-            onAcceptDelivery={onAcceptDelivery}
+    <div className={`tiles-bar ${barCollapsed ? 'tiles-bar-collapsed' : ''}`}>
+      <div className="tiles-bar-scroll">
+        <div className="tiles-bar-self">{selfTile}</div>
+        {sortedWorkers.map((w) => (
+          <WorkerCard
+            key={w.id}
+            worker={w}
+            depTitles={depTitles}
+            mode="gallery"
+            selected={false}
+            speaking={w.role === 'talker' && aiSpeaking}
+            onSelect={() => {}}
+            onResolvePermission={onResolvePermission}
           />
-        )}
+        ))}
       </div>
-    </aside>
+      <button
+        type="button"
+        className="tiles-bar-collapse"
+        onClick={() => setBarCollapsed((v) => !v)}
+        aria-label={barCollapsed ? '展开参会人' : '收起参会人'}
+        title={barCollapsed ? '展开参会人' : '收起参会人'}
+      >
+        {barCollapsed ? <ChevronDown size={16} /> : <ChevronUp size={16} />}
+      </button>
+    </div>
   );
 }

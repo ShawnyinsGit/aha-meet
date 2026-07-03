@@ -10,7 +10,6 @@ import {
   Camera,
   Square,
   MessageSquare,
-  Globe,
   X,
 } from 'lucide-react';
 
@@ -30,8 +29,6 @@ interface BottomToolbarProps {
   onInterrupt: () => void;
   chatOpen: boolean;
   onToggleChat: () => void;
-  browserOpen: boolean;
-  onToggleBrowser: () => void;
   onLeave: () => void;
 }
 
@@ -79,8 +76,6 @@ export function BottomToolbar({
   onInterrupt,
   chatOpen,
   onToggleChat,
-  browserOpen,
-  onToggleBrowser,
   onLeave,
 }: BottomToolbarProps) {
   const meterWidth = Math.max(0, Math.min(1, speechLevel)) * 100;
@@ -136,12 +131,6 @@ export function BottomToolbar({
       </div>
 
       <div className="toolbar-group">
-        <ToolbarButton
-          icon={<Globe size={ICON_SIZE} />}
-          label="Browser"
-          onClick={onToggleBrowser}
-          active={browserOpen}
-        />
         <ToolbarButton
           icon={<MessageSquare size={ICON_SIZE} />}
           label="Chat"

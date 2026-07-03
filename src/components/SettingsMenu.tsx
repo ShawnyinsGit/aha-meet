@@ -1,6 +1,6 @@
-// SettingsMenu — gear button in MeetingHeader that opens a popover with all
-// of the meeting-level toggles (voice lock, voice picker, memory). Used to
-// live inline in the SideDrawer but was crowding the chat surface.
+// SettingsMenu — gear button in MeetingHeader that opens a modal with all
+// of the meeting-level toggles (voice lock, voice picker, memory).
+// Redesigned from popover to modal for better usability and visual hierarchy.
 
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 
@@ -12,52 +12,61 @@ interface SettingsMenuProps {
 
 export function SettingsMenu({ children, badge = false }: SettingsMenuProps) {
   const [open, setOpen] = useState(false);
-  const popRef = useRef<HTMLDivElement | null>(null);
-  const btnRef = useRef<HTMLButtonElement | null>(null);
+  const modalRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     if (!open) return;
-    const onDown = (e: MouseEvent) => {
-      const t = e.target as Node;
-      if (popRef.current?.contains(t)) return;
-      if (btnRef.current?.contains(t)) return;
-      setOpen(false);
-    };
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') setOpen(false);
     };
-    document.addEventListener('mousedown', onDown);
     document.addEventListener('keydown', onKey);
     return () => {
-      document.removeEventListener('mousedown', onDown);
       document.removeEventListener('keydown', onKey);
     };
   }, [open]);
 
   return (
-    <div className="settings-menu">
+    <>
       <button
-        ref={btnRef}
         type="button"
-        className={`mtg-icon-btn settings-menu-btn ${open ? 'active' : ''}`}
-        onClick={() => setOpen((v) => !v)}
+        className="mtg-icon-btn settings-menu-btn"
+        onClick={() => setOpen(true)}
         title="设置"
-        aria-expanded={open}
         aria-haspopup="dialog"
       >
         ⚙
         {badge && <span className="settings-menu-badge" />}
       </button>
       {open && (
-        <div
-          className="settings-popover"
-          ref={popRef}
-          role="dialog"
-          aria-label="设置"
-        >
-          {children}
-        </div>
+        <>
+          <div
+            className="settings-modal-backdrop"
+            onClick={() => setOpen(false)}
+          />
+          <div
+            className="settings-modal"
+            ref={modalRef}
+            role="dialog"
+            aria-label="设置"
+            aria-modal="true"
+          >
+            <div className="settings-modal-header">
+              <h2 className="settings-modal-title">设置</h2>
+              <button
+                type="button"
+                className="settings-modal-close"
+                onClick={() => setOpen(false)}
+                aria-label="关闭设置"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="settings-modal-body">
+              {children}
+            </div>
+          </div>
+        </>
       )}
-    </div>
+    </>
   );
 }

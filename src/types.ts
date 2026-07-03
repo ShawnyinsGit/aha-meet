@@ -249,8 +249,8 @@ export interface VibeMeetApi {
   getVoiceConfig: () => Promise<{ enabled: boolean; voicePrint: VoicePrint | null }>;
   setVoiceLockEnabled: (on: boolean) => Promise<{ ok: boolean }>;
   setVoicePrint: (vp: VoicePrint | null) => Promise<{ ok: boolean }>;
-  getVoicePref: () => Promise<{ selectedVoiceName: string | null; guidanceDismissed: boolean; speechFilterMode: 'strict' | 'off' }>;
-  setVoicePref: (patch: { selectedVoiceName?: string | null; guidanceDismissed?: boolean; speechFilterMode?: 'strict' | 'off' }) => Promise<{ ok: boolean }>;
+  getVoicePref: () => Promise<{ selectedVoiceName: string | null; guidanceDismissed: boolean; speechFilterMode: 'strict' | 'off'; voicePolishEnabled: boolean }>;
+  setVoicePref: (patch: { selectedVoiceName?: string | null; guidanceDismissed?: boolean; speechFilterMode?: 'strict' | 'off'; voicePolishEnabled?: boolean }) => Promise<{ ok: boolean }>;
   openVoiceSettings: () => Promise<{ ok: boolean }>;
   useSystemPicker: () => Promise<boolean>;
   getDesktopSources: () => Promise<
@@ -266,6 +266,9 @@ export interface VibeMeetApi {
     pcm: ArrayBuffer,
     lang?: 'auto' | 'zh' | 'en',
   ) => Promise<{ ok: true; text: string } | { ok: false; error: string }>;
+  polishAsrText: (
+    text: string,
+  ) => Promise<{ ok: true; text: string } | { ok: false; error: string; text: string }>;
   auth: AuthApi;
   memory: MemoryApi;
   decisions: {

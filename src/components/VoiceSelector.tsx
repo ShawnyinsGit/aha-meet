@@ -14,6 +14,8 @@ interface VoiceSelectorProps {
   onOpenGuide: () => void;
   filterMode: SpeechFilterMode;
   onChangeFilterMode: (mode: SpeechFilterMode) => void;
+  voicePolishEnabled: boolean;
+  onChangeVoicePolish: (enabled: boolean) => void;
 }
 
 function describeVoice(v: ListedVoice): string {
@@ -28,6 +30,8 @@ export function VoiceSelector({
   onOpenGuide,
   filterMode,
   onChangeFilterMode,
+  voicePolishEnabled,
+  onChangeVoicePolish,
 }: VoiceSelectorProps) {
   const chineseVoices = listChineseVoices(voices);
   const hasPremium = chineseVoices.some((v) => v.tier !== 'default');
@@ -85,6 +89,25 @@ export function VoiceSelector({
           className={`drawer-toggle ${strict ? 'drawer-toggle-on' : ''}`}
           aria-pressed={strict}
           onClick={() => onChangeFilterMode(strict ? 'off' : 'strict')}
+        >
+          <span className="drawer-toggle-knob" />
+        </button>
+      </div>
+
+      <div className="drawer-settings-row" style={{ marginTop: 12 }}>
+        <div className="drawer-settings-label">
+          <div className="drawer-settings-title">语音整理</div>
+          <div className="drawer-settings-hint">
+            {voicePolishEnabled
+              ? '口语自动整理为书面语再发送'
+              : '原样发送语音识别文本'}
+          </div>
+        </div>
+        <button
+          type="button"
+          className={`drawer-toggle ${voicePolishEnabled ? 'drawer-toggle-on' : ''}`}
+          aria-pressed={voicePolishEnabled}
+          onClick={() => onChangeVoicePolish(!voicePolishEnabled)}
         >
           <span className="drawer-toggle-knob" />
         </button>

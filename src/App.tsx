@@ -4,6 +4,7 @@ import { useWorkers } from './hooks/useWorkers';
 import { useTabs } from './hooks/useTabs';
 import { useScreenShare } from './hooks/useScreenShare';
 import { useBrowser } from './hooks/useBrowser';
+import { useStageWindows } from './hooks/useStageWindows';
 import { useElapsedSeconds } from './hooks/useTimer';
 import { cancelSpeech, enqueueConversational, isSpeechActive, markTurnComplete, setSelectedVoiceName, setSpeechFilterMode, speakConversational, useVoices, warmupTTS } from './hooks/useSpeech';
 import type { SpeakHandle } from './hooks/useSpeech';
@@ -54,6 +55,7 @@ export function App() {
   const tabs = useTabs();
   const { state: share, start: startShare, startSystemPicker, stop: stopShare, captureFrame, videoRef } = useScreenShare();
   const browser = useBrowser();
+  const stageWindows = useStageWindows();
 
   // Derived UI predicates:
   //   hasTabs       — any open tab (live or placeholder); drives Lobby vs Shell branch
@@ -101,6 +103,7 @@ export function App() {
   // even if voiceschanged fires again (e.g. a voice download completes).
   const [guidanceClosedThisSession, setGuidanceClosedThisSession] = useState(false);
   const [filterMode, setFilterModeState] = useState<SpeechFilterMode>('strict');
+  const [voicePolishEnabled, setVoicePolishEnabled] = useState(false);
 
   // Whether to surface subagents in the participant panel. Independent of the
   // multi-agent send mode toggle in the header.
@@ -182,6 +185,7 @@ export function App() {
       setSelectedVoiceNameState(pref.selectedVoiceName);
       setGuidanceDismissed(pref.guidanceDismissed);
       setFilterModeState(pref.speechFilterMode);
+      setVoicePolishEnabled(pref.voicePolishEnabled);
       setSelectedVoiceName(pref.selectedVoiceName);
       setSpeechFilterMode(pref.speechFilterMode);
     }).catch(() => { /* settings file may not exist yet */ });
@@ -226,6 +230,11 @@ export function App() {
     setFilterModeState(mode);
     setSpeechFilterMode(mode);
     void window.vibeMeet.setVoicePref({ speechFilterMode: mode });
+  }, []);
+
+  const handleVoicePolishChange = useCallback((enabled: boolean) => {
+    setVoicePolishEnabled(enabled);
+    void window.vibeMeet.setVoicePref({ voicePolishEnabled: enabled });
   }, []);
 
   const handleOpenGuide = useCallback(() => setGuideOpen(true), []);
@@ -402,7 +411,7 @@ export function App() {
   // VAD stays alive during mute (paused mode) so toggling is instant.
   const micEnabled = hasLiveTab || enrollment != null;
 
-  const onVoiceFinal = useCallback((text: string) => {
+  const onVoiceFinal = useCallback(async (text: string) => {
     // Read the active id fresh inside the callback. Closing over hasLiveTab at
     // render time races with rapid tab close: if the user speaks the instant
     // a tab tears down, the captured value can be stale and either drop a
@@ -412,8 +421,17 @@ export function App() {
       console.warn('[voice] dropped — no active session');
       return;
     }
-    sendWithModeRef.current(text);
-  }, []);
+    let finalText = text;
+    if (voicePolishEnabled) {
+      try {
+        const result = await window.vibeMeet.polishAsrText(text);
+        if (result.ok) finalText = result.text;
+      } catch {
+        // IPC failure → fall through with raw text
+      }
+    }
+    sendWithModeRef.current(finalText);
+  }, [voicePolishEnabled]);
 
   // Barge-in: any time the VAD says we've started speaking, cut Claude off.
   // markBargeIn() tags the active streaming turn so subsequent stream events
@@ -743,6 +761,8 @@ ${trimmed}`
               onOpenGuide={handleOpenGuide}
               filterMode={filterMode}
               onChangeFilterMode={handleFilterModeChange}
+              voicePolishEnabled={voicePolishEnabled}
+              onChangeVoicePolish={handleVoicePolishChange}
             />
             <VoiceLockPanel
               enabled={voiceLockEnabled}
@@ -776,33 +796,17 @@ ${trimmed}`
             videoRef={videoRef}
             onPickSource={() => setPickerOpen(true)}
             onStopShare={stopShare}
-            delivery={workers.currentDelivery}
-            sessionId={activeTab?.id ?? null}
-            onAcceptDelivery={() => { setViewingFile(null); workers.acceptDelivery(); }}
-            onReviseDelivery={(fb: string) => { setViewingFile(null); return workers.reviseDelivery(fb); }}
+            workers={workers.workerList}
+            plan={workers.plan}
+            running={state.running}
             aiSpeaking={aiSpeaking}
-            viewingFile={viewingFile}
-            onCloseFileView={() => setViewingFile(null)}
-            browserVisible={browser.state.visible}
-            browserTabs={browser.state.tabs}
-            browserActiveTabId={browser.state.activeTabId}
-            browserViewportRef={browser.viewportRef}
-            onBrowserOpenTab={() => browser.openTab()}
-            onBrowserCloseTab={browser.closeTab}
-            onBrowserSetActive={browser.setActiveTab}
-            onBrowserNavigate={browser.navigate}
-            onBrowserBack={browser.goBack}
-            onBrowserForward={browser.goForward}
-            onBrowserReload={browser.reload}
-            defaultContent={
+            galleryContent={
               <ParticipantPanel
                 workers={workers.workerList}
                 plan={workers.plan}
                 running={state.running}
                 aiSpeaking={aiSpeaking}
                 onResolvePermission={resolvePermission}
-                deliveryHistory={workers.deliveryHistory}
-                onAcceptDelivery={workers.acceptDelivery}
                 selfTile={
                   <ParticipantTile
                     name="You"
@@ -817,6 +821,28 @@ ${trimmed}`
                 }
               />
             }
+            delivery={workers.currentDelivery}
+            sessionId={activeTab?.id ?? null}
+            onAcceptDelivery={() => { setViewingFile(null); workers.acceptDelivery(); }}
+            onReviseDelivery={(fb: string) => { setViewingFile(null); return workers.reviseDelivery(fb); }}
+            viewingFile={viewingFile}
+            onCloseFileView={() => setViewingFile(null)}
+            stageWindows={stageWindows.windows}
+            activeWindowId={stageWindows.activeWindowId}
+            onSelectWindow={stageWindows.setActiveWindow}
+            onCloseWindow={stageWindows.closeWindow}
+            onCreateWindow={stageWindows.createWindow}
+            onResolvePermission={resolvePermission}
+            browserTabs={browser.state.tabs}
+            browserActiveTabId={browser.state.activeTabId}
+            browserViewportRef={browser.viewportRef}
+            onBrowserOpenTab={() => browser.openTab()}
+            onBrowserCloseTab={browser.closeTab}
+            onBrowserSetActive={browser.setActiveTab}
+            onBrowserNavigate={browser.navigate}
+            onBrowserBack={browser.goBack}
+            onBrowserForward={browser.goForward}
+            onBrowserReload={browser.reload}
           />
         </section>
 
@@ -853,8 +879,6 @@ ${trimmed}`
         onInterrupt={interrupt}
         chatOpen={drawerOpen}
         onToggleChat={() => setDrawerOpen((v) => !v)}
-        browserOpen={browser.state.visible}
-        onToggleBrowser={browser.toggleVisible}
         onLeave={leave}
       />
 

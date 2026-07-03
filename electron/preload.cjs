@@ -40,6 +40,7 @@ const api = {
   relaunchApp: () => ipcRenderer.invoke('app:relaunch'),
   asrAvailable: () => ipcRenderer.invoke('asr:available'),
   transcribePcm: (pcmBuffer, lang) => ipcRenderer.invoke('asr:transcribe', pcmBuffer, lang),
+  polishAsrText: (text) => ipcRenderer.invoke('asr:polish-text', text),
   auth: {
     getConfig: () => ipcRenderer.invoke('auth:get-config'),
     setApiKey: (key) => ipcRenderer.invoke('auth:set-api-key', key),

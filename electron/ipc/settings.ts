@@ -30,14 +30,15 @@ export function registerSettingsIpc(): void {
       selectedVoiceName: s.selectedVoiceName ?? null,
       guidanceDismissed: Boolean(s.voiceGuidanceDismissed),
       speechFilterMode: s.speechFilterMode ?? 'strict',
+      voicePolishEnabled: Boolean(s.voicePolishEnabled),
     };
   });
 
   ipcMain.handle('settings:set-voice-pref', async (
     _e,
-    patch: { selectedVoiceName?: string | null; guidanceDismissed?: boolean; speechFilterMode?: 'strict' | 'off' },
+    patch: { selectedVoiceName?: string | null; guidanceDismissed?: boolean; speechFilterMode?: 'strict' | 'off'; voicePolishEnabled?: boolean },
   ) => {
-    const next: Partial<{ selectedVoiceName: string | null; voiceGuidanceDismissed: boolean; speechFilterMode: 'strict' | 'off' }> = {};
+    const next: Partial<{ selectedVoiceName: string | null; voiceGuidanceDismissed: boolean; speechFilterMode: 'strict' | 'off'; voicePolishEnabled: boolean }> = {};
     if (Object.prototype.hasOwnProperty.call(patch, 'selectedVoiceName')) {
       next.selectedVoiceName = patch.selectedVoiceName ?? null;
     }
@@ -46,6 +47,9 @@ export function registerSettingsIpc(): void {
     }
     if (patch.speechFilterMode === 'strict' || patch.speechFilterMode === 'off') {
       next.speechFilterMode = patch.speechFilterMode;
+    }
+    if (Object.prototype.hasOwnProperty.call(patch, 'voicePolishEnabled')) {
+      next.voicePolishEnabled = Boolean(patch.voicePolishEnabled);
     }
     await updateSettings(next);
     return { ok: true };
