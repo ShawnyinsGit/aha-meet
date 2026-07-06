@@ -1,6 +1,6 @@
 {
   "name": "aha-meet",
-  "version": "0.10.7",
+  "version": "0.10.8",
   "description": "Real-time meeting-style collaboration with Claude Code",
   "author": {
     "name": "AhaMeet",
@@ -12,7 +12,7 @@
   "scripts": {
     "postinstall": "node node_modules/electron/install.js",
     "dev": "vite",
-    "dev:electron": "tsc -p tsconfig.electron.json && electron .",
+    "dev:electron": "VITE_DEV_SERVER_URL=http://localhost:5173 tsc -p tsconfig.electron.json && electron .",
     "build:renderer": "vite build",
     "build:electron": "tsc -p tsconfig.electron.json && cp electron/preload.cjs dist-electron/preload.cjs",
     "build": "npm run build:renderer && npm run build:electron",

@@ -237,6 +237,23 @@
     border-color: var(--danger);
     color: var(--danger);
   }
+
+  /* ---------- Chat bubbles ---------- */
+  .msg-user .msg-body {
+    color: #1c1c1e;
+  }
+
+  /* ---------- Workspace status bar ---------- */
+  .workspace-status-speaking { color: #007aff; }
+  .workspace-status-working { color: #248a3d; }
+  .workspace-status-waiting { color: #b25000; }
+
+  /* ---------- Scope picker (auto-approve dropdown) ---------- */
+  .mtg-scope-picker {
+    background: #ffffff;
+    border-color: rgba(0, 0, 0, 0.12);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+  }
 }
 
 * { box-sizing: border-box; }

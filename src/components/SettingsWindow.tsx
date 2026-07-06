@@ -2,7 +2,7 @@
 // via ?view=settings. Opaque solid background, no glass/transparency.
 // Hosts all settings panels: Memory, Voice, VoiceLock, Skills.
 
-import { useCallback } from 'react';
+import { Component, useCallback, type ErrorInfo, type ReactNode } from 'react';
 import { useVoicePreferences } from '../hooks/useVoicePreferences';
 import { useVoiceLock } from '../hooks/useVoiceLock';
 import { MemoryPanel } from './MemoryPanel';
@@ -12,13 +12,64 @@ import { SkillManagerPanel } from './SkillManagerPanel';
 import { VoiceGuideModal } from './VoiceGuideModal';
 import { SPEAKER_MODEL_ID } from '../lib/speaker-embedding';
 
+interface ErrorBoundaryProps {
+  children: ReactNode;
+}
+
+interface ErrorBoundaryState {
+  error: Error | null;
+}
+
+class SettingsErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
+  constructor(props: ErrorBoundaryProps) {
+    super(props);
+    this.state = { error: null };
+  }
+
+  static getDerivedStateFromError(error: Error): ErrorBoundaryState {
+    return { error };
+  }
+
+  componentDidCatch(error: Error, info: ErrorInfo): void {
+    console.error('[SettingsWindow] Uncaught error:', error, info.componentStack);
+  }
+
+  render(): ReactNode {
+    if (this.state.error) {
+      return (
+        <div className="settings-window">
+          <header className="settings-window-header">
+            <h1 className="settings-window-title">设置</h1>
+          </header>
+          <div className="settings-window-body" style={{ padding: 24, textAlign: 'center' }}>
+            <div style={{ fontSize: 40, marginBottom: 16 }}>⚠️</div>
+            <h2 style={{ fontSize: 16, marginBottom: 8 }}>设置加载失败</h2>
+            <p style={{ fontSize: 13, opacity: 0.7, marginBottom: 16 }}>
+              {this.state.error.message || 'An unexpected error occurred'}
+            </p>
+            <button
+              type="button"
+              className="settings-window-close"
+              style={{ position: 'static', padding: '8px 20px', fontSize: 13 }}
+              onClick={() => window.close()}
+            >
+              关闭窗口
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 // Dummy refs/callbacks for useVoiceLock — the settings window has no active
 // audio session, so mute/speaking state is irrelevant. The hook still needs
 // these arguments for type correctness and to update its own enrollment state.
 const noopSetState = () => {};
 const dummySpeakingRef = { current: false };
 
-export function SettingsWindow() {
+function SettingsWindowInner() {
   const voicePrefs = useVoicePreferences();
   const voiceLock = useVoiceLock({
     muted: false,
@@ -78,5 +129,13 @@ export function SettingsWindow() {
         />
       )}
     </div>
+  );
+}
+
+export function SettingsWindow() {
+  return (
+    <SettingsErrorBoundary>
+      <SettingsWindowInner />
+    </SettingsErrorBoundary>
   );
 }

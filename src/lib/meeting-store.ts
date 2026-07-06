@@ -538,16 +538,22 @@ class MeetingStore {
   private notify(slotId: string) {
     this.invalidateTabCache();
     if (slotId === this.activeId) {
-      for (const l of this.listeners) l();
+      for (const l of this.listeners) {
+        try { l(); } catch { /* one bad listener must not block others */ }
+      }
     }
     // Tab status / unread badge can change for any slot, so always nudge tab
     // listeners. Cheap (just badges).
-    for (const l of this.tabListeners) l();
+    for (const l of this.tabListeners) {
+      try { l(); } catch { /* one bad listener must not block others */ }
+    }
   }
 
   private notifyTabsOnly() {
     this.invalidateTabCache();
-    for (const l of this.tabListeners) l();
+    for (const l of this.tabListeners) {
+      try { l(); } catch { /* one bad listener must not block others */ }
+    }
   }
 
   private mutateSlot(slotId: string, updater: (s: MeetingState) => MeetingState) {
