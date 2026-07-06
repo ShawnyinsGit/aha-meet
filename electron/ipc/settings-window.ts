@@ -31,7 +31,7 @@ function createSettingsWindow(): BrowserWindow {
     maximizable: false,
     fullscreenable: false,
     webPreferences: {
-      preload: join(__dirname, 'preload.cjs'),
+      preload: join(__dirname, '..', 'preload.cjs'),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
