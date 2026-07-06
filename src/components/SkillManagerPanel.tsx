@@ -23,6 +23,7 @@ export function SkillManagerPanel() {
     setError(null);
     try {
       const r = await window.vibeMeet.skills.list();
+      console.log('[SkillManager] reload result:', r);
       if (!mountedRef.current) return;
       if (r.ok) {
         setSkills(r.skills);
@@ -30,6 +31,7 @@ export function SkillManagerPanel() {
         setError(r.error);
       }
     } catch (err) {
+      console.error('[SkillManager] reload error:', err);
       if (mountedRef.current) setError(err instanceof Error ? err.message : String(err));
     } finally {
       if (mountedRef.current) setLoading(false);
@@ -57,19 +59,19 @@ export function SkillManagerPanel() {
     setInstallResult(null);
     try {
       const r = await window.vibeMeet.skills.install(source);
+      console.log('[SkillManager] install result:', r);
       if (r.ok) {
         setInstallResult({ type: 'success', skill: r.skill });
         setInstallSource('');
-        // Small delay so the filesystem write is fully flushed before
-        // we scan again — prevents a race where listSkills misses the
-        // freshly written SKILL.md.
-        await new Promise((res) => setTimeout(res, 300));
+        // Wait longer for filesystem to fully flush before scanning again
+        await new Promise((res) => setTimeout(res, 800));
         if (mountedRef.current) await reload();
       } else {
         setInstallResult({ type: 'error', message: r.error });
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
+      console.error('[SkillManager] install error:', err);
       if (mountedRef.current) {
         setInstallResult({ type: 'error', message: msg });
         setError(msg);

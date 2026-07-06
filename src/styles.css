@@ -254,6 +254,425 @@
     border-color: rgba(0, 0, 0, 0.12);
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
   }
+  .mtg-scope-picker-title { color: var(--text-muted); }
+  .mtg-scope-option {
+    color: var(--text-primary);
+    border-color: var(--border-soft);
+  }
+  .mtg-scope-option:hover {
+    background: var(--bg-hover);
+    border-color: var(--border-strong);
+  }
+  .mtg-scope-option-active { color: var(--success); }
+  .mtg-scope-option-desc { color: var(--text-muted); }
+
+  /* ---------- Auto-approve toggle ---------- */
+  .mtg-trust-chip { color: #8a4400; }
+  .mtg-trust-chip:hover { color: #6e3600; }
+  .mtg-approve-toggle {
+    background: rgba(0, 0, 0, 0.04);
+    border-color: var(--border-soft);
+    color: var(--text-secondary);
+  }
+  .mtg-approve-toggle:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+  }
+  .mtg-approve-toggle-track { background: rgba(0, 0, 0, 0.12); }
+  .mtg-approve-toggle-on { color: #8a4400; }
+  .mtg-approve-toggle-on:hover { color: #6e3600; }
+
+  /* ---------- Multi-agent toggle ---------- */
+  .mtg-multi-toggle-on { color: var(--accent); }
+  .mtg-multi-toggle-on:hover { color: #005ec4; }
+
+  /* ---------- Tab bar ---------- */
+  .stage-tab-bar {
+    background: var(--bg-elevated);
+    border-color: var(--border-soft);
+  }
+  .stage-tab:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+  }
+  .stage-tab-active {
+    background: var(--accent-soft);
+    color: var(--text-primary);
+  }
+  .stage-tab-close:hover {
+    background: rgba(0, 0, 0, 0.08);
+    color: var(--text-primary);
+  }
+  .stage-tab-add-btn:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+  }
+  .stage-tab-menu {
+    background: #ffffff;
+    border-color: var(--border-soft);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  }
+  .stage-tab-menu-item { color: var(--text-primary); }
+  .stage-tab-menu-item:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+  }
+  .tab-strip-close:hover { background: rgba(0, 0, 0, 0.08); }
+  .tab-strip-add:hover { background: rgba(0, 0, 0, 0.06); }
+
+  /* ---------- Gallery / tiles ---------- */
+  .tiles--overlay .tile {
+    background: rgba(255, 255, 255, 0.85);
+    border-color: var(--border-soft);
+  }
+  .tile-role-badge { color: var(--text-muted); }
+  .tile-stage {
+    background: var(--bg-elevated);
+    border-color: var(--border-soft);
+  }
+  .tile-specialty-badge {
+    color: var(--text-secondary);
+    border-color: var(--border-soft);
+  }
+  .tile-specialty-frontend { color: #7b2d8e; }
+  .tile-specialty-backend { color: #0056b3; }
+  .tile-specialty-electron { color: #006699; }
+  .tile-specialty-devops { color: #8a4400; }
+  .tile-specialty-test { color: #1a7a35; }
+  .tile-specialty-docs { color: #4a4a4a; }
+  .tile-specialty-review { color: #9e0050; }
+  .tile-specialty-general {
+    color: var(--text-secondary);
+    border-color: var(--border-soft);
+  }
+  .tile-history-toggle {
+    color: var(--text-secondary);
+    background: rgba(0, 0, 0, 0.04);
+    border-color: var(--border-soft);
+  }
+  .tile-history-toggle:hover {
+    background: var(--bg-hover);
+    border-color: var(--border-strong);
+  }
+  .tile-history-toggle-open { color: var(--accent); }
+  .tile-history-panel {
+    background: #ffffff;
+    border-color: var(--border-soft);
+  }
+  .tile-history-header { color: var(--text-muted); }
+  .tile-history-item { border-left-color: var(--border-soft); }
+  .tile-history-status {
+    background: rgba(0, 0, 0, 0.04);
+    color: var(--text-muted);
+  }
+  .tile-history-status-done { color: var(--success); }
+  .tile-history-status-failed { color: var(--danger); }
+  .tile-history-meta { color: var(--text-muted); }
+  .tiles-bar {
+    background: var(--bg-elevated);
+    border-color: var(--border-soft);
+  }
+
+  /* ---------- Drawer / settings panels ---------- */
+  .drawer-settings {
+    background: var(--bg-elevated);
+    border-color: var(--border-soft);
+  }
+  .drawer-tabs {
+    background: var(--bg-elevated);
+    border-color: var(--border-soft);
+  }
+  .drawer-composer {
+    background: var(--bg-elevated);
+    border-color: var(--border-soft);
+  }
+  .voice-lock-cancel { color: var(--danger); }
+
+  /* ---------- Chat area ---------- */
+  .drawer-send-icon { color: var(--accent); }
+  .drawer-send-icon:hover { color: #005ec4; }
+  .drawer-attach-icon:hover { background: var(--bg-hover); }
+  .attachment-chip {
+    background: var(--bg-elevated);
+    border-color: var(--border-soft);
+  }
+  .attachment-chip-remove:hover { background: rgba(0, 0, 0, 0.08); }
+  .attachment-chip-text .attachment-icon { color: #1a7a35; }
+  .attachment-chip-word .attachment-icon { color: var(--accent); }
+  .attachment-chip-pdf .attachment-icon { color: #c85000; }
+  .attachment-chip-image .attachment-icon { color: #8a6d00; }
+  .attachment-chip-rejected { color: var(--danger); }
+  .attachment-chip-sent {
+    background: var(--bg-elevated);
+    border-color: var(--border-soft);
+  }
+  .mtg-dropping::after {
+    color: var(--accent);
+    background: rgba(242, 242, 247, 0.85);
+  }
+
+  /* ---------- Activity area ---------- */
+  .act-row.has-detail:hover { background: var(--bg-hover); }
+  .act-action {
+    border-color: var(--border-soft);
+    background: var(--bg-elevated);
+    color: var(--text-primary);
+  }
+  .act-action:hover {
+    background: var(--bg-hover);
+    border-color: var(--border-strong);
+  }
+
+  /* ---------- Workspace status pills ---------- */
+  .workspace-status-speaking { color: var(--accent); }
+  .workspace-status-working { color: var(--success); }
+  .workspace-status-waiting { color: var(--warn); }
+
+  /* ---------- Worker cards (multi-agent) ---------- */
+  .worker-card-stage {
+    background: var(--bg-elevated);
+    border-color: var(--border-soft);
+  }
+  .worker-card-stage-talker {
+    background: linear-gradient(160deg, #dce8ff, #ebeef5);
+  }
+  .worker-card-stage-worker {
+    background: linear-gradient(160deg, #e0f0e8, #ebeef5);
+  }
+  .worker-card-footer {
+    background: var(--bg-elevated);
+    border-color: var(--border-soft);
+  }
+  .worker-card-sidebar:hover { border-color: var(--border-strong); }
+  .worker-card-pill-idle { background: var(--bg-hover); }
+  .worker-card-pill-waiting { color: var(--warn); }
+  .worker-card-pill-working { color: var(--accent); }
+  .worker-card-pill-done { color: var(--success); }
+  .worker-card-pill-failed { color: var(--danger); }
+  .worker-card-dep-chip { color: var(--warn); }
+  .worker-card-activity-row { border-left-color: var(--border-soft); }
+  .worker-card-activity-system { border-color: var(--border-soft); }
+  .worker-card-perm-allow { color: var(--success); }
+  .worker-card-perm-deny { color: var(--danger); }
+  .worker-card-summary { border-top-color: var(--border-soft); }
+
+  /* ---------- Workspace task pills ---------- */
+  .workspace-task-pill-idle { background: var(--bg-hover); }
+  .workspace-task-pill-waiting { color: var(--warn); }
+  .workspace-task-pill-working { color: var(--accent); }
+  .workspace-task-pill-done { color: var(--success); }
+  .workspace-task-pill-failed { color: var(--danger); }
+  .workspace-task-pill-speaking { color: var(--accent); }
+  .workspace-feed-row-clickable:hover { background: var(--bg-hover); }
+  .workspace-feed-row-open { background: var(--accent-soft); }
+  .workspace-feed-task-pill-pending { color: var(--warn); }
+  .workspace-feed-task-pill-running { color: var(--accent); }
+  .workspace-feed-task-pill-done { color: var(--success); }
+  .workspace-feed-task-pill-failed { color: var(--danger); }
+
+  /* ---------- Browser panel ---------- */
+  .browser-stage {
+    background: var(--bg-elevated);
+    border-color: var(--border-soft);
+  }
+  .browser-toolbar {
+    background: var(--bg-elevated);
+    border-color: var(--border-soft);
+  }
+  .browser-tab {
+    background: var(--bg-elevated);
+    color: var(--text-primary);
+  }
+  .browser-tab:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+  }
+  .browser-tab-active {
+    background: var(--accent-soft);
+    color: var(--text-primary);
+  }
+  .browser-tab-favicon { color: var(--text-muted); }
+  .browser-tab-close:hover { background: rgba(0, 0, 0, 0.08); }
+  .browser-tab-add:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+  }
+  .browser-nav-btn:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+  }
+  .browser-url-input {
+    background: var(--bg-input);
+    color: var(--text-primary);
+    border-color: var(--border-soft);
+  }
+
+  /* ---------- Delivery stage ---------- */
+  .stage-delivery {
+    background: linear-gradient(170deg, #e8e8ed 0%, #f2f2f7 100%);
+  }
+  .delivery-viewer-summary { color: var(--text-primary); }
+  .delivery-viewer-sidebar {
+    background: var(--bg-elevated);
+    border-color: var(--border-soft);
+  }
+  .delivery-viewer-file:hover { background: var(--bg-hover); }
+  .delivery-viewer-content {
+    background: var(--bg-elevated);
+    border-color: var(--border-soft);
+  }
+  .delivery-viewer-feedback-input {
+    background: var(--bg-input);
+    border-color: var(--border-soft);
+    color: var(--text-primary);
+  }
+  .delivery-viewer-btn-primary:hover { background: #005ec4; }
+  .delivery-viewer-btn-secondary {
+    background: var(--bg-elevated);
+    border-color: var(--border-soft);
+  }
+  .delivery-viewer-btn-secondary:hover {
+    background: var(--bg-hover);
+    border-color: var(--border-strong);
+  }
+
+  /* ---------- Participant tabs ---------- */
+  .participant-tabs {
+    background: var(--bg-elevated);
+    border-color: var(--border-soft);
+  }
+  .participant-tabs-bar {
+    border-bottom-color: var(--border-soft);
+    background: var(--bg-elevated);
+  }
+  .participant-tab {
+    color: var(--text-secondary);
+  }
+  .participant-tab:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+  }
+  .participant-tab-active {
+    color: var(--accent);
+  }
+
+  /* ---------- Review / Spec panels ---------- */
+  .review-panel-empty { color: var(--text-muted); }
+  .review-panel-summary { color: var(--accent); }
+  .review-change {
+    background: var(--bg-elevated);
+    border-color: var(--border-soft);
+  }
+  .review-change-header {
+    background: var(--bg-hover);
+  }
+  .review-change-tool { color: var(--text-primary); }
+  .review-change-path { color: var(--text-secondary); }
+  .review-change-ts { color: var(--text-muted); }
+  .review-change-detail { color: var(--text-secondary); }
+  .spec-panel-empty { color: var(--text-muted); }
+  .spec-panel-header h3 { color: var(--text-primary); }
+  .spec-panel-count { color: var(--text-muted); }
+  .spec-message {
+    background: var(--bg-elevated);
+    border-color: var(--border-soft);
+  }
+  .spec-message-meta {
+    background: var(--bg-hover);
+  }
+  .spec-message-ts { color: var(--text-muted); }
+
+  /* ---------- Terminal panel (always dark) ---------- */
+  .terminal-panel {
+    background: #1e1e1e;
+    color: #e0e0e0;
+  }
+  .terminal-panel-empty { color: rgba(255, 255, 255, 0.4); }
+  .terminal-block { background: #2d2d2d; }
+  .terminal-block-header {
+    background: #333;
+    color: rgba(255, 255, 255, 0.6);
+  }
+  .terminal-block-command { color: #68d391; }
+  .terminal-block-output {
+    color: rgba(255, 255, 255, 0.85);
+    background: #252525;
+    border-top-color: #333;
+  }
+
+  /* ---------- File tree ---------- */
+  .file-tree-row:hover { background: var(--bg-hover); }
+  .file-tree-spinner {
+    border-color: rgba(0, 0, 0, 0.15);
+    border-top-color: var(--accent);
+  }
+
+  /* ---------- Pickers / modals ---------- */
+  .picker-backdrop {
+    background: rgba(0, 0, 0, 0.4);
+  }
+  .picker-error { color: var(--danger); }
+  .picker-btn-relaunch { color: var(--danger); }
+  .picker-btn-relaunch:hover { color: #c00; }
+  .plan-modal-help code {
+    background: rgba(0, 0, 0, 0.06);
+    color: var(--accent);
+  }
+  .plan-modal-textarea {
+    background: var(--bg-input);
+    border-color: var(--border-soft);
+    color: var(--text-primary);
+  }
+  .plan-modal-preview {
+    background: var(--bg-hover);
+  }
+  .plan-modal-preview code { color: var(--accent); }
+  .plan-modal-error { color: var(--danger); }
+  .plan-modal-cancel:hover { background: var(--bg-hover); }
+  .error-banner { color: var(--danger); }
+  .error-banner__reconnect {
+    background: var(--bg-elevated);
+    color: var(--text-primary);
+    border-color: var(--border-soft);
+  }
+  .error-banner__reconnect:hover {
+    background: var(--bg-hover);
+    border-color: var(--border-strong);
+  }
+  .settings-modal {
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.05);
+  }
+
+  /* ---------- Join screen extras ---------- */
+  .join-error { color: var(--danger); }
+  .join-auth-badge.active { color: var(--success); }
+  .join-auth-error { color: var(--danger); }
+
+  /* ---------- Skill panel extras ---------- */
+  .skill-install-result-dismiss:hover { background: var(--bg-hover); }
+  .skill-btn-danger { color: var(--danger); }
+  .skill-item-source {
+    background: var(--bg-hover);
+  }
+  .skill-btn {
+    background: var(--bg-elevated);
+    border-color: var(--border-soft);
+    color: var(--text-primary);
+  }
+  .skill-btn:hover {
+    background: var(--bg-hover);
+    border-color: var(--border-strong);
+  }
+
+  /* ---------- Memory panel extras ---------- */
+  .memory-chip-active { color: #ffffff; }
+  .memory-scope-toggle {
+    background: var(--bg-elevated);
+    border-color: var(--border-soft);
+  }
+  .memory-scope-on { color: #8a4400; }
+  .memory-btn-primary { color: #ffffff; }
+  .memory-btn-danger { color: var(--danger); }
 }
 
 * { box-sizing: border-box; }

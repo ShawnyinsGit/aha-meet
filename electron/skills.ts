@@ -192,6 +192,10 @@ async function downloadSkill(url: string): Promise<{ name: string; content: stri
     throw new Error(`下载失败: HTTP ${res.status} ${res.statusText}`);
   }
   const content = await res.text();
+  // Validate that we actually got a SKILL.md with frontmatter, not an HTML page
+  if (content.trimStart().startsWith('<!') || content.trimStart().startsWith('<html')) {
+    throw new Error('下载的内容不是有效的 SKILL.md 文件（可能是网页而非原始文件链接）');
+  }
   const meta = parseFrontmatter(content);
   const name = meta?.name || inferSkillNameFromUrl(url);
   return { name, content };
@@ -298,9 +302,12 @@ export async function installSkill(source: string): Promise<SkillInfo> {
     }
 
     const meta = await readSkillMd(skillDir);
+    if (!meta) {
+      throw new Error('安装完成但无法读取有效的 SKILL.md（frontmatter 格式可能不正确）');
+    }
     return {
       name,
-      description: meta?.description || '',
+      description: meta.description || '',
       source: 'user',
       path: skillDir,
     };
