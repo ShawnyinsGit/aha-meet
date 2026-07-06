@@ -95,12 +95,19 @@ function createSettingsWindow(): BrowserWindow {
     return { action: 'deny' };
   });
 
+  win.webContents.on('did-fail-load', (_e, code, desc) => {
+    console.error('[settings-window] load failed:', code, desc);
+  });
+
   if (dev) {
     const sep = process.env.VITE_DEV_SERVER_URL!.includes('?') ? '&' : '?';
-    void win.loadURL(`${process.env.VITE_DEV_SERVER_URL}${sep}view=settings`);
+    win.loadURL(`${process.env.VITE_DEV_SERVER_URL}${sep}view=settings`).catch((err) => {
+      console.error('[settings-window] loadURL error:', err);
+    });
   } else {
-    void win.loadFile(join(__dirname, '..', 'dist', 'index.html'), {
-      query: { view: 'settings' },
+    const htmlPath = join(__dirname, '..', '..', 'dist', 'index.html');
+    win.loadFile(htmlPath, { query: { view: 'settings' } }).catch((err) => {
+      console.error('[settings-window] loadFile error:', htmlPath, err);
     });
   }
 
