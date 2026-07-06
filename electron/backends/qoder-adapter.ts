@@ -219,7 +219,6 @@ export class QoderBackend extends SubprocessBackend {
     if (auth.apiKey) {
       // Qoder uses a generic API key env var
       env.QODER_API_KEY = auth.apiKey;
-      env.GEMINI_API_KEY = auth.apiKey; // Qoder uses Gemini by default
     }
     if (auth.baseUrl) {
       env.QODER_BASE_URL = auth.baseUrl;

@@ -13,7 +13,7 @@
 //   • Exit code handling (0=success, non-zero=error)
 //   • stderr ring buffer for error diagnostics
 
-import { spawn, type ChildProcess } from 'node:child_process';
+import { spawn, execFileSync, type ChildProcess } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { delimiter } from 'node:path';
 import {
@@ -31,6 +31,12 @@ import {
 // ── Subprocess session ────────────────────────────────────────────────────────
 // Controls a spawned CLI process. Sends prompts via stdin, reads JSONL from
 // stdout, captures stderr for diagnostics.
+
+/** Strip absolute paths from error messages to avoid leaking filesystem layout. */
+function sanitizeError(msg: string): string {
+  // Replace common absolute path patterns with a generic placeholder.
+  return msg.replace(/\/(?:Users?|home|opt|usr|var|tmp|private|Applications?)\/[^\s:'"]+/g, '<path>');
+}
 
 export abstract class SubprocessSession implements BackendSession {
   protected process: ChildProcess | null = null;
@@ -63,14 +69,21 @@ export abstract class SubprocessSession implements BackendSession {
     if (this.process || this.closed) return;
 
     const args = this.buildArgs(this.config);
+    // Use minimal environment if not explicitly provided to avoid leaking
+    // Electron internals or other backend API keys.
+    const spawnEnv = this.config.env ?? {
+      PATH: process.env.PATH,
+      HOME: process.env.HOME,
+      LANG: process.env.LANG ?? 'en_US.UTF-8',
+    };
     try {
       this.process = spawn(this.binaryPath, args, {
         cwd: this.config.cwd,
-        env: this.config.env ?? process.env,
+        env: spawnEnv,
         stdio: ['pipe', 'pipe', 'pipe'],
       });
     } catch (err: unknown) {
-      this.emit({ kind: 'error', error: `Failed to spawn ${this.binaryPath}: ${String(err)}` });
+      this.emit({ kind: 'error', error: sanitizeError(`Failed to spawn ${this.binaryPath}: ${String(err)}`) });
       this.emit({ kind: 'ended' });
       return;
     }
@@ -100,7 +113,7 @@ export abstract class SubprocessSession implements BackendSession {
       const text = chunk.toString();
       this.stderrRing.push(text);
       if (this.stderrRing.length > 40) this.stderrRing.shift();
-      console.error(`[subprocess-backend:${this.binaryPath}:stderr]`, text.trim());
+      // Only log stderr at debug level; avoid leaking sensitive data to console
     });
 
     // Exit handling
@@ -115,10 +128,10 @@ export abstract class SubprocessSession implements BackendSession {
 
       if (!this.closed) {
         if (code !== null && code !== 0) {
-          const stderrTail = this.stderrRing.join('').slice(-2000).trim();
+          const stderrTail = this.stderrRing.join('').slice(-500).trim();
           this.emit({
             kind: 'error',
-            error: `${this.binaryPath} exited with code ${code}${stderrTail ? `: ${stderrTail}` : ''}`,
+            error: sanitizeError(`${this.binaryPath} exited with code ${code}${stderrTail ? `: ${stderrTail}` : ''}`),
           });
         }
         this.emit({ kind: 'ended' });
@@ -129,7 +142,7 @@ export abstract class SubprocessSession implements BackendSession {
 
     this.process.on('error', (err: Error) => {
       if (!this.closed) {
-        this.emit({ kind: 'error', error: `${this.binaryPath} process error: ${err.message}` });
+        this.emit({ kind: 'error', error: sanitizeError(`${this.binaryPath} process error: ${err.message}`) });
         this.emit({ kind: 'ended' });
         this.emit = () => {};
       }
@@ -187,8 +200,12 @@ export abstract class SubprocessSession implements BackendSession {
   }
 
   protected writeStdin(data: string): void {
-    if (this.process?.stdin?.writable) {
-      this.process.stdin.write(data + '\n');
+    try {
+      if (this.process?.stdin?.writable) {
+        this.process.stdin.write(data + '\n');
+      }
+    } catch {
+      // EPIPE / ERR_STREAM_DESTROYED — process died between check and write
     }
   }
 }
@@ -213,7 +230,19 @@ export abstract class SubprocessBackend implements CliBackend {
   }
 
   buildEnv(auth: BackendAuthConfig, extra?: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
-    return { ...process.env, ...extra };
+    // Build a minimal environment to avoid leaking Electron internals or other
+    // backend API keys to subprocess CLIs.
+    const minimal: NodeJS.ProcessEnv = {
+      PATH: process.env.PATH,
+      HOME: process.env.HOME,
+      USER: process.env.USER,
+      SHELL: process.env.SHELL,
+      LANG: process.env.LANG ?? 'en_US.UTF-8',
+      LC_ALL: process.env.LC_ALL ?? 'en_US.UTF-8',
+      TERM: process.env.TERM ?? 'xterm-256color',
+      TMPDIR: process.env.TMPDIR,
+    };
+    return { ...minimal, ...extra };
   }
 }
 
@@ -221,10 +250,18 @@ export abstract class SubprocessBackend implements CliBackend {
 // Tries to find a binary by name: system PATH first, then known locations.
 
 export function resolveBinaryFromPath(binaryName: string): string | null {
-  // 1. Check system PATH via `which`
+  // Validate binaryName: only alphanumeric, hyphens, underscores, dots allowed
+  if (!/^[a-zA-Z0-9._-]+$/.test(binaryName)) {
+    return null;
+  }
+
+  // 1. Check system PATH via execFileSync (no shell — prevents command injection)
   try {
-    const { execSync } = require('node:child_process');
-    const result = execSync(`which ${binaryName} 2>/dev/null`, { encoding: 'utf8', timeout: 3000 });
+    const result = execFileSync('which', [binaryName], {
+      encoding: 'utf8',
+      timeout: 3000,
+      stdio: ['pipe', 'pipe', 'ignore'],
+    });
     const path = result.trim();
     if (path && existsSync(path)) return path;
   } catch { /* not found in PATH */ }

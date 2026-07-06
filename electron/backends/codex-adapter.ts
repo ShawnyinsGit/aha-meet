@@ -119,17 +119,17 @@ class CodexSession implements BackendSession {
   private config: BackendSessionConfig;
   private apiKey?: string;
   private baseUrl?: string;
+  private turnQueue: Promise<void> = Promise.resolve();
 
   constructor(
     config: BackendSessionConfig,
     emit: (e: BackendSessionEvent) => void,
-    apiKey?: string,
-    baseUrl?: string,
   ) {
     this.config = config;
     this.emit = emit;
-    this.apiKey = apiKey;
-    this.baseUrl = baseUrl;
+    // Read API key and base URL from config.env where buildEnv placed them
+    this.apiKey = config.env?.OPENAI_API_KEY;
+    this.baseUrl = config.env?.OPENAI_BASE_URL;
   }
 
   start(): void {
@@ -175,7 +175,7 @@ class CodexSession implements BackendSession {
         workingDirectory: this.config.cwd,
         model: this.config.model,
         approvalPolicy: 'untrusted',
-        sandboxMode: 'danger-full-access',
+        sandboxMode: 'workspace-write',
       });
 
       for await (const event of events) {
@@ -315,10 +315,11 @@ class CodexSession implements BackendSession {
 
   sendUserText(text: string, _priority?: InputPriority): void {
     if (!this.thread || this.closed) return;
-    // Run a new turn with the user's text
-    void (async () => {
+    const thread = this.thread; // Capture thread reference before async boundary
+    // Serialize turns to prevent concurrent runStreamed calls on the same thread
+    this.turnQueue = this.turnQueue.then(async () => {
       try {
-        const { events } = await this.thread!.runStreamed(text);
+        const { events } = await thread.runStreamed(text);
         for await (const event of events) {
           if (this.closed) break;
           const msg = this.normalizeEvent(event);
@@ -329,7 +330,7 @@ class CodexSession implements BackendSession {
           this.emit({ kind: 'error', error: `Codex error: ${String(err)}` });
         }
       }
-    })();
+    }).catch(() => { /* Swallow errors to prevent unhandled rejections in queue */ });
   }
 
   sendUserContent(content: UserContentBlock[], _priority?: InputPriority): void {
@@ -363,14 +364,12 @@ function safeJsonParse(s: string): Record<string, unknown> {
 export class CodexBackend implements CliBackend {
   readonly id = 'codex';
   readonly capabilities = CODEX_CAPABILITIES;
-  private apiKey?: string;
-  private baseUrl?: string;
 
   createSession(
     config: BackendSessionConfig,
     emit: (e: BackendSessionEvent) => void,
   ): BackendSession {
-    return new CodexSession(config, emit, this.apiKey, this.baseUrl);
+    return new CodexSession(config, emit);
   }
 
   resolveBinary(): string | null {
@@ -381,11 +380,9 @@ export class CodexBackend implements CliBackend {
     const env = { ...process.env, ...extra };
     if (auth.apiKey) {
       env.OPENAI_API_KEY = auth.apiKey;
-      this.apiKey = auth.apiKey;
     }
     if (auth.baseUrl) {
       env.OPENAI_BASE_URL = auth.baseUrl;
-      this.baseUrl = auth.baseUrl;
     }
     return env;
   }

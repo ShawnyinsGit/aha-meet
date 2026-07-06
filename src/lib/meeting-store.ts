@@ -830,7 +830,7 @@ class MeetingStore {
     }
     this.notifyTabsOnly();
     if (this.activeId) this.notify(this.activeId);
-    else for (const l of this.listeners) l();
+    else for (const l of this.listeners) { try { l(); } catch { /* listener error */ } }
   }
 
   // --- Event routing --------------------------------------------------------
@@ -1771,7 +1771,12 @@ class MeetingStore {
     if (!id) return;
     const slot = this.slots.get(id);
     if (!slot) return;
-    await window.vibeMeet.interrupt(id);
+    try {
+      await window.vibeMeet.interrupt(id);
+    } catch (err) {
+      console.warn('[meeting-store] interrupt IPC failed:', err);
+      return;
+    }
     this.updateWorker(slot, 'talker', (w) => ({
       ...w,
       activity: appendCapped(
@@ -1918,7 +1923,9 @@ class MeetingStore {
   async addHostGroup(backendId: string): Promise<{ ok: boolean; hostId?: string; error?: string }> {
     const slot = this.getActiveSlot();
     const sessionId = slot?.id ?? null;
-    const result = await window.vibeMeet.sessions.addHost(sessionId, backendId);
+    const result = await window.vibeMeet.sessions.addHost(sessionId, backendId).catch(
+      (err: unknown) => ({ ok: false as const, error: String(err), hostId: '' }),
+    );
     if (!result.ok) return { ok: false, error: result.error };
 
     // Add the host group to local state.
@@ -1942,7 +1949,9 @@ class MeetingStore {
   async removeHostGroup(hostId: string): Promise<{ ok: boolean; error?: string }> {
     const slot = this.getActiveSlot();
     const sessionId = slot?.id ?? null;
-    const result = await window.vibeMeet.sessions.removeHost(sessionId, hostId);
+    const result = await window.vibeMeet.sessions.removeHost(sessionId, hostId).catch(
+      (err: unknown) => ({ ok: false as const, error: String(err) }),
+    );
     if (!result.ok) return { ok: false, error: result.error };
 
     if (slot) {

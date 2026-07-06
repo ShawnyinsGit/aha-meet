@@ -218,20 +218,21 @@ export class HostGroup {
     const tasks: Promise<void>[] = [];
     if (this.host) tasks.push(this.host.interrupt());
     for (const t of this.scheduler.interruptAll()) tasks.push(t);
-    await Promise.all(tasks);
+    await Promise.allSettled(tasks);
   }
 
   async setPermissionMode(mode: 'default' | 'acceptEdits' | 'bypassPermissions' | 'plan') {
     const tasks: Promise<void>[] = [];
     if (this.host?.setPermissionMode) tasks.push(this.host.setPermissionMode(mode));
     for (const t of this.scheduler.setPermissionModeAll(mode)) tasks.push(t);
-    await Promise.all(tasks);
+    await Promise.allSettled(tasks);
   }
 
   /** Tear down host + workers. Returns the final buffered worker lines. */
   end(): string[] {
-    const finalLines = this.scheduler.collectFinalBufferedLines();
-    this.scheduler.endAll();
+    if (!this.host && !this.scheduler) return [];
+    const finalLines = this.scheduler?.collectFinalBufferedLines() ?? [];
+    this.scheduler?.endAll();
     this.host?.end();
     this.host = null;
     return finalLines;

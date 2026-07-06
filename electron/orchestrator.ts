@@ -211,6 +211,9 @@ export class Orchestrator implements OrchestratorBridge {
   /** Add a new host group to this meeting. Returns the host group id. */
   addHost(backendId: string, hostId?: string): { ok: true; hostId: string } | { ok: false; error: string } {
     if (this.closed) return { ok: false, error: 'orchestrator is closed' };
+    if (hostId && !/^[a-zA-Z0-9._-]{1,64}$/.test(hostId)) {
+      return { ok: false, error: 'hostId must be alphanumeric with dots/hyphens/underscores, max 64 chars' };
+    }
     const id = hostId ?? `${backendId}-host-${this.hostGroups.size}`;
     if (this.hostGroups.has(id)) {
       return { ok: false, error: `host group '${id}' already exists` };
@@ -302,7 +305,7 @@ export class Orchestrator implements OrchestratorBridge {
     // B4: abort end-of-meeting recap if it's mid-flight. Recap runs after
     // `end()` so an interrupt arriving here may be the only signal to stop.
     if (this.recapHandle) tasks.push(this.recapHandle.abort());
-    await Promise.all(tasks);
+    await Promise.allSettled(tasks);
   }
 
   /** Returns true if the post-meeting recap is still in flight. Main process
@@ -368,15 +371,20 @@ export class Orchestrator implements OrchestratorBridge {
 
     this.closed = true;
 
-    // End all host groups.
+    // End all host groups — wrap in try/finally so cleanup always runs.
+    const errors: unknown[] = [];
     for (const hg of this.hostGroups.values()) {
-      hg.end();
+      try { hg.end(); } catch (err) { errors.push(err); }
     }
 
     this.decisions.dispose();
     this.decisionMeta.clear();
     this.crossHostBus.dispose();
     Orchestrator.liveInstances.delete(this);
+
+    if (errors.length > 0) {
+      console.error('[orchestrator] errors during end():', errors);
+    }
 
     // Currently only recap.done is async. If host group teardown grows async
     // cleanup later, push those Promises into this array.

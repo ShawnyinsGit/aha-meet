@@ -17,6 +17,17 @@ import { getBackendRegistry } from '../backends/registry.js';
 import type { BackendAuthEntry } from '../store.js';
 
 export function registerBackendAuthIpc(): void {
+  /** Validate that a backendId corresponds to a registered backend. */
+  function validateBackendId(backendId: string): string | null {
+    if (!backendId || !/^[a-zA-Z0-9._-]{1,64}$/.test(backendId)) {
+      return 'backendId must be alphanumeric with dots/hyphens/underscores, max 64 chars';
+    }
+    if (!getBackendRegistry().get(backendId)) {
+      return `unknown backend: ${backendId}`;
+    }
+    return null;
+  }
+
   /** List all backends with their auth status and availability. */
   ipcMain.handle('backend-auth:list', async () => {
     const registry = getBackendRegistry();
@@ -76,6 +87,10 @@ export function registerBackendAuthIpc(): void {
     if (typeof backendId !== 'string') {
       return { ok: false, error: 'backendId must be a string' };
     }
+    const validationError = validateBackendId(backendId);
+    if (validationError) {
+      return { ok: false, error: validationError };
+    }
     if (typeof key !== 'string') {
       return { ok: false, error: 'key must be a string' };
     }
@@ -83,8 +98,12 @@ export function registerBackendAuthIpc(): void {
     const patch: Partial<BackendAuthEntry> = trimmed.length === 0
       ? { authMode: 'none', apiKey: undefined, apiKeyEnc: undefined }
       : { authMode: 'apikey', apiKey: trimmed };
-    await setBackendAuth(backendId, patch);
-    return { ok: true };
+    try {
+      await setBackendAuth(backendId, patch);
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    }
   });
 
   /** Set base URL for a specific backend. */
@@ -96,6 +115,8 @@ export function registerBackendAuthIpc(): void {
     if (typeof backendId !== 'string') {
       return { ok: false, error: 'backendId must be a string' };
     }
+    const vErr = validateBackendId(backendId);
+    if (vErr) return { ok: false, error: vErr };
     if (typeof url !== 'string') {
       return { ok: false, error: 'url must be a string' };
     }
@@ -110,8 +131,12 @@ export function registerBackendAuthIpc(): void {
         return { ok: false, error: 'invalid URL format' };
       }
     }
-    await setBackendAuth(backendId, { baseUrl: trimmed.length === 0 ? undefined : trimmed });
-    return { ok: true };
+    try {
+      await setBackendAuth(backendId, { baseUrl: trimmed.length === 0 ? undefined : trimmed });
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    }
   });
 
   /** Set model for a specific backend. */
@@ -123,12 +148,18 @@ export function registerBackendAuthIpc(): void {
     if (typeof backendId !== 'string') {
       return { ok: false, error: 'backendId must be a string' };
     }
+    const vErr = validateBackendId(backendId);
+    if (vErr) return { ok: false, error: vErr };
     if (typeof model !== 'string') {
       return { ok: false, error: 'model must be a string' };
     }
     const trimmed = model.trim();
-    await setBackendAuth(backendId, { model: trimmed.length === 0 ? undefined : trimmed });
-    return { ok: true };
+    try {
+      await setBackendAuth(backendId, { model: trimmed.length === 0 ? undefined : trimmed });
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    }
   });
 
   /** Set auth mode for a specific backend. */
@@ -140,11 +171,17 @@ export function registerBackendAuthIpc(): void {
     if (typeof backendId !== 'string') {
       return { ok: false, error: 'backendId must be a string' };
     }
+    const vErr = validateBackendId(backendId);
+    if (vErr) return { ok: false, error: vErr };
     if (mode !== 'apikey' && mode !== 'oauth' && mode !== 'none') {
       return { ok: false, error: 'mode must be apikey, oauth, or none' };
     }
-    await setBackendAuth(backendId, { authMode: mode });
-    return { ok: true };
+    try {
+      await setBackendAuth(backendId, { authMode: mode });
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    }
   });
 
   /** Set the default backend for new sessions. */
@@ -152,8 +189,14 @@ export function registerBackendAuthIpc(): void {
     if (typeof backendId !== 'string') {
       return { ok: false, error: 'backendId must be a string' };
     }
-    await setDefaultBackend(backendId);
-    return { ok: true };
+    const vErr = validateBackendId(backendId);
+    if (vErr) return { ok: false, error: vErr };
+    try {
+      await setDefaultBackend(backendId);
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    }
   });
 
   /** Check auth status for a specific backend. */
