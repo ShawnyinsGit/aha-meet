@@ -4,6 +4,9 @@
   --bg-tile: #1d1f2a;
   --bg-elevated: #232634;
   --bg-glass: rgba(28, 30, 42, 0.72);
+  --bg-panel: #14151d;
+  --bg-hover: rgba(255, 255, 255, 0.08);
+  --bg-input: rgba(0, 0, 0, 0.3);
   --border-soft: rgba(255, 255, 255, 0.06);
   --border-strong: rgba(255, 255, 255, 0.12);
   --text-primary: #e9ecf3;
@@ -16,6 +19,8 @@
   --danger-soft: rgba(240, 72, 100, 0.18);
   --warn: #ffb648;
   --success: #38d9a9;
+  --success-soft: rgba(56, 217, 169, 0.12);
+  --danger-result-soft: rgba(255, 90, 90, 0.12);
   --radius-lg: 16px;
   --radius-md: 12px;
   --radius-sm: 8px;
@@ -23,6 +28,62 @@
   --shadow-soft: 0 8px 24px -8px rgba(0, 0, 0, 0.45);
   --transition: 180ms cubic-bezier(0.4, 0, 0.2, 1);
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", "PingFang SC", "Microsoft YaHei", sans-serif;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg-app: #f5f6f8;
+    --bg-stage: #ebedf2;
+    --bg-tile: #ffffff;
+    --bg-elevated: #ffffff;
+    --bg-glass: rgba(255, 255, 255, 0.72);
+    --bg-panel: #ffffff;
+    --border-soft: rgba(0, 0, 0, 0.08);
+    --border-strong: rgba(0, 0, 0, 0.15);
+    --text-primary: #1a1d26;
+    --text-secondary: #5c6170;
+    --text-muted: #8c91a0;
+    --accent: #2b5fd9;
+    --accent-soft: rgba(43, 95, 217, 0.12);
+    --accent-glow: rgba(43, 95, 217, 0.3);
+    --danger: #d93a50;
+    --danger-soft: rgba(217, 58, 80, 0.12);
+    --warn: #d99a2b;
+    --success: #28a87a;
+    --success-soft: rgba(40, 168, 122, 0.1);
+    --danger-result-soft: rgba(217, 58, 80, 0.1);
+    --shadow-card: 0 16px 40px -12px rgba(0, 0, 0, 0.12);
+    --shadow-soft: 0 4px 16px -4px rgba(0, 0, 0, 0.1);
+  }
+
+  /* Join screen decorative tiles — lighter gradients for light mode */
+  .join-tile-ai { background: linear-gradient(160deg, #d6e4ff, #e8edf8); }
+  .join-tile-self { background: linear-gradient(160deg, #f0d6ff, #f5e8ff); }
+  .join-tile-label { color: var(--text-primary); }
+  .join-tile-meta { background: rgba(0, 0, 0, 0.15); }
+
+  /* Stage area backgrounds */
+  .stage-sharing { background: #f0f2f5; }
+  .stage-default { background: linear-gradient(170deg, #e8edf8 0%, #f5f6f8 100%); }
+  .stage-video { background: #f0f2f5; }
+
+  /* Participant tiles */
+  .tile-ai .tile-stage { background: linear-gradient(160deg, #d6e4ff, #e8edf8); }
+  .tile-self .tile-stage { background: linear-gradient(160deg, #f0d6ff, #f5e8ff); }
+
+  /* Join screen background gradients */
+  .join-screen {
+    background:
+      radial-gradient(900px 600px at 12% 6%, rgba(43, 95, 217, 0.08), transparent 60%),
+      radial-gradient(700px 500px at 88% 90%, rgba(40, 168, 122, 0.06), transparent 60%),
+      var(--bg-app);
+  }
+
+  /* Interactive element backgrounds */
+  :root {
+    --bg-hover: rgba(0, 0, 0, 0.06);
+    --bg-input: rgba(0, 0, 0, 0.04);
+  }
 }
 
 * { box-sizing: border-box; }
@@ -622,6 +683,90 @@ button:disabled {
 
 .settings-modal-body .drawer-settings:last-child {
   border-bottom: none;
+}
+
+/* ---------- Settings Window (standalone, opaque) ---------- */
+
+/* Allow scrolling in settings window — the main app sets overflow:hidden */
+html.settings-view,
+html.settings-view body,
+html.settings-view #root {
+  overflow: auto;
+  background: var(--bg-app);
+}
+
+.settings-window {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  background: var(--bg-app);
+  color: var(--text-primary);
+}
+
+.settings-window-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20px 24px 16px;
+  border-bottom: 1px solid var(--border-soft);
+  /* Draggable title bar region for macOS */
+  -webkit-app-region: drag;
+}
+
+.settings-window-title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.settings-window-close {
+  width: 32px;
+  height: 32px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 20px;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  transition: background var(--transition), color var(--transition);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  -webkit-app-region: no-drag;
+}
+
+.settings-window-close:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.settings-window-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0;
+}
+
+/* Force solid opaque backgrounds inside settings window — no glass effect */
+.settings-window-body .drawer-settings {
+  padding: 20px 24px;
+  border-bottom: 1px solid var(--border-soft);
+  margin: 0;
+  background: var(--bg-panel);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+.settings-window-body .drawer-settings:last-child {
+  border-bottom: none;
+}
+
+/* Override any bg-glass references inside the settings window */
+.settings-window .settings-modal,
+.settings-window [class*="glass"] {
+  background: var(--bg-panel);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 
 @keyframes fade-in {
@@ -2984,6 +3129,57 @@ button:disabled {
 }
 .skill-install-btn:hover { opacity: 0.85; }
 .skill-install-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.skill-install-result {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  margin-top: 8px;
+  font-size: 13px;
+  line-height: 1.4;
+  animation: fade-in 200ms ease-out;
+}
+
+.skill-install-result-success {
+  background: var(--success-soft);
+  border: 1px solid var(--success);
+  color: var(--success);
+}
+
+.skill-install-result-success strong {
+  color: var(--success);
+}
+
+.skill-install-result-error {
+  background: var(--danger-result-soft);
+  border: 1px solid var(--danger);
+  color: var(--danger);
+}
+
+.skill-install-result-dismiss {
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.6;
+}
+
+.skill-install-result-dismiss:hover {
+  opacity: 1;
+  background: rgba(255, 255, 255, 0.08);
+}
+
 .skill-meta {
   display: flex;
   align-items: center;

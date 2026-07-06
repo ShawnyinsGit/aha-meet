@@ -86,6 +86,10 @@ const api = {
     install: (source) => ipcRenderer.invoke('skills:install', source),
     uninstall: (name) => ipcRenderer.invoke('skills:uninstall', name),
   },
+  settingsWindow: {
+    open: () => ipcRenderer.invoke('settings:open-window'),
+    close: () => ipcRenderer.invoke('settings:close-window'),
+  },
   browser: {
     openTab: (url) => ipcRenderer.invoke('browser:open-tab', { url }),
     closeTab: (tabId) => ipcRenderer.invoke('browser:close-tab', { tabId }),

@@ -23,13 +23,8 @@ import { SourcePicker } from './components/SourcePicker';
 import { BottomToolbar } from './components/BottomToolbar';
 import { SideDrawer } from './components/SideDrawer';
 import { SettingsMenu } from './components/SettingsMenu';
-import { VoiceLockPanel } from './components/VoiceLockPanel';
-import { MemoryPanel } from './components/MemoryPanel';
-import { VoiceSelector } from './components/VoiceSelector';
-import { SkillManagerPanel } from './components/SkillManagerPanel';
 import { VoiceGuideModal } from './components/VoiceGuideModal';
 import { ParticipantPanel } from './components/ParticipantPanel';
-import { SPEAKER_MODEL_ID } from './lib/speaker-embedding';
 import type { AutoApproveScope, DesktopSource } from './types';
 
 export function App() {
@@ -244,32 +239,7 @@ ${trimmed}`
         multiAgent={multiAgent}
         onToggleMultiAgent={() => setMultiAgent((v) => !v)}
         settingsSlot={
-          <SettingsMenu badge={voiceLock.enrollmentActive}>
-            <MemoryPanel />
-            <VoiceSelector
-              voices={voicePrefs.voices}
-              selectedVoiceName={voicePrefs.selectedVoiceName}
-              onChange={voicePrefs.handleVoiceChange}
-              onOpenGuide={voicePrefs.handleOpenGuide}
-              filterMode={voicePrefs.filterMode}
-              onChangeFilterMode={voicePrefs.handleFilterModeChange}
-              voicePolishEnabled={voicePrefs.voicePolishEnabled}
-              onChangeVoicePolish={voicePrefs.handleVoicePolishChange}
-            />
-            <VoiceLockPanel
-              enabled={voiceLock.voiceLockEnabled}
-              enrolledAt={voiceLock.voicePrint?.enrolledAt ?? null}
-              modelMatches={voiceLock.voicePrint?.model === SPEAKER_MODEL_ID}
-              enrollment={voiceLock.enrollment}
-              recentlyRejected={voiceLock.recentlyRejected}
-              enrollmentToast={voiceLock.enrollmentToast}
-              onToggleEnabled={voiceLock.handleToggleVoiceLock}
-              onStartEnroll={voiceLock.handleStartEnrollment}
-              onCancelEnroll={voiceLock.handleCancelEnrollment}
-              onClearEnrollment={voiceLock.handleClearEnrollment}
-            />
-            <SkillManagerPanel />
-          </SettingsMenu>
+          <SettingsMenu badge={voiceLock.enrollmentActive} />
         }
       />
 

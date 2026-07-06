@@ -281,6 +281,10 @@ export interface VibeMeetApi {
     request: () => Promise<{ granted: boolean }>;
   };
   skills: SkillsApi;
+  settingsWindow: {
+    open: () => Promise<{ ok: boolean }>;
+    close: () => Promise<{ ok: boolean }>;
+  };
   browser: BrowserApi;
   steerWorker: (
     sessionId: string | null,

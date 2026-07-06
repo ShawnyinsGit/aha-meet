@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, shell, systemPreferences } from 'electron';
+import { app, BrowserWindow, dialog, shell, systemPreferences, nativeTheme } from 'electron';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import type { AutoApproveScope } from './auto-approve-policy.js';
@@ -50,12 +50,16 @@ function liveWindow(): BrowserWindow | null {
   return mainWindow;
 }
 
+function getThemeBackgroundColor(): string {
+  return nativeTheme.shouldUseDarkColors ? '#0f1014' : '#f5f6f8';
+}
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 820,
     title: 'AhaMeet',
-    backgroundColor: '#0e0f12',
+    backgroundColor: getThemeBackgroundColor(),
     titleBarStyle: 'hiddenInset',
     webPreferences: {
       preload: join(__dirname, 'preload.cjs'),
@@ -319,6 +323,7 @@ async function registerAllIpc(ctx: IpcContext): Promise<void> {
     { registerDesktopIpc },
     { registerAsrIpc },
     { registerSettingsIpc },
+    { registerSettingsWindowIpc },
     { registerMemoryIpc },
     { registerDecisionIpc },
     { registerDialogIpc },
@@ -335,6 +340,7 @@ async function registerAllIpc(ctx: IpcContext): Promise<void> {
     import('./ipc/desktop.js'),
     import('./ipc/asr.js'),
     import('./ipc/settings.js'),
+    import('./ipc/settings-window.js'),
     import('./ipc/memory.js'),
     import('./ipc/decision.js'),
     import('./ipc/dialog.js'),
@@ -352,6 +358,7 @@ async function registerAllIpc(ctx: IpcContext): Promise<void> {
   registerDesktopIpc();
   registerAsrIpc();
   registerSettingsIpc();
+  registerSettingsWindowIpc();
   registerMemoryIpc(ctx);
   registerDecisionIpc();
   registerDialogIpc(ctx);

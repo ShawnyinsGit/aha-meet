@@ -1,12 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { SkillInfo } from '../types';
 
+type InstallResult = { type: 'success'; skill: SkillInfo } | { type: 'error'; message: string } | null;
+
 export function SkillManagerPanel() {
   const [skills, setSkills] = useState<SkillInfo[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [installSource, setInstallSource] = useState('');
   const [installing, setInstalling] = useState(false);
+  const [installResult, setInstallResult] = useState<InstallResult>(null);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const mountedRef = useRef(true);
 
@@ -37,22 +40,40 @@ export function SkillManagerPanel() {
     void reload();
   }, [reload]);
 
+  // Auto-clear install result after 5 seconds
+  useEffect(() => {
+    if (!installResult) return;
+    const timer = setTimeout(() => {
+      if (mountedRef.current) setInstallResult(null);
+    }, 5000);
+    return () => clearTimeout(timer);
+  }, [installResult]);
+
   const handleInstall = useCallback(async () => {
     const source = installSource.trim();
     if (!source) return;
     setInstalling(true);
     setError(null);
+    setInstallResult(null);
     try {
       const r = await window.vibeMeet.skills.install(source);
-      if (!mountedRef.current) return;
       if (r.ok) {
+        setInstallResult({ type: 'success', skill: r.skill });
         setInstallSource('');
-        await reload();
+        // Small delay so the filesystem write is fully flushed before
+        // we scan again — prevents a race where listSkills misses the
+        // freshly written SKILL.md.
+        await new Promise((res) => setTimeout(res, 300));
+        if (mountedRef.current) await reload();
       } else {
-        setError(r.error);
+        setInstallResult({ type: 'error', message: r.error });
       }
     } catch (err) {
-      if (mountedRef.current) setError(err instanceof Error ? err.message : String(err));
+      const msg = err instanceof Error ? err.message : String(err);
+      if (mountedRef.current) {
+        setInstallResult({ type: 'error', message: msg });
+        setError(msg);
+      }
     } finally {
       if (mountedRef.current) setInstalling(false);
     }
@@ -110,6 +131,24 @@ export function SkillManagerPanel() {
           {installing ? '安装中…' : '安装'}
         </button>
       </div>
+
+      {installResult && (
+        <div className={`skill-install-result skill-install-result-${installResult.type}`}>
+          {installResult.type === 'success' ? (
+            <span>✓ 安装成功: <strong>{installResult.skill.name}</strong></span>
+          ) : (
+            <span>✕ 安装失败: {installResult.message}</span>
+          )}
+          <button
+            type="button"
+            className="skill-install-result-dismiss"
+            onClick={() => setInstallResult(null)}
+            aria-label="关闭提示"
+          >
+            ✕
+          </button>
+        </div>
+      )}
 
       <div className="skill-meta">
         <span>{loading ? '加载中…' : `${skills.length} 个技能`}</span>
