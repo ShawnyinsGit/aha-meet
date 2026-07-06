@@ -237,4 +237,49 @@ export function registerSessionsIpc(ctx: IpcContext): void {
       lastActiveCwd: typeof s.lastActiveCwd === 'string' ? s.lastActiveCwd : null,
     };
   });
+
+  // ---- Multi-host management -----------------------------------------------
+
+  /** Add a host group to an existing session. The session's Orchestrator
+   *  creates a new HostGroup tied to the specified backend. */
+  ipcMain.handle('sessions:add-host', async (_e, payload: unknown) => {
+    if (typeof payload !== 'object' || payload === null) {
+      return { ok: false, error: 'payload must be an object' };
+    }
+    const { sessionId, backendId, hostId } = payload as {
+      sessionId?: string;
+      backendId?: string;
+      hostId?: string;
+    };
+    if (typeof backendId !== 'string') {
+      return { ok: false, error: 'backendId must be a string' };
+    }
+    const orch = ctx.getOrchestrator(sessionId);
+    if (!orch) return { ok: false, error: 'session not found' };
+    return orch.addHost(backendId, hostId);
+  });
+
+  /** Remove a host group from a session. Cannot remove the default host. */
+  ipcMain.handle('sessions:remove-host', async (_e, payload: unknown) => {
+    if (typeof payload !== 'object' || payload === null) {
+      return { ok: false, error: 'payload must be an object' };
+    }
+    const { sessionId, hostId } = payload as { sessionId?: string; hostId?: string };
+    if (typeof hostId !== 'string') {
+      return { ok: false, error: 'hostId must be a string' };
+    }
+    const orch = ctx.getOrchestrator(sessionId);
+    if (!orch) return { ok: false, error: 'session not found' };
+    return orch.removeHost(hostId);
+  });
+
+  /** List all host groups in a session. */
+  ipcMain.handle('sessions:list-hosts', async (_e, payload: unknown) => {
+    const sessionId = typeof (payload as { sessionId?: string })?.sessionId === 'string'
+      ? (payload as { sessionId: string }).sessionId
+      : null;
+    const orch = ctx.getOrchestrator(sessionId);
+    if (!orch) return { ok: false, error: 'session not found' };
+    return { ok: true, hosts: orch.listHosts() };
+  });
 }

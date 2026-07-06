@@ -9,6 +9,7 @@ import { MemoryPanel } from './MemoryPanel';
 import { VoiceSelector } from './VoiceSelector';
 import { VoiceLockPanel } from './VoiceLockPanel';
 import { SkillManagerPanel } from './SkillManagerPanel';
+import { BackendSettings } from './BackendSettings';
 import { VoiceGuideModal } from './VoiceGuideModal';
 import { SPEAKER_MODEL_ID } from '../lib/speaker-embedding';
 
@@ -96,6 +97,7 @@ function SettingsWindowInner() {
         </button>
       </header>
       <div className="settings-window-body">
+        <BackendSettings />
         <MemoryPanel />
         <VoiceSelector
           voices={voicePrefs.voices}

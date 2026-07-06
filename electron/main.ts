@@ -213,8 +213,9 @@ function emitToRenderer(e: IpcEmittedEvent) {
   // Flatten { source, event } onto each event so the renderer's RendererEvent
   // shape stays a single object with an extra `source` field. sessionId is
   // pre-bound by the per-slot emit wrapper created in sessions:open so the
-  // renderer can route the event to the right MeetingState slot.
-  win.webContents.send('session:event', { ...e.event, source: e.source, sessionId: e.sessionId });
+  // renderer can route the event to the right MeetingState slot. hostId is
+  // added by the orchestrator's safeEmit wrapper (defaults to 'default').
+  win.webContents.send('session:event', { ...e.event, source: e.source, sessionId: e.sessionId, hostId: e.hostId });
 }
 
 // S3: under auto-approve, render a short preview of the tool call for the
@@ -333,6 +334,7 @@ async function registerAllIpc(ctx: IpcContext): Promise<void> {
     { registerAccessibilityIpc },
     { registerSkillsIpc },
     { registerBrowserIpc },
+    { registerBackendAuthIpc },
   ] = await Promise.all([
     import('./ipc/session.js'),
     import('./ipc/sessions.js'),
@@ -350,6 +352,7 @@ async function registerAllIpc(ctx: IpcContext): Promise<void> {
     import('./ipc/accessibility.js'),
     import('./ipc/skills.js'),
     import('./ipc/browser.js'),
+    import('./ipc/backend-auth.js'),
   ]);
   _flushOpenTabsNow = flushOpenTabsNow;
   registerSessionIpc(ctx);
@@ -368,6 +371,7 @@ async function registerAllIpc(ctx: IpcContext): Promise<void> {
   registerAccessibilityIpc();
   registerSkillsIpc();
   registerBrowserIpc(browserTabManager);
+  registerBackendAuthIpc();
 }
 
 // ---- App lifecycle ----------------------------------------------------------

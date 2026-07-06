@@ -19,6 +19,7 @@
 // SDK 'ended' event arrives after end() already disposed the same handle.
 
 import type { ClaudeSession, SessionEvent } from './claude-session.js';
+import type { BackendSession } from './backends/cli-backend.js';
 import {
   validatePlan,
   type PlanMeetingTask,
@@ -50,7 +51,7 @@ import type {
 
 export type SessionFactory = (
   opts: ConstructorParameters<typeof ClaudeSession>[0],
-) => ClaudeSession;
+) => BackendSession;
 
 export interface WorkerSchedulerOpts {
   /** Emit channel — should be the orchestrator's `safeEmit` so events
@@ -84,7 +85,7 @@ export interface WorkerSchedulerOpts {
   /** Talker accessor — used to push worker-update batches, file-collision
    *  warnings, task_done completions, and cascade-failure notes. Returns
    *  null when the talker hasn't started yet or has been torn down. */
-  getTalker: () => ClaudeSession | null;
+  getTalker: () => BackendSession | null;
   /** Reports orchestrator shutdown. Scheduler uses it to short-circuit
    *  queued setTimeout callbacks that fire after end(). */
   isClosed: () => boolean;
@@ -149,7 +150,7 @@ export class WorkerScheduler {
   setAutoApproveScope(scope: AutoApproveScope): void {
     this.autoApproveScope = scope;
     for (const handle of this.workers.values()) {
-      handle.session?.setAutoApproveScope(scope);
+      handle.session?.setAutoApproveScope?.(scope);
     }
   }
 
@@ -248,7 +249,7 @@ export class WorkerScheduler {
   ): Promise<void>[] {
     const tasks: Promise<void>[] = [];
     for (const handle of this.workers.values()) {
-      if (handle.session) tasks.push(handle.session.setPermissionMode(mode));
+      if (handle.session?.setPermissionMode) tasks.push(handle.session.setPermissionMode(mode));
     }
     return tasks;
   }

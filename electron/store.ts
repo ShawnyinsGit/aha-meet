@@ -40,6 +40,16 @@ export interface OpenTabEntry {
   openedAt: number;
 }
 
+export interface BackendAuthEntry {
+  backendId: string;  // 'claude-code' | 'codex' | 'kimi' | 'qoder'
+  authMode: 'apikey' | 'oauth' | 'none';
+  apiKeyEnc?: string;  // base64 of safeStorage.encryptString(apiKey)
+  apiKey?: string;     // plaintext in memory only, never written to disk when encryption available
+  baseUrl?: string;
+  model?: string;
+  lastValidatedAt?: number;  // timestamp of last successful auth check
+}
+
 export interface Settings {
   /** @deprecated Migrated into recentCwds + lastActiveCwd at first load. Kept
    *  in the type so JSON files written by old versions parse without warnings. */
@@ -88,6 +98,12 @@ export interface Settings {
   // Model override (ANTHROPIC_MODEL) for talker + workers. Only injected when
   // authMode === 'apikey'. Empty/undefined uses CLI/built-in defaults.
   anthropicModel?: string;
+  /** Per-backend auth configurations. When present, takes priority over the
+   *  legacy authMode/anthropicApiKey fields. Migration runs on first load
+   *  to promote legacy auth into backendAuth[0] for 'claude-code'. */
+  backendAuth?: BackendAuthEntry[];
+  /** Default backend ID for new sessions. Falls back to 'claude-code' if unset. */
+  defaultBackend?: string;
 }
 
 const RECENT_CWDS_MAX = 10;
@@ -237,6 +253,34 @@ function load(): Settings {
     }
   }
   if (hadPlaintextKeyOnDisk && safeStorageAvailable()) needsRewrite = true;
+  // One-shot migration: promote legacy auth fields into backendAuth array.
+  // If backendAuth doesn't exist yet but legacy auth fields do, create a
+  // 'claude-code' entry from them. Idempotent: skips if backendAuth already
+  // has a 'claude-code' entry.
+  if (!cached.backendAuth || cached.backendAuth.length === 0) {
+    if (cached.authMode || cached.anthropicApiKey || cached.anthropicBaseUrl || cached.anthropicModel) {
+      const claudeEntry: BackendAuthEntry = {
+        backendId: 'claude-code',
+        authMode: cached.authMode === 'subscription' ? 'oauth' : (cached.authMode ?? 'none'),
+        apiKey: cached.anthropicApiKey,
+        baseUrl: cached.anthropicBaseUrl,
+        model: cached.anthropicModel,
+      };
+      if (claudeEntry.apiKey && safeStorageAvailable()) {
+        const enc = tryEncryptKey(claudeEntry.apiKey);
+        if (enc) {
+          claudeEntry.apiKeyEnc = enc;
+          delete claudeEntry.apiKey;
+        }
+      }
+      cached = {
+        ...cached,
+        backendAuth: [claudeEntry],
+        defaultBackend: 'claude-code',
+      };
+      needsRewrite = true;
+    }
+  }
   // One fire-and-forget rewrite covers both migrations so two concurrent
   // persist() calls can't race on the rename.
   if (needsRewrite) {
@@ -320,3 +364,91 @@ export function setOpenTabs(tabs: OpenTabEntry[], activeCwd: string | null): Pro
     return { ...next };
   });
 }
+
+/** Get the backend auth entry for a specific backend ID. Returns undefined if
+ *  the backend has no auth configuration yet. Decrypts the API key from the
+ *  ciphertext field if safeStorage is available. */
+export function getBackendAuth(backendId: string): BackendAuthEntry | undefined {
+  const settings = load();
+  const entry = (settings.backendAuth ?? []).find((e) => e.backendId === backendId);
+  if (!entry) return undefined;
+  // Decrypt the at-rest API key into the plaintext field for the caller.
+  const result = { ...entry };
+  if (result.apiKeyEnc) {
+    const dec = tryDecryptKey(result.apiKeyEnc);
+    if (dec !== null) {
+      result.apiKey = dec;
+    }
+    delete result.apiKeyEnc;
+  }
+  return result;
+}
+
+/** List all backend auth entries. Decrypts API keys in each entry. */
+export function listBackendAuth(): BackendAuthEntry[] {
+  const settings = load();
+  return (settings.backendAuth ?? []).map((entry) => {
+    const result = { ...entry };
+    if (result.apiKeyEnc) {
+      const dec = tryDecryptKey(result.apiKeyEnc);
+      if (dec !== null) {
+        result.apiKey = dec;
+      }
+      delete result.apiKeyEnc;
+    }
+    return result;
+  });
+}
+
+/** Upsert a backend auth entry. Creates a new entry if the backendId doesn't
+ *  exist, or merges the patch into the existing entry. Encrypts the API key
+ *  for at-rest storage if safeStorage is available. */
+export function setBackendAuth(
+  backendId: string,
+  patch: Partial<Omit<BackendAuthEntry, 'backendId'>>,
+): Promise<Settings> {
+  return withWriteLock(async () => {
+    const current = load();
+    const entries = [...(current.backendAuth ?? [])];
+    const idx = entries.findIndex((e) => e.backendId === backendId);
+
+    const base: BackendAuthEntry = idx >= 0 ? { ...entries[idx] } : { backendId, authMode: 'none' };
+    const updated: BackendAuthEntry = { ...base, ...patch };
+
+    // Encrypt API key for at-rest storage.
+    if (updated.apiKey && safeStorageAvailable()) {
+      const enc = tryEncryptKey(updated.apiKey);
+      if (enc) {
+        updated.apiKeyEnc = enc;
+        delete updated.apiKey;
+      }
+    }
+
+    if (idx >= 0) {
+      entries[idx] = updated;
+    } else {
+      entries.push(updated);
+    }
+
+    const next: Settings = { ...current, backendAuth: entries };
+    await persist(next);
+    return { ...next };
+  });
+}
+
+/** Remove a backend auth entry. */
+export function removeBackendAuth(backendId: string): Promise<Settings> {
+  return withWriteLock(async () => {
+    const current = load();
+    const entries = (current.backendAuth ?? []).filter((e) => e.backendId !== backendId);
+    const next: Settings = { ...current, backendAuth: entries };
+    await persist(next);
+    return { ...next };
+  });
+}
+
+/** Set the default backend for new sessions. */
+export function setDefaultBackend(backendId: string): Promise<Settings> {
+  return updateSettings({ defaultBackend: backendId });
+}
+

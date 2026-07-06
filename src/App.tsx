@@ -257,10 +257,13 @@ ${trimmed}`
             galleryContent={
               <ParticipantPanel
                 workers={workers.workerList}
+                hostGroups={workers.hostGroups}
                 plan={workers.plan}
                 running={state.running}
                 aiSpeaking={aiSpeaking}
                 onResolvePermission={resolvePermission}
+                onToggleHostGroup={workers.toggleHostGroupCollapsed}
+                onAddHost={workers.addHostGroup}
                 selfTile={
                   <ParticipantTile
                     name="You"

@@ -5985,3 +5985,431 @@ html.settings-view #root {
   line-height: 1.6;
   white-space: pre-wrap;
 }
+
+/* ==========================================================================
+   Backend Settings — per-CLI-backend auth configuration cards.
+   Matches the drawer-settings vocabulary used elsewhere in SettingsWindow.
+   ========================================================================== */
+
+.backend-settings {
+  padding: 20px 24px;
+  border-bottom: 1px solid var(--border-soft);
+  background: var(--bg-panel);
+}
+
+.backend-settings-loading {
+  padding: 32px 24px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.backend-settings-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 14px;
+  margin-bottom: 12px;
+  font-size: 12px;
+  color: #ff6b6b;
+  background: var(--danger-soft);
+  border-radius: var(--radius-sm);
+  line-height: 1.4;
+}
+
+.backend-settings-error-dismiss {
+  flex: 0 0 auto;
+  border: none;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font-size: 14px;
+  opacity: 0.7;
+  padding: 0 2px;
+}
+
+.backend-settings-error-dismiss:hover {
+  opacity: 1;
+}
+
+.backend-settings-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+/* ---- Backend card ---- */
+
+.backend-card {
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+  background: var(--bg-app);
+  overflow: hidden;
+  transition: border-color var(--transition);
+}
+
+.backend-card-default {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent-soft);
+}
+
+.backend-card-unavailable {
+  opacity: 0.6;
+}
+
+.backend-card-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+}
+
+.backend-card-icon {
+  flex: 0 0 auto;
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.backend-card-icon svg {
+  display: block;
+}
+
+.backend-card-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.backend-card-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  line-height: 1.3;
+}
+
+.backend-card-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.backend-status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+}
+
+.backend-status-dot.status-ok {
+  background: var(--success);
+  box-shadow: 0 0 4px var(--success);
+}
+
+.backend-status-dot.status-none {
+  background: var(--text-muted);
+}
+
+.backend-default-badge {
+  display: inline-block;
+  padding: 1px 6px;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-radius: 4px;
+  margin-left: 4px;
+}
+
+.backend-unavailable-badge {
+  display: inline-block;
+  padding: 1px 6px;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-muted);
+  background: var(--bg-hover);
+  border-radius: 4px;
+  margin-left: 4px;
+}
+
+.backend-card-actions {
+  flex: 0 0 auto;
+}
+
+/* ---- Backend card body (fields) ---- */
+
+.backend-card-body {
+  padding: 0 16px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.backend-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.backend-field-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.backend-field-row {
+  display: flex;
+  gap: 6px;
+}
+
+.backend-field-input {
+  flex: 1;
+  min-width: 0;
+  padding: 7px 10px;
+  font-size: 13px;
+  color: var(--text-primary);
+  background: var(--bg-input);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  outline: none;
+  transition: border-color var(--transition);
+  font-family: inherit;
+}
+
+.backend-field-input:focus {
+  border-color: var(--accent);
+}
+
+.backend-field-input:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.backend-field-select {
+  padding: 7px 10px;
+  font-size: 13px;
+  color: var(--text-primary);
+  background: var(--bg-input);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  outline: none;
+  cursor: pointer;
+  transition: border-color var(--transition);
+  font-family: inherit;
+}
+
+.backend-field-select:focus {
+  border-color: var(--accent);
+}
+
+.backend-field-select:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ---- Buttons ---- */
+
+.backend-btn {
+  padding: 7px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+  background: var(--bg-hover);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background var(--transition), border-color var(--transition);
+  white-space: nowrap;
+  font-family: inherit;
+}
+
+.backend-btn:hover:not(:disabled) {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.backend-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.backend-btn-sm {
+  padding: 5px 10px;
+  font-size: 11px;
+}
+
+/* ---- Capability badges ---- */
+
+.backend-card-caps {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+}
+
+.backend-cap-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-muted);
+  background: var(--bg-hover);
+  border-radius: 4px;
+  letter-spacing: 0.02em;
+}
+
+/* ---- Install hint ---- */
+
+.backend-card-install {
+  padding: 10px 16px 14px;
+  border-top: 1px solid var(--border-soft);
+}
+
+.backend-card-install code {
+  display: block;
+  padding: 8px 10px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  background: var(--bg-input);
+  border-radius: var(--radius-sm);
+  font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
+  word-break: break-all;
+  line-height: 1.5;
+}
+
+/* ==========================================================================
+   Host Group Tiles — multi-host participant panel sections.
+   Each host group renders as a collapsible block: host (talker) card always
+   visible, worker cards hidden by default for non-default hosts.
+   ========================================================================== */
+
+.host-group-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.host-group-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  background: var(--bg-hover);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background var(--transition), color var(--transition);
+  font-family: inherit;
+  width: 100%;
+  text-align: left;
+}
+
+.host-group-header:hover {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.host-group-badge {
+  padding: 1px 6px;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-radius: 4px;
+  letter-spacing: 0.02em;
+}
+
+.host-group-count {
+  flex: 1;
+  font-weight: 400;
+  color: var(--text-muted);
+}
+
+/* ---- Add host button ---- */
+
+.host-group-add-wrap {
+  position: relative;
+  padding: 4px 8px;
+}
+
+.host-group-add-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  background: var(--bg-hover);
+  border: 1px dashed var(--border-soft);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background var(--transition), color var(--transition), border-color var(--transition);
+  width: 100%;
+  justify-content: center;
+  font-family: inherit;
+}
+
+.host-group-add-btn:hover {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.host-group-add-menu {
+  position: absolute;
+  bottom: calc(100% + 4px);
+  left: 8px;
+  right: 8px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-card);
+  z-index: 100;
+  overflow: hidden;
+}
+
+.host-group-add-menu-title {
+  padding: 8px 12px 4px;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.host-group-add-item {
+  display: block;
+  width: 100%;
+  padding: 8px 12px;
+  font-size: 13px;
+  color: var(--text-primary);
+  background: transparent;
+  border: none;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--transition);
+  font-family: inherit;
+}
+
+.host-group-add-item:hover {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+

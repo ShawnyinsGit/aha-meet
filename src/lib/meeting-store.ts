@@ -117,6 +117,8 @@ export interface WorkerState {
   specialty: WorkerSpecialty;
   startedAt: number | null;
   taskHistory: WorkerTaskHistoryEntry[];
+  /** Host group this worker belongs to. Defaults to 'default'. */
+  hostId: string;
 }
 
 /** Snapshot of one worker's delivered artifacts, displayed in the ScreenStage
@@ -145,6 +147,22 @@ export interface MeetingState {
    *  freshest one. */
   currentDelivery: DeliverySnapshot | null;
   deliveryHistory: DeliverySnapshot[];
+  /** Host groups in this meeting. Always has at least 'default'. Each group
+   *  owns one host agent (the "talker" for that group) plus its workers. */
+  hostGroups: Map<string, HostGroupState>;
+}
+
+/** One host group: a host agent + its worker pool. Collapsible in the
+ *  participant panel — workers hidden by default, click host to expand. */
+export interface HostGroupState {
+  id: string;
+  backendId: string;
+  /** The host agent (talker) for this group. */
+  hostWorkerId: AgentSource;
+  /** Worker ids belonging to this host. */
+  workerIds: AgentSource[];
+  /** Whether the worker list is collapsed in the UI. Default true. */
+  collapsed: boolean;
 }
 
 /** Tab metadata projected from each slot. Drives the TabStrip rendering. */
@@ -258,12 +276,21 @@ function createTalkerState(): WorkerState {
     specialty: 'general',
     startedAt: null,
     taskHistory: [],
+    hostId: 'default',
   };
 }
 
 function emptyState(): MeetingState {
   const workers = new Map<AgentSource, WorkerState>();
   workers.set('talker', createTalkerState());
+  const hostGroups = new Map<string, HostGroupState>();
+  hostGroups.set('default', {
+    id: 'default',
+    backendId: 'claude-code',
+    hostWorkerId: 'talker',
+    workerIds: [],
+    collapsed: true,
+  });
   return {
     workers,
     plan: null,
@@ -271,6 +298,7 @@ function emptyState(): MeetingState {
     lastError: null,
     currentDelivery: null,
     deliveryHistory: [],
+    hostGroups,
   };
 }
 
@@ -873,6 +901,7 @@ class MeetingStore {
       return;
     }
     if (e.kind === 'worker-spawned') {
+      const hostId = e.hostId ?? 'default';
       this.mutateSlot(slot.id, (s) => {
         const workers = new Map(s.workers);
         const existing = workers.get(e.workerId);
@@ -908,6 +937,7 @@ class MeetingStore {
               activity: isReassign ? [] : existing.activity,
               transcript: isReassign ? [] : existing.transcript,
               taskHistory: archivedHistory,
+              hostId,
             }
           : {
               id: e.workerId,
@@ -926,9 +956,30 @@ class MeetingStore {
               specialty: e.specialty,
               startedAt: now,
               taskHistory: [],
+              hostId,
             };
         workers.set(e.workerId, next);
-        return { ...s, workers };
+
+        // Update HostGroupState: add worker to its host group.
+        const hostGroups = new Map(s.hostGroups);
+        const hg = hostGroups.get(hostId);
+        if (hg) {
+          const ids = hg.workerIds.includes(e.workerId)
+            ? hg.workerIds
+            : [...hg.workerIds, e.workerId];
+          hostGroups.set(hostId, { ...hg, workerIds: ids });
+        } else {
+          // New host group — create it with this worker.
+          hostGroups.set(hostId, {
+            id: hostId,
+            backendId: hostId, // Will be updated when host info arrives
+            hostWorkerId: `host-${hostId}`,
+            workerIds: [e.workerId],
+            collapsed: true,
+          });
+        }
+
+        return { ...s, workers, hostGroups };
       });
       return;
     }
@@ -1136,6 +1187,7 @@ class MeetingStore {
       specialty: 'general',
       startedAt: null,
       taskHistory: [],
+      hostId: 'default',
     };
   }
 
@@ -1844,6 +1896,73 @@ class MeetingStore {
         MAX_ACTIVITY,
       ),
     }));
+  }
+
+  // ===========================================================================
+  // Host group management
+
+  /** Toggle the collapsed state of a host group in the active slot. */
+  toggleHostGroupCollapsed(hostId: string) {
+    const slot = this.getActiveSlot();
+    if (!slot) return;
+    this.mutateSlot(slot.id, (s) => {
+      const hg = s.hostGroups.get(hostId);
+      if (!hg) return s;
+      const hostGroups = new Map(s.hostGroups);
+      hostGroups.set(hostId, { ...hg, collapsed: !hg.collapsed });
+      return { ...s, hostGroups };
+    });
+  }
+
+  /** Add a host group to the active slot via IPC. */
+  async addHostGroup(backendId: string): Promise<{ ok: boolean; hostId?: string; error?: string }> {
+    const slot = this.getActiveSlot();
+    const sessionId = slot?.id ?? null;
+    const result = await window.vibeMeet.sessions.addHost(sessionId, backendId);
+    if (!result.ok) return { ok: false, error: result.error };
+
+    // Add the host group to local state.
+    if (slot) {
+      this.mutateSlot(slot.id, (s) => {
+        const hostGroups = new Map(s.hostGroups);
+        hostGroups.set(result.hostId, {
+          id: result.hostId,
+          backendId,
+          hostWorkerId: `host-${result.hostId}`,
+          workerIds: [],
+          collapsed: true,
+        });
+        return { ...s, hostGroups };
+      });
+    }
+    return { ok: true, hostId: result.hostId };
+  }
+
+  /** Remove a host group from the active slot via IPC. */
+  async removeHostGroup(hostId: string): Promise<{ ok: boolean; error?: string }> {
+    const slot = this.getActiveSlot();
+    const sessionId = slot?.id ?? null;
+    const result = await window.vibeMeet.sessions.removeHost(sessionId, hostId);
+    if (!result.ok) return { ok: false, error: result.error };
+
+    if (slot) {
+      this.mutateSlot(slot.id, (s) => {
+        const hostGroups = new Map(s.hostGroups);
+        hostGroups.delete(hostId);
+        // Also remove workers belonging to this host.
+        const workers = new Map(s.workers);
+        for (const [id, w] of workers) {
+          if (w.hostId === hostId) workers.delete(id);
+        }
+        return { ...s, hostGroups, workers };
+      });
+    }
+    return { ok: true };
+  }
+
+  private getActiveSlot(): SlotInternal | null {
+    if (!this.activeId) return null;
+    return this.slots.get(this.activeId) ?? null;
   }
 }
 

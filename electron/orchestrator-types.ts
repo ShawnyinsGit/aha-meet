@@ -6,7 +6,8 @@
 // tsconfig rootDir boundary so the shapes are duplicated. Keep both files in
 // sync when adding fields.
 
-import type { ClaudeSession, SessionEvent } from './claude-session.js';
+import type { SessionEvent } from './claude-session.js';
+import type { BackendSession } from './backends/cli-backend.js';
 
 export type OrchestratorSource = 'talker' | string;
 
@@ -63,6 +64,10 @@ export type EmittedEvent = SessionEvent | OrchestratorOnlyEvent;
 export interface OrchestratorEvent {
   source: OrchestratorSource;
   event: EmittedEvent;
+  /** Host group that produced this event. Defaults to 'default' when absent.
+   *  Added in the multi-host phase so the renderer can route events to the
+   *  correct HostGroupState slot. */
+  hostId?: string;
 }
 
 export interface TalkerTurn {
@@ -93,7 +98,7 @@ export interface WorkerHandle {
   prompt: string;
   deps: string[];
   status: WorkerStatusKind;
-  session: ClaudeSession | null;
+  session: BackendSession | null;
   summary: string;
   live: WorkerLiveStatus;
   pendingDelegateAck: boolean;

@@ -1,28 +1,27 @@
-// orchestrator.ts — runs one Talker + N Worker ClaudeSession instances.
+// orchestrator.ts — coordinates M HostGroups (each: 1 Host + N Workers).
 //
-//   Talker  (Haiku-class, no real tools, only meeting-MCP tools)
-//     - Faces the user via voice + chat
-//     - For a single request → delegate_task → spawns one anonymous worker
-//     - For multiple independent asks → plan_meeting({tasks}) → DAG of workers
-//     - Mid-flight steer one → delegate_to({workerId, addendum})
-//     - Broadcast course-correct → update_task({addendum})
-//     - Status query → ask_worker_status({workerId?})
+//   HostGroup "default" (Claude Code, always present)
+//     ├── Host (Talker — Haiku-class, meeting-MCP tools, faces the user)
+//     └── Workers (0..4, Sonnet-class, full Claude Code preset)
 //
-//   Worker  (Sonnet, full Claude Code preset, per-task cwd shared)
-//     - Each one is a real Claude Code session with user's installed agents
-//       and skills loaded; we just instruct it to dispatch to them.
-//     - On completion it calls task_done({summary}) which releases dependents.
+//   HostGroup "codex-host" (added via addHost)
+//     ├── Host (Codex agent)
+//     └── Workers (0..4, Codex sessions)
+//
+// When only the default HostGroup exists, behavior is identical to the
+// pre-multi-host architecture. The public API is unchanged.
 //
 // MCP tool callbacks for both roles live in `meeting-mcp.ts` and reach back
 // here through the `OrchestratorBridge` interface this class implements.
 // Recap (post-meeting Haiku summarisation) lives in `recap.ts`. Per-worker
 // scheduling, spawn / dispose / DAG cascades, file-collision tracking, and
 // the bursty worker→talker update queue live in `worker-scheduler.ts` —
-// this file owns the Talker side and delegates all worker mechanics to the
-// scheduler.
+// this file owns the coordination layer and delegates all per-host mechanics
+// to HostGroup.
 
 import { randomUUID } from 'node:crypto';
 import { ClaudeSession, type SessionEvent } from './claude-session.js';
+import type { BackendSession } from './backends/cli-backend.js';
 import type { AutoApproveScope } from './auto-approve-policy.js';
 import type { PlanMeetingTask } from './meeting-tools.js';
 import {
@@ -34,37 +33,28 @@ import {
 import {
   appendEntry,
   computeProjectId,
-  formatForPrompt,
-  selectRelevant,
   type MemoryCategory,
 } from './memory.js';
 import { getSettings } from './store.js';
-import { TALKER_PROMPT } from './orchestrator-prompts.js';
 import {
-  MEMORY_TOKEN_BUDGET,
   SAVE_MEMORY_PER_SESSION_LIMIT,
-  TALKER_TRANSCRIPT_MAX_ENTRIES,
-  extractText,
 } from './orchestrator-helpers.js';
 import {
-  buildTalkerMcp,
-  buildWorkerMcp,
   type DecisionCreationResult,
   type OrchestratorBridge,
   type SaveMemoryResult,
   type SteerResult,
 } from './meeting-mcp.js';
-import { buildComputerUseMcp, type ComputerUseBridge } from './computer-use-mcp.js';
-import { buildBrowserMcp, type BrowserMcpBridge } from './browser-mcp.js';
 import { BrowserTabManager } from './browser-tab-manager.js';
 import { startRecap, type RecapHandle } from './recap.js';
-import { WorkerScheduler, type SessionFactory } from './worker-scheduler.js';
+import { type SessionFactory } from './worker-scheduler.js';
+import { HostGroup } from './host-group.js';
+import { CrossHostBus } from './cross-host-bus.js';
 import type {
   MeetingPlan,
   MeetingPlanNode,
   OrchestratorEvent,
   OrchestratorSource,
-  TalkerTurn,
   WorkerSpecialtyKind,
   WorkerStatusKind,
 } from './orchestrator-types.js';
@@ -78,6 +68,10 @@ export type {
   WorkerStatusKind,
   WorkerSpecialtyKind,
 } from './orchestrator-types.js';
+
+/** Default host group id. Always present in every meeting. */
+const DEFAULT_HOST_ID = 'default';
+const DEFAULT_BACKEND_ID = 'claude-code';
 
 interface OrchestratorOpts {
   emit: (e: OrchestratorEvent) => void;
@@ -102,8 +96,8 @@ interface OrchestratorOpts {
 }
 
 export class Orchestrator implements OrchestratorBridge {
-  private talker: ClaudeSession | null = null;
-  private scheduler: WorkerScheduler;
+  /** All host groups in this meeting. Always has at least 'default'. */
+  private hostGroups = new Map<string, HostGroup>();
   private emit: (e: OrchestratorEvent) => void;
   private cwd: string;
   private autoApproveScope: AutoApproveScope;
@@ -115,7 +109,6 @@ export class Orchestrator implements OrchestratorBridge {
   private projectId: string;
   private meetingId: string;
   private saveMemoryCallsThisSession = 0;
-  private talkerTranscript: TalkerTurn[] = [];
   // Active end-of-meeting recap, if any. Tracked so `interrupt()` can reach
   // into a closed orchestrator and abort the recap pass (B4) — otherwise
   // the user pressing the interrupt button after `end()` was a no-op while
@@ -127,6 +120,11 @@ export class Orchestrator implements OrchestratorBridge {
   // in end().
   private decisions: DecisionWatcher = new DecisionWatcher();
   private decisionMeta: Map<string, { question: string; path: string }> = new Map();
+
+  // Cross-host messaging bus. Each HostGroup subscribes on creation; the
+  // orchestrator publishes when cross-host events occur (file writes, decision
+  // resolutions, etc.).
+  private crossHostBus = new CrossHostBus();
 
   // Cached in-flight `end()` Promise. Subsequent calls return the same Promise
   // so callers can `await orchestrator.end()` repeatedly without re-running
@@ -167,123 +165,140 @@ export class Orchestrator implements OrchestratorBridge {
     this.browserTabManager = opts.browserTabManager;
     this.projectId = computeProjectId(this.cwd);
     this.meetingId = randomUUID();
-    this.sessionFactory = opts.sessionFactory ?? ((o) => new ClaudeSession(o));
-    const cuBridge: ComputerUseBridge = {
-      injectScreenshot: (workerId, data) => {
-        this.scheduler.injectScreenshotToWorker(workerId, data);
-      },
-    };
-    const browserBridge: BrowserMcpBridge = {
-      injectScreenshot: (workerId, data) => {
-        this.scheduler.injectScreenshotToWorker(workerId, data);
-      },
-    };
-    this.scheduler = new WorkerScheduler({
-      emit: (e) => this.safeEmit(e),
-      cwd: this.cwd,
-      autoApproveScope: this.autoApproveScope,
-      workerEnv: this.workerEnv,
-      confirmDestructive: this.confirmDestructive,
-      sessionFactory: this.sessionFactory,
-      buildWorkerMcp: (workerId) => buildWorkerMcp(this, workerId, this.cwd),
-      buildComputerUseMcp: (workerId) => buildComputerUseMcp(cuBridge, workerId),
-      buildBrowserMcp: this.browserTabManager
-        ? (workerId) => buildBrowserMcp(this.browserTabManager!, browserBridge, workerId)
-        : undefined,
-      getTalker: () => this.talker,
-      isClosed: () => this.closed,
-      getSpeechFilterMode: () => (getSettings().speechFilterMode === 'off' ? 'off' : 'strict'),
-    });
+    this.sessionFactory = opts.sessionFactory ?? ((o) => new ClaudeSession(o) as unknown as import('./backends/cli-backend.js').BackendSession);
+
+    // Create the default HostGroup. This is always present; single-host
+    // meetings use only this group and behave identically to pre-multi-host.
+    this.createHostGroup(DEFAULT_HOST_ID, DEFAULT_BACKEND_ID);
+
     Orchestrator.liveInstances.add(this);
     Orchestrator.ensureShutdownHook();
   }
 
+  // ---------------------------------------------------------------------------
+  // HostGroup management
+
+  private createHostGroup(id: string, backendId: string): HostGroup {
+    const hg = new HostGroup({
+      id,
+      backendId,
+      emit: (e) => this.onHostGroupEvent(id, e),
+      cwd: this.cwd,
+      projectId: this.projectId,
+      autoApproveScope: this.autoApproveScope,
+      workerEnv: this.workerEnv,
+      talkerModel: this.talkerModel,
+      confirmDestructive: this.confirmDestructive,
+      sessionFactory: this.sessionFactory,
+      browserTabManager: this.browserTabManager,
+      bridge: this,
+      isClosed: () => this.closed,
+      getSpeechFilterMode: () => (getSettings().speechFilterMode === 'off' ? 'off' : 'strict'),
+    });
+    this.hostGroups.set(id, hg);
+
+    // Subscribe to cross-host messages targeting this group
+    this.crossHostBus.subscribe(id, (msg) => {
+      const host = hg.getHost();
+      if (host) {
+        host.sendUserText(`[cross-host from ${msg.from}] ${msg.text}`, 'normal');
+      }
+    });
+
+    return hg;
+  }
+
+  /** Add a new host group to this meeting. Returns the host group id. */
+  addHost(backendId: string, hostId?: string): { ok: true; hostId: string } | { ok: false; error: string } {
+    if (this.closed) return { ok: false, error: 'orchestrator is closed' };
+    const id = hostId ?? `${backendId}-host-${this.hostGroups.size}`;
+    if (this.hostGroups.has(id)) {
+      return { ok: false, error: `host group '${id}' already exists` };
+    }
+    this.createHostGroup(id, backendId);
+    return { ok: true, hostId: id };
+  }
+
+  /** Remove a host group. Cannot remove the default host. */
+  removeHost(hostId: string): { ok: true } | { ok: false; error: string } {
+    if (hostId === DEFAULT_HOST_ID) {
+      return { ok: false, error: 'cannot remove the default host group' };
+    }
+    const hg = this.hostGroups.get(hostId);
+    if (!hg) {
+      return { ok: false, error: `host group '${hostId}' not found` };
+    }
+    hg.end();
+    this.hostGroups.delete(hostId);
+    this.crossHostBus.unsubscribeHost(hostId);
+    return { ok: true };
+  }
+
+  /** List all host groups with their ids and backend ids. */
+  listHosts(): Array<{ id: string; backendId: string }> {
+    return Array.from(this.hostGroups.entries()).map(([id, hg]) => ({
+      id,
+      backendId: hg.backendId,
+    }));
+  }
+
+  /** Get the default host group (always present). */
+  private defaultHost(): HostGroup {
+    const hg = this.hostGroups.get(DEFAULT_HOST_ID);
+    if (!hg) throw new Error('default host group missing — this is a bug');
+    return hg;
+  }
+
+  /** Handle events from a HostGroup, tagging with hostId before re-emitting. */
+  private onHostGroupEvent(hostId: string, e: OrchestratorEvent) {
+    this.safeEmit({ ...e, hostId });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Public API (delegates to default host for backward compatibility)
+
   setAutoApproveScope(scope: AutoApproveScope) {
     this.autoApproveScope = scope;
-    this.talker?.setAutoApproveScope(scope);
-    this.scheduler.setAutoApproveScope(scope);
+    for (const hg of this.hostGroups.values()) {
+      hg.setAutoApproveScope(scope);
+    }
   }
 
   private safeEmit(e: OrchestratorEvent) {
     if (this.closed) return;
+    // Ensure hostId is always present; default to 'default' when absent.
+    if (!e.hostId) e = { ...e, hostId: DEFAULT_HOST_ID };
     this.emit(e);
   }
 
   async start(greeting?: string) {
-    const meetingMcp = buildTalkerMcp(this);
-
-    // Pull relevant long-term memory for this project and prepend it to the
-    // Talker system prompt so Claude has context from prior meetings before
-    // the user even speaks. Always per-project; never cross-project leak.
-    let systemPrompt: string = TALKER_PROMPT;
-    try {
-      const memoryEntries = await selectRelevant(this.projectId, {
-        tokenBudget: MEMORY_TOKEN_BUDGET,
-      });
-      const memoryBlock = formatForPrompt(memoryEntries);
-      if (memoryBlock) {
-        systemPrompt = `## 历史记忆 (从过往会议沉淀)\n\n${memoryBlock}\n\n---\n\n${TALKER_PROMPT}`;
-      }
-    } catch (err) {
-      console.warn('[memory] failed to load memory for system prompt:', err);
-    }
-
-    this.talker = this.sessionFactory({
-      cwd: this.cwd,
-      autoApproveScope: this.autoApproveScope,
-      envOverride: this.workerEnv,
-      confirmDestructive: this.confirmDestructive,
-      emit: (e) => this.onTalkerEvent(e),
-      sessionOptions: {
-        systemPrompt,
-        tools: [],
-        mcpServers: { meeting: meetingMcp },
-        skills: [],
-        settingSources: [],
-        // Default the talker to Haiku 4.5 — small, fast, cheap. Chat-only role
-        // (no real tools, only meeting MCP) so Sonnet/Opus would be wasted
-        // latency. A custom gateway/model override (ANTHROPIC_MODEL) wins so the
-        // talker never requests a model the gateway can't serve.
-        model: this.talkerModel ?? 'claude-haiku-4-5',
-        // Stream partial tokens so we can dispatch the first sentence to TTS
-        // the moment the model commits a content block, instead of waiting
-        // for the whole turn. Renderer/TTS streaming consumer side is owned
-        // by exec-tts; see docs/plan-tts-streaming.md §3.
-        includePartialMessages: true,
-      },
-    });
-
-    this.talker.start();
-
-    if (greeting) {
-      // Greeting is system-synthesised, treat as 'normal' priority so a real
-      // user utterance arriving immediately after still cuts ahead.
-      this.talker.sendUserText(greeting, 'normal');
-    }
+    await this.defaultHost().start(greeting);
   }
 
   sendUserText(text: string) {
     // Single entry point reached from the renderer IPC (session:user-text).
-    // Real user voice / typed input → 'high' priority so it always beats
-    // worker progress chatter that arrived a moment earlier.
-    this.talker?.sendUserText(text, 'high');
+    // Routes to the default host. Multi-host routing (e.g. user picks a
+    // specific host) is a Phase 4 concern.
+    this.defaultHost().sendUserText(text);
   }
 
   sendUserImage(content: SDKUserMessage['message']['content']) {
-    this.talker?.sendUserContent(content, 'high');
+    this.defaultHost().sendUserImage(content);
   }
 
   resolvePermission(id: string, decision: 'allow' | 'deny', message?: string) {
-    // Try every active session; only the one that issued the permission
+    // Try every active host group; only the one that issued the permission
     // request actually has a matching pending entry.
-    this.talker?.resolvePermission(id, decision, message);
-    this.scheduler.resolvePermissionInAny(id, decision, message);
+    for (const hg of this.hostGroups.values()) {
+      hg.resolvePermission(id, decision, message);
+    }
   }
 
   async interrupt() {
     const tasks: Promise<void>[] = [];
-    if (this.talker) tasks.push(this.talker.interrupt());
-    for (const t of this.scheduler.interruptAll()) tasks.push(t);
+    for (const hg of this.hostGroups.values()) {
+      tasks.push(hg.interrupt());
+    }
     // B4: abort end-of-meeting recap if it's mid-flight. Recap runs after
     // `end()` so an interrupt arriving here may be the only signal to stop.
     if (this.recapHandle) tasks.push(this.recapHandle.abort());
@@ -306,22 +321,23 @@ export class Orchestrator implements OrchestratorBridge {
 
   async setPermissionMode(mode: 'default' | 'acceptEdits' | 'bypassPermissions' | 'plan') {
     const tasks: Promise<void>[] = [];
-    if (this.talker) tasks.push(this.talker.setPermissionMode(mode));
-    for (const t of this.scheduler.setPermissionModeAll(mode)) tasks.push(t);
+    for (const hg of this.hostGroups.values()) {
+      tasks.push(hg.setPermissionMode(mode));
+    }
     await Promise.all(tasks);
   }
 
   end(): Promise<void> {
     if (this.endPromise) return this.endPromise;
 
-    // Snapshot the talker transcript and kick off a recap pass against Haiku
-    // BEFORE we tear down. Recap runs in the background; the returned Promise
-    // resolves once recap (the only truly async cleanup) finishes so a
-    // before-quit handler can `await` end() and reap the SDK subprocesses
-    // cleanly instead of getting SIGKILL'd mid-stream.
-    const transcriptSnapshot = [...this.talkerTranscript];
+    // Merge transcripts from all host groups for recap.
+    const allTranscripts: import('./orchestrator-types.js').TalkerTurn[] = [];
+    for (const hg of this.hostGroups.values()) {
+      allTranscripts.push(...hg.getTranscript());
+    }
+
     this.recapHandle = startRecap({
-      transcript: transcriptSnapshot,
+      transcript: allTranscripts,
       cwd: this.cwd,
       env: this.workerEnv,
       projectId: this.projectId,
@@ -330,8 +346,10 @@ export class Orchestrator implements OrchestratorBridge {
 
     // Flush any unfinished worker progress into one final talker line so the
     // user isn't left wondering what happened. Done BEFORE closing the gate.
-    if (this.talker) {
-      const finalLines = this.scheduler.collectFinalBufferedLines();
+    const dh = this.defaultHost();
+    const dhHost = dh.getHost();
+    if (dhHost) {
+      const finalLines = dh.getScheduler().collectFinalBufferedLines();
       if (finalLines.length > 0) {
         this.safeEmit({
           source: 'talker',
@@ -349,16 +367,19 @@ export class Orchestrator implements OrchestratorBridge {
     }
 
     this.closed = true;
-    this.scheduler.endAll();
+
+    // End all host groups.
+    for (const hg of this.hostGroups.values()) {
+      hg.end();
+    }
+
     this.decisions.dispose();
     this.decisionMeta.clear();
-    this.talker?.end();
-    this.talker = null;
+    this.crossHostBus.dispose();
     Orchestrator.liveInstances.delete(this);
 
-    // Currently only recap.done is async; talker.end() / scheduler.endAll() /
-    // decisions.dispose() all return void. If any of those grow async cleanup
-    // later, push their Promises into this array.
+    // Currently only recap.done is async. If host group teardown grows async
+    // cleanup later, push those Promises into this array.
     const cleanupPromises: Promise<void>[] = [];
     if (this.recapHandle) cleanupPromises.push(this.recapHandle.done);
 
@@ -368,34 +389,45 @@ export class Orchestrator implements OrchestratorBridge {
 
   /** Manual entry point: renderer-side "Plan meeting" button. */
   async installPlan(tasks: PlanMeetingTask[]): Promise<{ ok: true } | { ok: false; error: string }> {
-    return this.scheduler.installPlan(tasks);
+    return this.defaultHost().getScheduler().installPlan(tasks);
   }
 
   // ===========================================================================
   // OrchestratorBridge — methods called from the MCP tool factories in
-  // meeting-mcp.ts. Most are thin delegates to the scheduler; the talker-side
-  // operations (narrateAssistantLine, createDecision, saveMemory) live here
-  // because they touch the talker session / decision watcher / memory store
-  // that the orchestrator owns.
+  // meeting-mcp.ts. These route to the default host's scheduler. In a full
+  // multi-host setup, the bridge would be hostId-aware; for now the default
+  // host handles all MCP tool callbacks.
 
   delegateSingleTask(description: string): { workerId: string; specialty: WorkerSpecialtyKind; reused: boolean } {
-    return this.scheduler.delegateSingleTask(description);
+    return this.defaultHost().getScheduler().delegateSingleTask(description);
   }
 
   steerWorker(workerId: string, addendum: string): SteerResult {
-    return this.scheduler.steerWorker(workerId, addendum);
+    // Search across all host groups — worker IDs are unique.
+    for (const hg of this.hostGroups.values()) {
+      const result = hg.getScheduler().steerWorker(workerId, addendum);
+      if (result.ok || result.reason !== 'unknown') return result;
+    }
+    return { ok: false, reason: 'unknown' };
   }
 
   hasWorker(workerId: string): boolean {
-    return this.scheduler.hasWorker(workerId);
+    for (const hg of this.hostGroups.values()) {
+      if (hg.getScheduler().hasWorker(workerId)) return true;
+    }
+    return false;
   }
 
   activeWorkerIds(): string[] {
-    return this.scheduler.activeWorkerIds();
+    const ids: string[] = [];
+    for (const hg of this.hostGroups.values()) {
+      ids.push(...hg.getScheduler().activeWorkerIds());
+    }
+    return ids;
   }
 
   describeWorkers(workerId?: string): string {
-    return this.scheduler.describeWorkers(workerId);
+    return this.defaultHost().getScheduler().describeWorkers(workerId);
   }
 
   narrateAssistantLine(text: string): void {
@@ -411,7 +443,7 @@ export class Orchestrator implements OrchestratorBridge {
         } as unknown as SDKMessage,
       },
     });
-    this.talker?.sendUserText(`(you just spoke to the user) ${text}`, 'normal');
+    this.defaultHost().getHost()?.sendUserText(`(you just spoke to the user) ${text}`, 'normal');
   }
 
   async createDecision(payload: CreateDecisionPayload): Promise<DecisionCreationResult> {
@@ -462,24 +494,35 @@ export class Orchestrator implements OrchestratorBridge {
   }
 
   markWorkerTaskDone(workerId: string, summary: string): void {
-    this.scheduler.markTaskDone(workerId, summary);
+    // Search across all host groups.
+    for (const hg of this.hostGroups.values()) {
+      if (hg.getScheduler().hasWorker(workerId)) {
+        hg.getScheduler().markTaskDone(workerId, summary);
+        return;
+      }
+    }
   }
 
   // Test-only proxy: forward session events to the scheduler for simulation.
   schedulerOnWorkerEvent(workerId: string, e: SessionEvent): void {
-    this.scheduler.onWorkerEvent(workerId, e);
+    this.defaultHost().getScheduler().onWorkerEvent(workerId, e);
   }
 
   submitWorkerDelivery(workerId: string, files: string[]): void {
-    this.scheduler.submitWorkerDelivery(workerId, files);
+    for (const hg of this.hostGroups.values()) {
+      if (hg.getScheduler().hasWorker(workerId)) {
+        hg.getScheduler().submitWorkerDelivery(workerId, files);
+        return;
+      }
+    }
   }
 
   // ===========================================================================
 
   /**
    * Called from DecisionWatcher when the user fills in "✅ 确认结论". Pushes a
-   * synthetic system message into the talker so the model can re-evaluate, and
-   * surfaces an activity entry to the renderer.
+   * synthetic system message into the default host's talker so the model can
+   * re-evaluate, and surfaces an activity entry to the renderer.
    */
   private onDecisionResolved(r: ResolvedDecision): void {
     if (this.closed) return;
@@ -496,65 +539,21 @@ export class Orchestrator implements OrchestratorBridge {
       },
     });
     const condensed = r.conclusion.length > 400 ? `${r.conclusion.slice(0, 398)}…` : r.conclusion;
-    this.talker?.sendUserText(
+    this.defaultHost().getHost()?.sendUserText(
       `(decision update) 用户对"${question}"给出了结论：${condensed}\n\n如果这跟你之前推进的方向不一致，请马上调整：可以 delegate_to 现有 worker 让他改，或开新 worker 走另一条路；并简短告诉用户你怎么调整。`,
       'normal',
     );
-    // Resolved → drop both the metadata entry and the fs.watch handle.
-    // Without this, a 2hr meeting with 30 decisions leaves 30 stale watchers
-    // until end() runs. DecisionWatcher.unwatch is keyed by path, not id;
-    // ResolvedDecision carries the path directly so no map lookup needed.
     this.decisionMeta.delete(r.id);
     this.decisions.unwatch(r.path);
-  }
 
-  private onTalkerEvent(e: SessionEvent) {
-    this.safeEmit({ source: 'talker', event: e });
-
-    // ClaudeSession emits 'ended' both for our own teardown (this.closed is
-    // already true by then, see end()) and for unexpected subprocess death
-    // (OOM, external kill, crash). The second case used to silently break
-    // sendUserText — the user kept talking, nothing reached the model, no UI
-    // feedback. Surface it via a synthetic assistant message and tear down
-    // so the slot ends cleanly. void: end() returns a Promise we don't await
-    // here (we're inside an event callback).
-    if (e.kind === 'ended' && !this.closed) {
-      this.safeEmit({
-        source: 'talker',
-        event: {
-          kind: 'message',
-          message: {
-            type: 'assistant',
-            message: { role: 'assistant', content: [{ type: 'text', text: '（Talker 进程意外退出，会议自动结束。如需继续请重新打开会议。）' }] },
-            parent_tool_use_id: null,
-            session_id: 'orchestrator-talker-exit',
-          } as unknown as SDKMessage,
-        },
+    // Cross-host notification: if other hosts exist, tell them about the decision.
+    if (this.hostGroups.size > 1) {
+      this.crossHostBus.publish({
+        from: DEFAULT_HOST_ID,
+        to: '*',
+        text: `Decision resolved: "${question}" → ${condensed}`,
+        meta: { kind: 'decision-resolved', payload: { decisionId: r.id, question, conclusion: condensed } },
       });
-      void this.end();
-      return;
     }
-
-    // Capture talker turns into a private transcript so end-of-meeting recap
-    // has something to feed Haiku. We grab user + assistant text only, never
-    // tool-use blobs (those are noisy and recap should focus on conversation).
-    if (e.kind === 'message') {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const msg: any = e.message;
-      const t = msg?.type;
-      if (t === 'assistant') {
-        const text = extractText(msg);
-        if (text) this.appendTalkerTurn({ role: 'assistant', text });
-      } else if (t === 'user') {
-        const text = extractText(msg);
-        if (text) this.appendTalkerTurn({ role: 'user', text });
-      }
-    }
-  }
-
-  private appendTalkerTurn(turn: TalkerTurn) {
-    this.talkerTranscript = [...this.talkerTranscript, turn].slice(
-      -TALKER_TRANSCRIPT_MAX_ENTRIES,
-    );
   }
 }

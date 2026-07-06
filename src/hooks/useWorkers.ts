@@ -1,11 +1,12 @@
 import { useCallback, useMemo, useSyncExternalStore } from 'react';
-import { meetingStore, type DeliverySnapshot, type WorkerState } from '../lib/meeting-store';
+import { meetingStore, type DeliverySnapshot, type HostGroupState, type WorkerState } from '../lib/meeting-store';
 import type { SpeakHandle } from '../lib/speech-session';
 import type { MeetingPlan, StagedAttachment } from '../types';
 
 export interface UseWorkersResult {
   workers: Map<string, WorkerState>;
   workerList: WorkerState[];
+  hostGroups: Map<string, HostGroupState>;
   plan: MeetingPlan | null;
   running: boolean;
   cwd: string | null;
@@ -27,6 +28,9 @@ export interface UseWorkersResult {
     | { ok: true; route: 'worker' | 'talker'; queued?: boolean }
     | { ok: false; error: string }
   >;
+  toggleHostGroupCollapsed: (hostId: string) => void;
+  addHostGroup: (backendId: string) => Promise<{ ok: boolean; hostId?: string; error?: string }>;
+  removeHostGroup: (hostId: string) => Promise<{ ok: boolean; error?: string }>;
 }
 
 export function useWorkers(): UseWorkersResult {
@@ -65,10 +69,23 @@ export function useWorkers(): UseWorkersResult {
     (feedback: string) => meetingStore.reviseDelivery(feedback),
     [],
   );
+  const toggleHostGroupCollapsed = useCallback(
+    (hostId: string) => meetingStore.toggleHostGroupCollapsed(hostId),
+    [],
+  );
+  const addHostGroup = useCallback(
+    (backendId: string) => meetingStore.addHostGroup(backendId),
+    [],
+  );
+  const removeHostGroup = useCallback(
+    (hostId: string) => meetingStore.removeHostGroup(hostId),
+    [],
+  );
 
   return {
     workers: state.workers,
     workerList,
+    hostGroups: state.hostGroups,
     plan: state.plan,
     running: state.running,
     cwd,
@@ -87,5 +104,8 @@ export function useWorkers(): UseWorkersResult {
     setSpeakCallback,
     acceptDelivery,
     reviseDelivery,
+    toggleHostGroupCollapsed,
+    addHostGroup,
+    removeHostGroup,
   };
 }

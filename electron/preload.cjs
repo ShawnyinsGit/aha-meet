@@ -11,6 +11,12 @@ const api = {
     setActive: (id) => ipcRenderer.invoke('sessions:set-active', { id }),
     list: () => ipcRenderer.invoke('sessions:list'),
     listRestore: () => ipcRenderer.invoke('sessions:list-restore'),
+    addHost: (sessionId, backendId, hostId) =>
+      ipcRenderer.invoke('sessions:add-host', { sessionId, backendId, hostId }),
+    removeHost: (sessionId, hostId) =>
+      ipcRenderer.invoke('sessions:remove-host', { sessionId, hostId }),
+    listHosts: (sessionId) =>
+      ipcRenderer.invoke('sessions:list-hosts', { sessionId }),
   },
   sendUserText: (sessionId, text) =>
     ipcRenderer.invoke('session:user-text', { sessionId, text }),
@@ -49,6 +55,16 @@ const api = {
     setMode: (mode) => ipcRenderer.invoke('auth:set-mode', mode),
     loginSubscription: () => ipcRenderer.invoke('auth:login-subscription'),
     checkSubscriptionStatus: () => ipcRenderer.invoke('auth:check-subscription-status'),
+  },
+  backendAuth: {
+    list: () => ipcRenderer.invoke('backend-auth:list'),
+    getConfig: (backendId) => ipcRenderer.invoke('backend-auth:get-config', backendId),
+    setApiKey: (backendId, key) => ipcRenderer.invoke('backend-auth:set-api-key', { backendId, key }),
+    setBaseUrl: (backendId, url) => ipcRenderer.invoke('backend-auth:set-base-url', { backendId, url }),
+    setModel: (backendId, model) => ipcRenderer.invoke('backend-auth:set-model', { backendId, model }),
+    setMode: (backendId, mode) => ipcRenderer.invoke('backend-auth:set-mode', { backendId, mode }),
+    setDefault: (backendId) => ipcRenderer.invoke('backend-auth:set-default', backendId),
+    checkStatus: (backendId) => ipcRenderer.invoke('backend-auth:check-status', backendId),
   },
   memory: {
     list: (filter) => ipcRenderer.invoke('memory:list', filter ?? null),
