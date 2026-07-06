@@ -52,7 +52,7 @@ test('task_done releases the worker session', async () => {
   assert.equal(sessions[0].ended, false, 'session live during task');
 
   // Reach into the private markTaskDone to simulate the worker MCP tool path.
-  orch.markTaskDone('a', 'finished');
+  orch.markWorkerTaskDone('a', 'finished');
 
   assert.equal(sessions[0].ended, true, 'session.end() called on task_done');
   orch.end();
@@ -68,7 +68,7 @@ test('premature session end (no task_done) cleans up + cascades', async () => {
 
   // Simulate the SDK ending the worker stream before task_done was called
   // (e.g. crash, network drop, or user cancel mid-flight).
-  orch.onWorkerEvent('a', { kind: 'ended' });
+  orch.schedulerOnWorkerEvent('a', { kind: 'ended' });
 
   assert.equal(sessions[0].ended, true, 'A.session.end() invoked on premature end');
 
@@ -102,10 +102,10 @@ test('end() tears down every live worker', async () => {
 test('disposeWorker is idempotent (double end() does not throw)', async () => {
   const { orch, sessions } = makeOrch();
   await orch.installPlan([{ id: 'a', title: 'A', prompt: 'do A', deps: [] }]);
-  orch.markTaskDone('a', 'first');
+  orch.markWorkerTaskDone('a', 'first');
   // Re-firing the SDK 'ended' event after task_done used to leave dangling
   // listeners behind. With the disposeWorker tombstone it should be a no-op.
-  assert.doesNotThrow(() => orch.onWorkerEvent('a', { kind: 'ended' }));
+  assert.doesNotThrow(() => orch.schedulerOnWorkerEvent('a', { kind: 'ended' }));
   assert.equal(sessions[0].ended, true);
   orch.end();
 });

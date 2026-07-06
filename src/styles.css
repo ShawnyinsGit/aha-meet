@@ -673,6 +673,502 @@
   .memory-scope-on { color: #8a4400; }
   .memory-btn-primary { color: #ffffff; }
   .memory-btn-danger { color: var(--danger); }
+
+  /* ---------- Workspace feed rows ---------- */
+  .workspace-feed-row {
+    background: var(--bg-elevated);
+    border-color: var(--border-soft);
+  }
+  .workspace-feed-row-clickable:hover {
+    background: var(--bg-hover);
+    border-color: var(--border-strong);
+  }
+  .workspace-feed-row-open {
+    background: var(--accent-soft);
+    border-color: var(--accent);
+  }
+
+  /* ---------- Agent pills ---------- */
+  .agent-pill-talker {
+    background: rgba(0, 122, 255, 0.1);
+    color: #0055cc;
+  }
+  .agent-pill-worker {
+    background: rgba(52, 199, 89, 0.1);
+    color: #1a7a35;
+  }
+
+  /* ---------- Tile status, footer, role badge ---------- */
+  .tile-status {
+    background: rgba(0, 0, 0, 0.06);
+    color: var(--text-secondary);
+    backdrop-filter: none;
+  }
+  .tile-footer {
+    background: rgba(0, 0, 0, 0.03);
+  }
+  .tile-role-badge {
+    color: var(--text-muted);
+    background: rgba(0, 0, 0, 0.06);
+  }
+
+  /* ---------- Tile specialty badge (dark hardcoded) ---------- */
+  .tile-specialty-frontend { background: rgba(177, 91, 255, 0.1); border-color: rgba(177, 91, 255, 0.3); color: #7b2d8e; }
+  .tile-specialty-backend  { background: rgba(51, 112, 255, 0.1); border-color: rgba(51, 112, 255, 0.3); color: #0056b3; }
+  .tile-specialty-electron { background: rgba(0, 182, 255, 0.1); border-color: rgba(0, 182, 255, 0.3); color: #006699; }
+  .tile-specialty-devops   { background: rgba(255, 138, 0, 0.1); border-color: rgba(255, 138, 0, 0.3); color: #8a4400; }
+  .tile-specialty-test     { background: rgba(75, 200, 110, 0.1); border-color: rgba(75, 200, 110, 0.3); color: #1a7a35; }
+  .tile-specialty-docs     { background: rgba(180, 180, 180, 0.15); border-color: rgba(180, 180, 180, 0.35); color: #4a4a4a; }
+  .tile-specialty-review   { background: rgba(255, 95, 162, 0.1); border-color: rgba(255, 95, 162, 0.3); color: #9e0050; }
+  .tile-specialty-general  { background: rgba(0, 0, 0, 0.04); border-color: rgba(0, 0, 0, 0.12); color: var(--text-secondary); }
+
+  /* ---------- Tiles bar / detail / dock (gallery containers) ---------- */
+  .tiles-bar {
+    background: var(--bg-elevated);
+    border-color: var(--border-soft);
+    backdrop-filter: none;
+  }
+  .tiles-bar-collapse {
+    background: rgba(0, 0, 0, 0.04);
+    border-color: var(--border-soft);
+    color: var(--text-secondary);
+  }
+  .tiles-bar-collapse:hover {
+    background: rgba(0, 0, 0, 0.08);
+    color: var(--text-primary);
+  }
+  .tiles-detail {
+    background: var(--bg-elevated);
+    border-color: var(--border-soft);
+    backdrop-filter: none;
+  }
+  .dock-sidebar {
+    background: var(--bg-elevated);
+    border-color: var(--border-soft);
+    backdrop-filter: none;
+  }
+  .dock-detail {
+    background: var(--bg-elevated);
+    border-color: var(--border-soft);
+    backdrop-filter: none;
+  }
+
+  /* ---------- Worker card ---------- */
+  .worker-card {
+    background: var(--bg-elevated);
+    border-color: var(--border-soft);
+  }
+  .worker-card-sidebar:hover { border-color: var(--border-strong); }
+  .worker-card-status-badge {
+    background: rgba(0, 0, 0, 0.06);
+    color: var(--text-secondary);
+    backdrop-filter: none;
+  }
+  .worker-card-tool {
+    background: rgba(0, 0, 0, 0.04);
+  }
+  .worker-card-pill-idle    { background: rgba(0, 0, 0, 0.05); color: var(--text-muted); }
+  .worker-card-pill-waiting { background: rgba(255, 149, 0, 0.1); color: #b25000; }
+  .worker-card-pill-working { background: rgba(0, 122, 255, 0.1); color: var(--accent); }
+  .worker-card-pill-done    { background: rgba(52, 199, 89, 0.1); color: #248a3d; }
+  .worker-card-pill-failed  { background: rgba(255, 59, 48, 0.1); color: var(--danger); }
+  .worker-card-dep-chip {
+    background: rgba(255, 149, 0, 0.1);
+    color: #b25000;
+  }
+  .worker-card-activity-row {
+    border-left-color: var(--border-soft);
+  }
+  .worker-card-activity-tool-call   { border-color: var(--accent); }
+  .worker-card-activity-tool-result { border-color: var(--success); }
+  .worker-card-activity-error       { border-color: var(--danger); }
+  .worker-card-activity-system      { border-color: var(--border-soft); }
+  .worker-card-perm {
+    background: rgba(255, 149, 0, 0.06);
+    border-color: rgba(255, 149, 0, 0.25);
+  }
+  .worker-card-perm-allow {
+    background: rgba(52, 199, 89, 0.1);
+    color: #248a3d;
+    border-color: rgba(52, 199, 89, 0.3);
+  }
+  .worker-card-perm-deny {
+    background: rgba(255, 59, 48, 0.08);
+    color: var(--danger);
+    border-color: rgba(255, 59, 48, 0.3);
+  }
+  .worker-card-summary {
+    border-top-color: var(--border-soft);
+  }
+  .worker-card-icon-speaking { background: rgba(0, 122, 255, 0.1); }
+  .worker-card-icon-perm { background: rgba(255, 149, 0, 0.12); }
+
+  /* ---------- Workspace status pills ---------- */
+  .workspace-status-speaking {
+    color: var(--accent);
+    border-color: var(--accent);
+    background: var(--accent-soft);
+  }
+  .workspace-status-speaking .workspace-status-dot {
+    background: var(--accent);
+    box-shadow: 0 0 0 4px rgba(0, 122, 255, 0.15);
+  }
+  .workspace-status-working {
+    color: #248a3d;
+    border-color: rgba(52, 199, 89, 0.4);
+    background: rgba(52, 199, 89, 0.08);
+  }
+  .workspace-status-waiting {
+    color: #b25000;
+    border-color: rgba(255, 149, 0, 0.35);
+    background: rgba(255, 149, 0, 0.08);
+  }
+
+  /* ---------- Workspace aurora (lighten for light mode) ---------- */
+  .workspace-aurora {
+    background:
+      radial-gradient(600px 380px at 18% 20%, rgba(0, 122, 255, 0.08), transparent 70%),
+      radial-gradient(500px 320px at 82% 88%, rgba(0, 182, 255, 0.06), transparent 70%);
+  }
+  .workspace-speaking .workspace-aurora { opacity: 1; }
+  .workspace-waiting .workspace-aurora {
+    background:
+      radial-gradient(600px 380px at 50% 30%, rgba(255, 149, 0, 0.08), transparent 70%);
+  }
+
+  /* ---------- Workspace task pills ---------- */
+  .workspace-task-pill-idle     { background: rgba(0, 0, 0, 0.05); color: var(--text-muted); }
+  .workspace-task-pill-waiting  { background: rgba(255, 149, 0, 0.1); color: #b25000; }
+  .workspace-task-pill-working  { background: rgba(0, 122, 255, 0.1); color: var(--accent); }
+  .workspace-task-pill-done     { background: rgba(52, 199, 89, 0.1); color: #248a3d; }
+  .workspace-task-pill-failed   { background: rgba(255, 59, 48, 0.1); color: var(--danger); }
+  .workspace-task-pill-speaking { background: rgba(0, 122, 255, 0.1); color: var(--accent); }
+
+  /* ---------- Workspace feed task pills ---------- */
+  .workspace-feed-task-pill-pending { background: rgba(255, 149, 0, 0.1); color: #b25000; }
+  .workspace-feed-task-pill-running { background: rgba(0, 122, 255, 0.1); color: var(--accent); }
+  .workspace-feed-task-pill-done    { background: rgba(52, 199, 89, 0.1); color: #248a3d; }
+  .workspace-feed-task-pill-failed  { background: rgba(255, 59, 48, 0.1); color: var(--danger); }
+
+  /* ---------- Tab strip (multi-meeting switcher) ---------- */
+  .tab-strip-item:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+  }
+  .tab-strip-item-active {
+    background: var(--bg-stage);
+    border-color: var(--border-soft);
+    color: var(--text-primary);
+  }
+  .tab-strip-close:hover { background: rgba(0, 0, 0, 0.06); }
+  .tab-strip-add:hover { background: rgba(0, 0, 0, 0.04); }
+
+  /* ---------- File tree ---------- */
+  .file-tree-row:hover { background: var(--bg-hover); }
+  .file-tree-row.active { background: var(--accent-soft); }
+  .file-tree-spinner {
+    border-color: rgba(0, 0, 0, 0.12);
+    border-top-color: var(--accent);
+  }
+
+  /* ---------- Delivery viewer ---------- */
+  .delivery-viewer-sidebar {
+    background: var(--bg-elevated);
+    border-color: var(--border-soft);
+  }
+  .delivery-viewer-file:hover { background: var(--bg-hover); }
+  .delivery-viewer-file.is-active {
+    background: var(--accent-soft);
+    border-color: var(--accent);
+    color: var(--text-primary);
+  }
+  .delivery-viewer-content {
+    background: var(--bg-elevated);
+    border-color: var(--border-soft);
+  }
+  .delivery-viewer-toast {
+    background: var(--bg-elevated);
+    border-color: var(--border-soft);
+  }
+  .delivery-viewer-btn-secondary {
+    background: var(--bg-elevated);
+    border-color: var(--border-soft);
+    color: var(--text-primary);
+  }
+  .delivery-viewer-btn-secondary:hover:not(:disabled) {
+    background: var(--bg-hover);
+  }
+
+  /* ---------- Drawer tabs & composer ---------- */
+  .drawer-tabs {
+    background: var(--bg-elevated);
+    border-color: var(--border-soft);
+  }
+  .drawer-composer {
+    background: var(--bg-elevated);
+    border-color: var(--border-soft);
+  }
+  .drawer-settings {
+    background: var(--bg-elevated);
+    border-color: var(--border-soft);
+  }
+
+  /* ---------- Message bubbles ---------- */
+  .msg-user .msg-body {
+    background: var(--accent-soft);
+    color: var(--accent);
+  }
+  .msg-assistant .msg-body {
+    background: var(--bg-elevated);
+    color: var(--text-primary);
+  }
+
+  /* ---------- Error banner ---------- */
+  .error-banner { color: var(--danger); }
+  .error-banner__reconnect {
+    background: var(--bg-elevated);
+    color: var(--text-primary);
+    border-color: var(--border-soft);
+  }
+  .error-banner__reconnect:hover {
+    background: var(--bg-hover);
+  }
+
+  /* ---------- Stage banner ---------- */
+  .stage-banner {
+    background: rgba(0, 0, 0, 0.55);
+    color: #ffffff;
+  }
+  .stage-banner-stop {
+    background: rgba(255, 255, 255, 0.18);
+    color: #ffffff;
+  }
+
+  /* ---------- Workspace now card ---------- */
+  .workspace-now-card {
+    background: var(--bg-elevated);
+    border-color: var(--border-soft);
+    backdrop-filter: none;
+  }
+
+  /* ---------- Workspace task card ---------- */
+  .workspace-task-card {
+    background: var(--bg-elevated);
+    border-color: var(--border-soft);
+    backdrop-filter: none;
+  }
+  .workspace-task-card:hover { border-color: var(--accent); }
+  .workspace-task-card-open { border-color: var(--accent); }
+
+  /* ---------- Attachment strip ---------- */
+  .attachment-chip {
+    background: var(--bg-elevated);
+    border-color: var(--border-soft);
+  }
+  .attachment-chip-remove:hover { background: rgba(0, 0, 0, 0.08); }
+  .attachment-chip-text .attachment-icon { color: #248a3d; }
+  .attachment-chip-word .attachment-icon { color: var(--accent); }
+  .attachment-chip-image .attachment-icon { color: #8a6d00; }
+  .attachment-chip-sent {
+    background: var(--bg-elevated);
+    border-color: var(--border-soft);
+  }
+
+  /* ---------- File viewer ---------- */
+  .file-viewer-action-btn:hover {
+    background: rgba(0, 0, 0, 0.06);
+    color: var(--text-primary);
+  }
+  .file-viewer-open-btn {
+    background: var(--bg-elevated);
+    border-color: var(--border-soft);
+    color: var(--text-primary);
+  }
+  .file-viewer-open-btn:hover {
+    background: var(--bg-hover);
+    border-color: var(--border-strong);
+  }
+  .file-viewer-close:hover {
+    background: rgba(0, 0, 0, 0.06);
+    color: var(--text-primary);
+  }
+  .file-viewer-md-body code {
+    background: rgba(0, 0, 0, 0.06);
+  }
+  .file-viewer-md-body .md-code-block {
+    background: rgba(0, 0, 0, 0.04);
+  }
+  .file-viewer-md-body a {
+    color: var(--accent);
+  }
+
+  /* ---------- User tasks pills ---------- */
+  .task-status-idle {
+    background: rgba(0, 0, 0, 0.05);
+    color: var(--text-secondary);
+  }
+  .task-status-pending {
+    background: rgba(255, 149, 0, 0.1);
+    color: #b25000;
+  }
+  .task-status-running {
+    background: rgba(0, 122, 255, 0.1);
+    color: var(--accent);
+  }
+  .task-status-done {
+    background: rgba(52, 199, 89, 0.1);
+    color: #248a3d;
+  }
+  .task-status-failed {
+    background: rgba(255, 59, 48, 0.1);
+    color: var(--danger);
+  }
+  .user-tasks-owner {
+    background: rgba(0, 0, 0, 0.04);
+    border-color: var(--border-soft);
+    color: var(--text-secondary);
+  }
+
+  /* ---------- Review panel ---------- */
+  .review-panel-empty { color: var(--text-muted); }
+  .review-panel-summary {
+    background: var(--accent-soft);
+    color: var(--accent);
+  }
+  .review-change {
+    background: var(--bg-elevated);
+    border-color: var(--border-soft);
+  }
+  .review-change-header { background: var(--bg-hover); }
+  .review-change-tool { color: var(--text-primary); }
+  .review-change-path { color: var(--text-secondary); }
+  .review-change-ts { color: var(--text-muted); }
+  .review-change-detail { color: var(--text-secondary); }
+
+  /* ---------- Spec panel ---------- */
+  .spec-panel-empty { color: var(--text-muted); }
+  .spec-panel-header { background: var(--accent-soft); }
+  .spec-panel-header h3 { color: var(--text-primary); }
+  .spec-panel-count { color: var(--text-muted); }
+  .spec-message {
+    background: var(--bg-elevated);
+    border-color: var(--border-soft);
+  }
+  .spec-message-meta { background: var(--bg-hover); }
+  .spec-message-role { color: var(--accent); }
+  .spec-message-ts { color: var(--text-muted); }
+  .spec-message-text { color: var(--text-primary); }
+
+  /* ---------- Participant tabs ---------- */
+  .participant-tabs {
+    background: var(--bg-elevated);
+    backdrop-filter: none;
+  }
+  .participant-tabs-bar {
+    background: var(--bg-elevated);
+    border-bottom-color: var(--border-soft);
+  }
+  .participant-tab {
+    color: var(--text-secondary);
+  }
+  .participant-tab:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+  }
+  .participant-tab-active {
+    background: var(--accent-soft);
+    color: var(--accent);
+  }
+  .participant-placeholder { color: var(--text-muted); }
+
+  /* ---------- Workspace delivery accept ---------- */
+  .workspace-delivery-accept-btn {
+    background: rgba(52, 199, 89, 0.08);
+    border-color: rgba(52, 199, 89, 0.3);
+    color: #248a3d;
+  }
+  .workspace-delivery-accept-btn:hover {
+    background: rgba(52, 199, 89, 0.15);
+    border-color: rgba(52, 199, 89, 0.5);
+  }
+
+  /* ---------- Skill install result dismiss ---------- */
+  .skill-install-result-dismiss:hover { background: rgba(0, 0, 0, 0.06); }
+
+  /* ---------- Browser panel (additional) ---------- */
+  .browser-tab-close:hover { background: rgba(0, 0, 0, 0.06); }
+
+  /* ---------- Toolbar ---------- */
+  .tb-btn-danger { color: var(--danger); }
+  .tb-btn-warn { background: rgba(255, 149, 0, 0.1); color: var(--warn); }
+
+  /* ---------- Error text colors (readable on light bg) ---------- */
+  .file-viewer-error { color: var(--danger); }
+  .stage-error-floating { color: var(--danger); }
+
+  /* ---------- Picker items ---------- */
+  .picker-item {
+    background: var(--bg-elevated);
+    border-color: var(--border-soft);
+  }
+  .picker-item:hover { border-color: var(--accent); }
+
+  /* ---------- Drawer input & stage ---------- */
+  .drawer-input {
+    background: var(--bg-input);
+    border-color: var(--border-soft);
+    color: var(--text-primary);
+  }
+
+  /* ---------- Perm card ---------- */
+  .perm-card {
+    background: var(--bg-elevated);
+    border-color: var(--accent);
+  }
+  .perm-input {
+    background: var(--bg-input);
+    color: var(--text-secondary);
+  }
+  .perm-deny {
+    background: var(--bg-elevated);
+    border-color: var(--border-strong);
+    color: var(--text-secondary);
+  }
+  .perm-deny:hover { background: var(--bg-hover); }
+
+  /* ---------- Workspace status off ---------- */
+  .workspace-status-off { color: var(--text-muted); }
+
+  /* ---------- Drawer empty / scroll ---------- */
+  .drawer-empty { color: var(--text-muted); }
+
+  /* ---------- Picker permission section ---------- */
+  .picker-permission-icon {
+    background: var(--bg-elevated);
+    border-color: var(--border-soft);
+  }
+
+  /* ---------- Skill install form ---------- */
+  .skill-install-form { gap: 6px; }
+
+  /* ---------- Voice select guide ---------- */
+  .voice-select-guide:hover { background: rgba(0, 122, 255, 0.15); }
+
+  /* ---------- Plan modal ---------- */
+  .plan-modal {
+    background: var(--bg-elevated);
+    border-color: var(--border-soft);
+  }
+  .plan-modal-textarea {
+    background: var(--bg-input);
+    border-color: var(--border-soft);
+    color: var(--text-primary);
+  }
+  .plan-modal-cancel {
+    border-color: var(--border-soft);
+    color: var(--text-secondary);
+  }
+  .plan-modal-cancel:hover { background: var(--bg-hover); }
 }
 
 * { box-sizing: border-box; }

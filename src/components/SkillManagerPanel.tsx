@@ -61,11 +61,29 @@ export function SkillManagerPanel() {
       const r = await window.vibeMeet.skills.install(source);
       console.log('[SkillManager] install result:', r);
       if (r.ok) {
-        setInstallResult({ type: 'success', skill: r.skill });
         setInstallSource('');
-        // Wait longer for filesystem to fully flush before scanning again
-        await new Promise((res) => setTimeout(res, 800));
-        if (mountedRef.current) await reload();
+        // Wait for the newly installed skill to appear in the list rather than
+        // using a fixed delay — filesystem flush timing varies. Retry up to 3
+        // times with increasing intervals so slow disks still converge.
+        const installedName = r.skill.name;
+        let reloaded = false;
+        for (const delayMs of [400, 800, 1600]) {
+          await new Promise((res) => setTimeout(res, delayMs));
+          if (!mountedRef.current) break;
+          await reload();
+          // Check if the new skill is now visible in the list
+          const listRes = await window.vibeMeet.skills.list();
+          if (listRes.ok && listRes.skills.some((s) => s.name === installedName)) {
+            reloaded = true;
+            break;
+          }
+        }
+        if (mountedRef.current) {
+          setInstallResult({ type: 'success', skill: r.skill });
+          if (!reloaded) {
+            setError('技能已安装但未能在列表中确认，请稍后刷新');
+          }
+        }
       } else {
         setInstallResult({ type: 'error', message: r.error });
       }

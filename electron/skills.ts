@@ -166,6 +166,87 @@ function githubBlobToRaw(url: string): string {
   return url;
 }
 
+/**
+ * Resolve a web-page URL to a raw SKILL.md URL.
+ *
+ * Supported patterns:
+ *   • skills.sh/{owner}/{repo}/{skill}  → raw.githubusercontent.com
+ *   • github.com/{owner}/{repo}          → try main/HEAD SKILL.md
+ *   • github.com/{owner}/{repo}/tree/…/{skill} → drill into subdir
+ *   • already-raw URLs                   → pass through
+ */
+function resolveWebUrl(url: string): { rawUrl: string; fallbackBranch?: string } {
+  const urlObj = new URL(url);
+  const host = urlObj.hostname.replace(/^www\./, '');
+  const parts = urlObj.pathname.split('/').filter(Boolean);
+
+  // ── skills.sh/{owner}/{repo}/{skill-name} ──
+  if (host === 'skills.sh' && parts.length >= 3) {
+    const [owner, repo, skillName] = parts;
+    return {
+      rawUrl: `https://raw.githubusercontent.com/${owner}/${repo}/HEAD/${skillName}/SKILL.md`,
+      fallbackBranch: 'main',
+    };
+  }
+
+  // ── github.com/{owner}/{repo}/tree/{branch}/{skill-dir} ──
+  if (host === 'github.com' && parts.length >= 4 && parts[2] === 'tree') {
+    const [owner, repo, , branch, ...rest] = parts;
+    const subdir = rest.length > 0 ? rest.join('/') + '/' : '';
+    return {
+      rawUrl: `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${subdir}SKILL.md`,
+    };
+  }
+
+  // ── github.com/{owner}/{repo} (repo root — try HEAD) ──
+  if (host === 'github.com' && parts.length >= 2 && parts.length <= 3) {
+    const [owner, repo] = parts;
+    const cleanRepo = repo?.replace(/\.git$/, '') ?? '';
+    return {
+      rawUrl: `https://raw.githubusercontent.com/${owner}/${cleanRepo}/HEAD/SKILL.md`,
+      fallbackBranch: 'main',
+    };
+  }
+
+  // ── Pass through (already a raw / direct URL) ──
+  return { rawUrl: url };
+}
+
+/**
+ * If the first attempt at fetching a raw SKILL.md returns a non-ok status
+ * (e.g. 404 because HEAD resolved to a missing ref), retry with the explicit
+ * fallback branch.
+ */
+async function fetchRawSkill(rawUrl: string, fallbackBranch?: string): Promise<string> {
+  const MAX_SIZE = 1_000_000; // 1 MB limit to prevent OOM from malicious URLs
+
+  let res = await fetch(rawUrl, { redirect: 'follow', signal: AbortSignal.timeout(30_000) });
+  if (!res.ok && fallbackBranch) {
+    const retry = rawUrl.replace('/HEAD/', `/${fallbackBranch}/`);
+    if (retry !== rawUrl) {
+      res = await fetch(retry, { redirect: 'follow', signal: AbortSignal.timeout(30_000) });
+    }
+  }
+  if (!res.ok) {
+    throw new Error(`下载失败: HTTP ${res.status} ${res.statusText}`);
+  }
+
+  // Pre-check Content-Length header if available
+  const contentLength = res.headers.get('content-length');
+  if (contentLength && parseInt(contentLength, 10) > MAX_SIZE) {
+    throw new Error(`Skill 文件过大（${Math.round(parseInt(contentLength, 10) / 1024)} KB），超过 1 MB 限制`);
+  }
+
+  const content = await res.text();
+
+  // Post-download size check
+  if (content.length > MAX_SIZE) {
+    throw new Error(`Skill 文件过大（${Math.round(content.length / 1024)} KB），超过 1 MB 限制`);
+  }
+
+  return content;
+}
+
 function inferSkillNameFromUrl(url: string): string {
   // Try to extract skill name from URL path segments
   const urlObj = new URL(url);
@@ -186,15 +267,18 @@ function inferSkillNameFromUrl(url: string): string {
 }
 
 async function downloadSkill(url: string): Promise<{ name: string; content: string }> {
-  const rawUrl = githubBlobToRaw(url);
-  const res = await fetch(rawUrl, { redirect: 'follow', signal: AbortSignal.timeout(30_000) });
-  if (!res.ok) {
-    throw new Error(`下载失败: HTTP ${res.status} ${res.statusText}`);
-  }
-  const content = await res.text();
+  const { rawUrl, fallbackBranch } = resolveWebUrl(url);
+  const finalUrl = githubBlobToRaw(rawUrl); // handles blob URLs too
+  const content = await fetchRawSkill(finalUrl, fallbackBranch);
   // Validate that we actually got a SKILL.md with frontmatter, not an HTML page
   if (content.trimStart().startsWith('<!') || content.trimStart().startsWith('<html')) {
-    throw new Error('下载的内容不是有效的 SKILL.md 文件（可能是网页而非原始文件链接）');
+    throw new Error(
+      '该链接指向的是一个网页，而非 SKILL.md 原始文件。\n' +
+      '请使用以下格式的直接链接：\n' +
+      '  • skills.sh: https://www.skills.sh/{owner}/{repo}/{skill}\n' +
+      '  • GitHub blob: https://github.com/{owner}/{repo}/blob/{branch}/{path}/SKILL.md\n' +
+      '  • raw 链接: https://raw.githubusercontent.com/{owner}/{repo}/{branch}/{path}/SKILL.md'
+    );
   }
   const meta = parseFrontmatter(content);
   const name = meta?.name || inferSkillNameFromUrl(url);
@@ -325,3 +409,11 @@ export async function uninstallSkill(name: string): Promise<void> {
     await fs.rm(skillDir, { recursive: true, force: true });
   });
 }
+
+// ── Testing surface (not part of the public API) ──
+export const _testing = {
+  resolveWebUrl,
+  githubBlobToRaw,
+  inferSkillNameFromUrl,
+  parseFrontmatter,
+};

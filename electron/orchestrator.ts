@@ -465,6 +465,11 @@ export class Orchestrator implements OrchestratorBridge {
     this.scheduler.markTaskDone(workerId, summary);
   }
 
+  // Test-only proxy: forward session events to the scheduler for simulation.
+  schedulerOnWorkerEvent(workerId: string, e: SessionEvent): void {
+    this.scheduler.onWorkerEvent(workerId, e);
+  }
+
   submitWorkerDelivery(workerId: string, files: string[]): void {
     this.scheduler.submitWorkerDelivery(workerId, files);
   }
