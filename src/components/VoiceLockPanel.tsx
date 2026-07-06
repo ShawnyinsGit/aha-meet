@@ -94,8 +94,8 @@ export function VoiceLockPanel({
             停止
           </button>
         </div>
-        <div style={{ height: 4, background: 'rgba(255,255,255,0.08)', borderRadius: 2, marginTop: 8, overflow: 'hidden' }}>
-          <div style={{ width: `${pct}%`, height: '100%', background: '#7cc6ff', transition: 'width 200ms ease' }} />
+        <div className="voice-lock-progress-track">
+          <div className="voice-lock-progress-bar" style={{ width: `${pct}%` }} />
         </div>
       </div>
     );
@@ -109,16 +109,16 @@ export function VoiceLockPanel({
             {enabled && <Lock size={14} aria-hidden="true" />}
             <span>声纹锁定 · Voice lock</span>
             {recentlyRejected && (
-              <span style={{ marginLeft: 8, fontSize: 11, color: '#ffb86b' }}>· ignored other voice</span>
+              <span className="voice-lock-toast voice-lock-toast-warn">· ignored other voice</span>
             )}
             {enrollmentToast === 'saved' && (
-              <span style={{ marginLeft: 8, fontSize: 11, color: '#7cc6ff' }}>· 声纹已保存</span>
+              <span className="voice-lock-toast voice-lock-toast-info">· 声纹已保存</span>
             )}
             {enrollmentToast === 'tooShort' && (
-              <span style={{ marginLeft: 8, fontSize: 11, color: '#ffb86b' }}>· 录音不足 2 秒,未保存</span>
+              <span className="voice-lock-toast voice-lock-toast-warn">· 录音不足 2 秒,未保存</span>
             )}
             {enrollmentToast === 'cancelled' && (
-              <span style={{ marginLeft: 8, fontSize: 11, color: '#9aa4b2' }}>· 已取消</span>
+              <span className="voice-lock-toast voice-lock-toast-muted">· 已取消</span>
             )}
           </div>
           <div className="drawer-settings-hint">
@@ -128,7 +128,7 @@ export function VoiceLockPanel({
                 ? `Enrolled ${formatRelative(enrolledAt!)} · only your voice is transcribed.`
                 : `Enrolled ${formatRelative(enrolledAt!)} · turn on to filter other voices.`}
             {enrolledAt != null && !modelMatches && (
-              <span style={{ color: '#ff7a7a' }}> · model changed, re-enrollment required</span>
+              <span className="voice-lock-toast voice-lock-toast-error"> · model changed, re-enrollment required</span>
             )}
           </div>
         </div>

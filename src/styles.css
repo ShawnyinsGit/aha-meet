@@ -1,26 +1,26 @@
 :root {
-  --bg-app: #0f1014;
-  --bg-stage: #161821;
-  --bg-tile: #1d1f2a;
-  --bg-elevated: #232634;
-  --bg-glass: rgba(28, 30, 42, 0.72);
-  --bg-panel: #14151d;
+  --bg-app: #1c1c1e;
+  --bg-stage: #2c2c2e;
+  --bg-tile: #3a3a3c;
+  --bg-elevated: #48484a;
+  --bg-glass: rgba(44, 44, 46, 0.72);
+  --bg-panel: #2c2c2e;
   --bg-hover: rgba(255, 255, 255, 0.08);
   --bg-input: rgba(0, 0, 0, 0.3);
-  --border-soft: rgba(255, 255, 255, 0.06);
-  --border-strong: rgba(255, 255, 255, 0.12);
-  --text-primary: #e9ecf3;
-  --text-secondary: #a4a9b8;
-  --text-muted: #6c7184;
-  --accent: #3370ff;
-  --accent-soft: rgba(51, 112, 255, 0.18);
-  --accent-glow: rgba(51, 112, 255, 0.45);
-  --danger: #f04864;
-  --danger-soft: rgba(240, 72, 100, 0.18);
-  --warn: #ffb648;
-  --success: #38d9a9;
-  --success-soft: rgba(56, 217, 169, 0.12);
-  --danger-result-soft: rgba(255, 90, 90, 0.12);
+  --border-soft: rgba(255, 255, 255, 0.1);
+  --border-strong: rgba(255, 255, 255, 0.2);
+  --text-primary: #f2f2f7;
+  --text-secondary: #ebebf0;
+  --text-muted: #8e8e93;
+  --accent: #0a84ff;
+  --accent-soft: rgba(10, 132, 255, 0.18);
+  --accent-glow: rgba(10, 132, 255, 0.45);
+  --danger: #ff453a;
+  --danger-soft: rgba(255, 69, 58, 0.18);
+  --warn: #ff9f0a;
+  --success: #30d158;
+  --success-soft: rgba(48, 209, 88, 0.12);
+  --danger-result-soft: rgba(255, 69, 58, 0.12);
   --radius-lg: 16px;
   --radius-md: 12px;
   --radius-sm: 8px;
@@ -32,57 +32,210 @@
 
 @media (prefers-color-scheme: light) {
   :root {
-    --bg-app: #f5f6f8;
-    --bg-stage: #ebedf2;
+    /* macOS HIG: systemGray6 for backgrounds, systemBackground for panels */
+    --bg-app: #f2f2f7;
+    --bg-stage: #e5e5ea;
     --bg-tile: #ffffff;
     --bg-elevated: #ffffff;
-    --bg-glass: rgba(255, 255, 255, 0.72);
+    --bg-glass: rgba(255, 255, 255, 0.82);
     --bg-panel: #ffffff;
-    --border-soft: rgba(0, 0, 0, 0.08);
-    --border-strong: rgba(0, 0, 0, 0.15);
-    --text-primary: #1a1d26;
-    --text-secondary: #5c6170;
-    --text-muted: #8c91a0;
-    --accent: #2b5fd9;
-    --accent-soft: rgba(43, 95, 217, 0.12);
-    --accent-glow: rgba(43, 95, 217, 0.3);
-    --danger: #d93a50;
-    --danger-soft: rgba(217, 58, 80, 0.12);
-    --warn: #d99a2b;
-    --success: #28a87a;
-    --success-soft: rgba(40, 168, 122, 0.1);
-    --danger-result-soft: rgba(217, 58, 80, 0.1);
-    --shadow-card: 0 16px 40px -12px rgba(0, 0, 0, 0.12);
-    --shadow-soft: 0 4px 16px -4px rgba(0, 0, 0, 0.1);
+    --bg-hover: rgba(0, 0, 0, 0.04);
+    --bg-input: #ffffff;
+    --border-soft: rgba(0, 0, 0, 0.1);
+    --border-strong: rgba(0, 0, 0, 0.2);
+    --text-primary: #1c1c1e;
+    --text-secondary: #3a3a3c;
+    --text-muted: #8e8e93;
+    --accent: #007aff;
+    --accent-soft: rgba(0, 122, 255, 0.1);
+    --accent-glow: rgba(0, 122, 255, 0.3);
+    --danger: #ff3b30;
+    --danger-soft: rgba(255, 59, 48, 0.1);
+    --warn: #ff9500;
+    --success: #34c759;
+    --success-soft: rgba(52, 199, 89, 0.1);
+    --danger-result-soft: rgba(255, 59, 48, 0.08);
+    --shadow-card: 0 4px 24px -4px rgba(0, 0, 0, 0.08);
+    --shadow-soft: 0 2px 8px -2px rgba(0, 0, 0, 0.06);
   }
 
-  /* Join screen decorative tiles — lighter gradients for light mode */
-  .join-tile-ai { background: linear-gradient(160deg, #d6e4ff, #e8edf8); }
-  .join-tile-self { background: linear-gradient(160deg, #f0d6ff, #f5e8ff); }
+  /* Join screen decorative tiles */
+  .join-tile-ai { background: linear-gradient(160deg, #dce8ff, #ebeef5); }
+  .join-tile-self { background: linear-gradient(160deg, #f0dcff, #f2e8ff); }
   .join-tile-label { color: var(--text-primary); }
-  .join-tile-meta { background: rgba(0, 0, 0, 0.15); }
+  .join-tile-meta { background: rgba(0, 0, 0, 0.12); color: var(--text-secondary); }
 
-  /* Stage area backgrounds */
-  .stage-sharing { background: #f0f2f5; }
-  .stage-default { background: linear-gradient(170deg, #e8edf8 0%, #f5f6f8 100%); }
-  .stage-video { background: #f0f2f5; }
-
-  /* Participant tiles */
-  .tile-ai .tile-stage { background: linear-gradient(160deg, #d6e4ff, #e8edf8); }
-  .tile-self .tile-stage { background: linear-gradient(160deg, #f0d6ff, #f5e8ff); }
-
-  /* Join screen background gradients */
   .join-screen {
     background:
-      radial-gradient(900px 600px at 12% 6%, rgba(43, 95, 217, 0.08), transparent 60%),
-      radial-gradient(700px 500px at 88% 90%, rgba(40, 168, 122, 0.06), transparent 60%),
+      radial-gradient(900px 600px at 12% 6%, rgba(0, 122, 255, 0.06), transparent 60%),
+      radial-gradient(700px 500px at 88% 90%, rgba(52, 199, 89, 0.05), transparent 60%),
       var(--bg-app);
   }
 
-  /* Interactive element backgrounds */
-  :root {
-    --bg-hover: rgba(0, 0, 0, 0.06);
-    --bg-input: rgba(0, 0, 0, 0.04);
+  /* Stage area */
+  .stage-sharing { background: #e8e8ed; }
+  .stage-default { background: linear-gradient(170deg, #e8e8ed 0%, #f2f2f7 100%); }
+  .stage-video { background: #e8e8ed; }
+
+  /* Participant tiles */
+  .tile-ai .tile-stage { background: linear-gradient(160deg, #dce8ff, #ebeef5); }
+  .tile-self .tile-stage { background: linear-gradient(160deg, #f0dcff, #f2e8ff); }
+
+  /* ---------- Inputs (select, input, textarea) ---------- */
+  .memory-cat-select,
+  .memory-textarea,
+  .memory-tag-input,
+  .memory-search-input,
+  .skill-install-input {
+    background: var(--bg-input);
+    border-color: var(--border-soft);
+    color: var(--text-primary);
+  }
+  .memory-cat-select:focus,
+  .memory-textarea:focus,
+  .memory-tag-input:focus,
+  .memory-search-input:focus,
+  .skill-install-input:focus {
+    border-color: var(--accent);
+  }
+  .voice-select {
+    background: var(--bg-input);
+    border-color: var(--border-soft);
+    color: var(--text-primary);
+  }
+  .voice-select:focus { border-color: var(--accent); }
+
+  /* ---------- Hover states ---------- */
+  .memory-chip:hover,
+  .memory-btn:hover,
+  .skill-btn:hover { background: var(--bg-hover); }
+
+  .skill-btn-danger:hover { background: var(--danger-soft); }
+
+  /* ---------- Text colors ---------- */
+  .memory-error,
+  .skill-error { color: var(--danger); }
+
+  /* Settings armed state */
+  .drawer-settings-armed .drawer-settings-title { color: #b85a00; }
+  .drawer-settings-armed .drawer-settings-hint { color: #a85500; }
+
+  /* Tile specialty and status colors */
+  .tile-specialty-devops { color: #8a4400; }
+  .tile-specialty-review { color: #9e0050; }
+  .tile-specialty-electron { color: #006699; }
+  .tile-specialty-general { color: var(--text-secondary); }
+  .tile-history-status-failed { color: var(--danger); }
+  .tile-history-status-done { color: var(--success); }
+  .tile-history-status-running,
+  .tile-history-status-pending { color: var(--accent); }
+
+  .tb-btn-danger { color: var(--danger); }
+
+  .attachment-chip-pdf .attachment-icon { color: #c85000; }
+  .attachment-chip-rejected .attachment-icon { color: var(--danger); }
+  .attachment-chip-rejected .attachment-size { color: var(--danger); }
+
+  /* ---------- Buttons ---------- */
+  .skill-install-btn,
+  .memory-btn {
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-soft);
+    color: var(--text-primary);
+  }
+  .skill-install-btn:hover,
+  .memory-btn:hover {
+    background: var(--bg-hover);
+    border-color: var(--border-strong);
+  }
+  .memory-btn-primary {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #ffffff;
+  }
+  .memory-btn-danger {
+    color: var(--danger);
+    border-color: var(--danger);
+    background: transparent;
+  }
+
+  /* ---------- Skill panel ---------- */
+  .skill-item {
+    background: var(--bg-elevated);
+    border-color: var(--border-soft);
+  }
+  .skill-item-source { color: var(--text-muted); }
+  .skill-item-desc { color: var(--text-secondary); }
+  .skill-item-readonly { color: var(--text-muted); }
+
+  /* ---------- Voice panel ---------- */
+  .voice-pref-row {
+    border-color: var(--border-soft);
+  }
+  .voice-polish-toggle {
+    color: var(--text-primary);
+  }
+
+  /* ---------- Voice lock panel ---------- */
+  .voice-lock-status {
+    color: var(--text-secondary);
+  }
+
+  /* ---------- Memory panel ---------- */
+  .memory-chip {
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-soft);
+    color: var(--text-primary);
+  }
+  .memory-chip-active {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #ffffff;
+  }
+  .memory-row {
+    border-color: var(--border-soft);
+  }
+  .memory-row-content { color: var(--text-primary); }
+  .memory-tag-chip {
+    background: var(--accent-soft);
+    color: var(--accent);
+  }
+  .memory-row-editing {
+    border-color: var(--accent);
+    background: var(--bg-elevated);
+  }
+  .memory-empty { color: var(--text-muted); }
+
+  /* ---------- Settings window panels ---------- */
+  .settings-window-body .drawer-settings {
+    background: var(--bg-panel);
+  }
+
+  /* ---------- Drawer toggle switch ---------- */
+  .drawer-toggle {
+    background: rgba(0, 0, 0, 0.12);
+  }
+  .drawer-toggle-knob {
+    background: #ffffff;
+  }
+  .drawer-toggle-on {
+    background: rgba(255, 138, 0, 0.85);
+    border-color: rgba(255, 138, 0, 0.9);
+  }
+  .drawer-toggle-on .drawer-toggle-knob {
+    background: #ffffff;
+  }
+
+  /* ---------- Install result banners ---------- */
+  .skill-install-result-success {
+    background: var(--success-soft);
+    border-color: var(--success);
+    color: #1a7a35;
+  }
+  .skill-install-result-error {
+    background: var(--danger-result-soft);
+    border-color: var(--danger);
+    color: var(--danger);
   }
 }
 
@@ -1583,6 +1736,30 @@ html.settings-view #root {
   border-color: rgba(255, 130, 130, 1);
 }
 .voice-lock-cancel:active { transform: scale(0.97); }
+
+.voice-lock-progress-track {
+  height: 4px;
+  background: var(--bg-hover);
+  border-radius: 2px;
+  margin-top: 8px;
+  overflow: hidden;
+}
+
+.voice-lock-progress-bar {
+  height: 100%;
+  background: var(--accent);
+  transition: width 200ms ease;
+}
+
+.voice-lock-toast {
+  margin-left: 8px;
+  font-size: 11px;
+}
+
+.voice-lock-toast-info { color: var(--accent); }
+.voice-lock-toast-warn { color: var(--warn); }
+.voice-lock-toast-error { color: var(--danger); }
+.voice-lock-toast-muted { color: var(--text-muted); }
 
 .drawer-toggle {
   position: relative;

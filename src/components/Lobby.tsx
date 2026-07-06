@@ -240,7 +240,7 @@ export function Lobby({ lastError }: LobbyProps) {
               <span>Recent meetings</span>
             </div>
             <ul className="lobby-list">
-              {lobby.recent.map((r) => {
+              {lobby.recent.slice(0, 3).map((r) => {
                 const { label, parent } = shortPath(r.path);
                 return (
                   <li key={r.path}>

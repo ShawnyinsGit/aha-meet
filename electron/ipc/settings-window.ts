@@ -13,7 +13,7 @@ const __dirname = dirname(__filename);
 let settingsWindow: BrowserWindow | null = null;
 
 function getThemeBackgroundColor(): string {
-  return nativeTheme.shouldUseDarkColors ? '#0f1014' : '#f5f6f8';
+  return nativeTheme.shouldUseDarkColors ? '#1c1c1e' : '#f2f2f7';
 }
 
 function createSettingsWindow(): BrowserWindow {
