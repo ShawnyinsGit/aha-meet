@@ -232,4 +232,10 @@ export class QoderBackend extends SubprocessBackend {
     }
     return { ok: true };
   }
+
+  async checkAuthStatus(): Promise<{ loggedIn: boolean }> {
+    // Qoder is "logged in" if the binary is available OR an API key is set
+    const binary = this.resolveBinary();
+    return { loggedIn: binary !== null };
+  }
 }

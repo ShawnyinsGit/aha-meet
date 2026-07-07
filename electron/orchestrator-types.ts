@@ -56,6 +56,7 @@ export type OrchestratorOnlyEvent =
   | { kind: 'plan-updated'; plan: MeetingPlan }
   | { kind: 'decision-pending'; decisionId: string; question: string; path: string; recommendedTitle: string; calendarOk: boolean; remindersOk: boolean }
   | { kind: 'decision-resolved'; decisionId: string; question: string; path: string; conclusion: string }
+  | { kind: 'document-saved'; title: string; filename: string; path: string }
   | { kind: 'session-ready' }
   | { kind: 'session-start-failed'; error: string };
 

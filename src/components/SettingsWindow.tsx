@@ -108,6 +108,8 @@ function SettingsWindowInner() {
           onChangeFilterMode={voicePrefs.handleFilterModeChange}
           voicePolishEnabled={voicePrefs.voicePolishEnabled}
           onChangeVoicePolish={voicePrefs.handleVoicePolishChange}
+          reportModeEnabled={voicePrefs.reportModeEnabled}
+          onChangeReportMode={voicePrefs.handleReportModeChange}
         />
         <VoiceLockPanel
           enabled={voiceLock.voiceLockEnabled}

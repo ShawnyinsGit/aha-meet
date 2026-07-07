@@ -35,7 +35,11 @@ import {
 /** Strip absolute paths from error messages to avoid leaking filesystem layout. */
 function sanitizeError(msg: string): string {
   // Replace common absolute path patterns with a generic placeholder.
-  return msg.replace(/\/(?:Users?|home|opt|usr|var|tmp|private|Applications?)\/[^\s:'"]+/g, '<path>');
+  // Unix paths: /Users/foo/..., /home/foo/..., etc.
+  // Windows paths: C:\Users\foo\..., D:\Program Files\..., etc.
+  return msg
+    .replace(/\/(?:Users?|home|opt|usr|var|tmp|private|Applications?)\/[^\s:'"]+/g, '<path>')
+    .replace(/[A-Z]:\\[^\s:'"]+/g, '<path>');
 }
 
 export abstract class SubprocessSession implements BackendSession {
@@ -190,6 +194,10 @@ export abstract class SubprocessSession implements BackendSession {
       .filter((b): b is { type: 'text'; text: string } => b.type === 'text')
       .map((b) => b.text)
       .join('\n');
+    const droppedImages = content.filter((b) => b.type === 'image').length;
+    if (droppedImages > 0) {
+      console.warn(`[subprocess] sendUserContent dropped ${droppedImages} image(s) — not supported by this backend`);
+    }
     if (text) this.sendUserText(text);
   }
 
@@ -283,8 +291,41 @@ function getStandardBinDirs(): string[] {
   const dirs = ['/usr/local/bin', '/opt/homebrew/bin'];
   if (home) {
     dirs.push(`${home}/.local/bin`, `${home}/.bin`, `${home}/bin`);
+    // npm global bin when the user has a custom prefix (~/.npm-global is the
+    // most common convention; also covers npmrc `prefix` set to ~/.npm-global).
+    dirs.push(`${home}/.npm-global/bin`);
   }
+  // Dynamically resolve npm global prefix via config (fast — reads ~/.npmrc
+  // and built-in defaults without starting the full npm process). Cached
+  // after first call so repeated resolutions don't re-spawn.
+  const npmBin = resolveNpmGlobalBin();
+  if (npmBin && !dirs.includes(npmBin)) dirs.push(npmBin);
   return dirs;
+}
+
+/** Resolve the npm global `bin` directory by running `npm config get prefix`.
+ *  Returns null if npm isn't available or the command fails. Cached after
+ *  first call — the global prefix doesn't change at runtime. */
+let npmGlobalBinCache: string | null | undefined;
+function resolveNpmGlobalBin(): string | null {
+  if (npmGlobalBinCache !== undefined) return npmGlobalBinCache;
+  try {
+    const lookupCmd = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+    const result = execFileSync(lookupCmd, ['config', 'get', 'prefix'], {
+      encoding: 'utf8',
+      timeout: 5000,
+      stdio: ['pipe', 'pipe', 'ignore'],
+      env: { ...process.env, PATH: process.env.PATH },
+    });
+    const prefix = result.trim();
+    if (prefix && existsSync(prefix)) {
+      const binDir = process.platform === 'win32' ? prefix : `${prefix}/bin`;
+      npmGlobalBinCache = existsSync(binDir) ? binDir : null;
+      return npmGlobalBinCache;
+    }
+  } catch { /* npm not available */ }
+  npmGlobalBinCache = null;
+  return null;
 }
 
 /** Build a PATH string that includes the inherited PATH plus standard dirs. */
@@ -348,11 +389,15 @@ export function resolveBinaryFromPath(binaryName: string): string | null {
       `${home}/.local/bin/${binaryName}`,
       `${home}/.bin/${binaryName}`,
       `${home}/bin/${binaryName}`,
+      // npm global bin when user has custom prefix (~/.npm-global)
+      `${home}/.npm-global/bin/${binaryName}`,
       // Homebrew npm global installs on Apple Silicon
       `/opt/homebrew/lib/node_modules/${binaryName}/bin/${binaryName}`,
       // npm global prefix on macOS (Intel) / Linux
       `/usr/local/lib/node_modules/${binaryName}/bin/${binaryName}`,
       `/usr/lib/node_modules/${binaryName}/bin/${binaryName}`,
+      // npm global installs under custom prefix
+      `${home}/.npm-global/lib/node_modules/${binaryName}/bin/${binaryName}`,
       // Linux-specific
       `/snap/bin/${binaryName}`,
     ];

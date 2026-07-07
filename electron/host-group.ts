@@ -24,7 +24,7 @@ import {
 import { buildComputerUseMcp, type ComputerUseBridge } from './computer-use-mcp.js';
 import { buildBrowserMcp, type BrowserMcpBridge } from './browser-mcp.js';
 import { WorkerScheduler, type SessionFactory } from './worker-scheduler.js';
-import { TALKER_PROMPT } from './orchestrator-prompts.js';
+import { TALKER_PROMPT, REPORT_MODE_SUFFIX } from './orchestrator-prompts.js';
 import {
   formatForPrompt,
   selectRelevant,
@@ -174,6 +174,14 @@ export class HostGroup {
       }
     } catch (err) {
       console.warn('[host-group] failed to load memory for system prompt:', err);
+    }
+
+    // Append report-mode instructions when the user enabled 汇报模式. The
+    // talker's save_document tool is always available (no cost when unused),
+    // but the prompt suffix is what makes it actually use the tool for long
+    // responses instead of reading everything aloud.
+    if (getSettings().reportModeEnabled) {
+      systemPrompt += '\n' + REPORT_MODE_SUFFIX;
     }
 
     this.host = this.sessionFactory({

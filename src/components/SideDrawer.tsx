@@ -56,6 +56,7 @@ const dotColor: Record<ActivityEntry['kind'], string> = {
   'tool-result': '#9ae29a',
   system: '#c8c8c8',
   error: '#ff7a7a',
+  document: '#5b8def',
 };
 
 function pad2(n: number): string {

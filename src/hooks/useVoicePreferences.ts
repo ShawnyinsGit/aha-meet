@@ -10,6 +10,7 @@ export function useVoicePreferences() {
   const [guidanceClosedThisSession, setGuidanceClosedThisSession] = useState(false);
   const [filterMode, setFilterModeState] = useState<SpeechFilterMode>('strict');
   const [voicePolishEnabled, setVoicePolishEnabled] = useState(false);
+  const [reportModeEnabled, setReportModeEnabled] = useState(false);
 
   const { voices, ready: voicesReady } = useVoices();
   const isMac = typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform);
@@ -22,6 +23,7 @@ export function useVoicePreferences() {
       setGuidanceDismissed(pref.guidanceDismissed);
       setFilterModeState(pref.speechFilterMode);
       setVoicePolishEnabled(pref.voicePolishEnabled);
+      setReportModeEnabled(pref.reportModeEnabled);
       setSelectedVoiceName(pref.selectedVoiceName);
       setSpeechFilterMode(pref.speechFilterMode);
     }).catch(() => {});
@@ -63,6 +65,11 @@ export function useVoicePreferences() {
     void window.vibeMeet.setVoicePref({ voicePolishEnabled: enabled });
   }, []);
 
+  const handleReportModeChange = useCallback((enabled: boolean) => {
+    setReportModeEnabled(enabled);
+    void window.vibeMeet.setVoicePref({ reportModeEnabled: enabled });
+  }, []);
+
   const handleOpenGuide = useCallback(() => setGuideOpen(true), []);
   const handleGuideClose = useCallback(() => {
     setGuideOpen(false);
@@ -79,12 +86,14 @@ export function useVoicePreferences() {
     selectedVoiceName,
     filterMode,
     voicePolishEnabled,
+    reportModeEnabled,
     voices,
     voicesReady,
     guideOpen,
     handleVoiceChange,
     handleFilterModeChange,
     handleVoicePolishChange,
+    handleReportModeChange,
     handleOpenGuide,
     handleGuideClose,
     handleDismissForever,

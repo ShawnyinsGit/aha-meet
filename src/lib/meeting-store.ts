@@ -1154,6 +1154,28 @@ class MeetingStore {
       }));
       return;
     }
+    if (e.kind === 'document-saved') {
+      this.updateWorker(slot, 'talker', (w) => ({
+        ...w,
+        activity: appendCapped(
+          w.activity,
+          [{
+            id: uid(),
+            kind: 'document',
+            title: e.title,
+            detail: `文档已保存: ${e.filename}`,
+            ts: Date.now(),
+            source: 'talker',
+            actionPath: e.path,
+          }],
+          MAX_ACTIVITY,
+        ),
+      }));
+      if (slot.id === this.activeId) {
+        this.announce(`文档已整理好：${e.title}`);
+      }
+      return;
+    }
     if (e.kind === 'message') {
       this.handleMessage(slot, source, e.message);
     }

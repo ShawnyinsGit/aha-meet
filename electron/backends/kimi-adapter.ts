@@ -36,7 +36,9 @@ const KIMI_CAPABILITIES: BackendCapabilities = {
   interrupt: true,
   defaultModel: 'kimi-latest',
   npmPackage: undefined,
-  installHint: 'curl -LsSf https://code.kimi.com/install.sh | bash',
+  installHint: process.platform === 'win32'
+    ? 'Kimi CLI is not yet available for Windows. Visit https://code.kimi.com for updates.'
+    : 'curl -LsSf https://code.kimi.com/install.sh | bash',
 };
 
 // ── Kimi JSONL message shapes ─────────────────────────────────────────────────
@@ -195,6 +197,13 @@ export class KimiBackend extends SubprocessBackend {
       return { ok: false, error: 'MOONSHOT_API_KEY is required' };
     }
     return { ok: true };
+  }
+
+  async checkAuthStatus(): Promise<{ loggedIn: boolean }> {
+    // Kimi is "logged in" if the binary is available (may have OAuth configured)
+    // OR an API key is set
+    const binary = this.resolveBinary();
+    return { loggedIn: binary !== null };
   }
 
   async loginOAuth(): Promise<{ ok: boolean; error?: string }> {

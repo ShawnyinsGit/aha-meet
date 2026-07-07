@@ -1,5 +1,5 @@
 import { memo, useMemo } from 'react';
-import { ChevronUp, ChevronDown, ChevronRight, Plus } from 'lucide-react';
+import { ChevronDown, ChevronUp, UserPlus } from 'lucide-react';
 import { useState, useCallback } from 'react';
 import type { HostGroupState, WorkerState } from '../lib/meeting-store';
 import type { MeetingPlan } from '../types';
@@ -42,8 +42,8 @@ export const ParticipantPanel = memo(function ParticipantPanel({
   onToggleHostGroup,
   onAddHost,
 }: ParticipantPanelProps) {
-  const [barCollapsed, setBarCollapsed] = useState(false);
-  const [showAddMenu, setShowAddMenu] = useState(false);
+  const [selectedHostId, setSelectedHostId] = useState<string | null>(null);
+  const [showInviteMenu, setShowInviteMenu] = useState(false);
 
   const depTitles = useMemo(() => {
     const map = new Map<string, string>();
@@ -101,108 +101,163 @@ export const ParticipantPanel = memo(function ParticipantPanel({
     return entries;
   }, [hostGroups]);
 
+  const handleHostClick = useCallback((hostId: string) => {
+    setSelectedHostId((prev) => (prev === hostId ? null : hostId));
+  }, []);
+
   const handleAddHost = useCallback((backendId: string) => {
-    setShowAddMenu(false);
+    setShowInviteMenu(false);
     onAddHost?.(backendId);
   }, [onAddHost]);
 
+  // Get talker for each host (for the host strip)
+  const hostTalkers = useMemo(() => {
+    const map = new Map<string, WorkerState>();
+    for (const [hostId, hostWorkers] of groupedWorkers.entries()) {
+      const talker = hostWorkers.find((w) => w.role === 'talker');
+      if (talker) map.set(hostId, talker);
+    }
+    return map;
+  }, [groupedWorkers]);
+
+  // Get worker count for each host
+  const hostWorkerCounts = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const [hostId, hostWorkers] of groupedWorkers.entries()) {
+      const count = hostWorkers.filter((w) => w.role !== 'talker').length;
+      map.set(hostId, count);
+    }
+    return map;
+  }, [groupedWorkers]);
+
+  // Workers for the selected host
+  const selectedHostWorkers = useMemo(() => {
+    if (!selectedHostId) return [];
+    const hostWorkers = groupedWorkers.get(selectedHostId) ?? [];
+    return sortWorkers(hostWorkers.filter((w) => w.role !== 'talker'));
+  }, [selectedHostId, groupedWorkers, sortWorkers]);
+
   return (
-    <div className={`tiles-bar ${barCollapsed ? 'tiles-bar-collapsed' : ''}`}>
-      <div className="tiles-bar-scroll">
-        <div className="tiles-bar-self">{selfTile}</div>
-        {sortedHostGroups.map(([hostId, hg]) => {
-          const hostWorkers = groupedWorkers.get(hostId) ?? [];
-          const sorted = sortWorkers(hostWorkers);
-          const talker = sorted.find((w) => w.role === 'talker');
-          const workerList = sorted.filter((w) => w.role !== 'talker');
-          const isDefault = hostId === 'default';
-          const backendLabel = BACKEND_LABELS[hg.backendId] ?? hg.backendId;
+    <div className="participant-container">
+      {/* Host strip */}
+      <div className="host-strip">
+        <div className="host-strip-scroll">
+          {/* Self tile (You) */}
+          <div className="host-tile self-tile">{selfTile}</div>
 
-          return (
-            <div key={hostId} className="host-group-tile">
-              {/* Host group header */}
-              {!isDefault && (
-                <button
-                  type="button"
-                  className="host-group-header"
-                  onClick={() => onToggleHostGroup(hostId)}
-                >
-                  <span className="host-group-badge">{backendLabel}</span>
-                  <span className="host-group-count">{workerList.length} worker{workerList.length !== 1 ? 's' : ''}</span>
-                  {hg.collapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
-                </button>
-              )}
+          {/* Host cards */}
+          {sortedHostGroups.map(([hostId, hg]) => {
+            const talker = hostTalkers.get(hostId);
+            const workerCount = hostWorkerCounts.get(hostId) ?? 0;
+            const isSelected = selectedHostId === hostId;
+            const backendLabel = BACKEND_LABELS[hg.backendId] ?? hg.backendId;
 
-              {/* Talker card always visible */}
-              {talker && (
-                <WorkerCard
-                  worker={talker}
-                  depTitles={depTitles}
-                  mode="gallery"
-                  selected={false}
-                  speaking={aiSpeaking}
-                  onSelect={() => {}}
-                  onResolvePermission={onResolvePermission}
-                />
-              )}
+            return (
+              <div
+                key={hostId}
+                className={`host-card ${isSelected ? 'host-card-selected' : ''}`}
+                onClick={() => handleHostClick(hostId)}
+              >
+                {talker && (
+                  <WorkerCard
+                    worker={talker}
+                    depTitles={depTitles}
+                    mode="gallery"
+                    selected={false}
+                    speaking={aiSpeaking}
+                    onSelect={() => {}}
+                    onResolvePermission={onResolvePermission}
+                  />
+                )}
+                <div className="host-card-footer">
+                  <span className="host-card-backend">{backendLabel}</span>
+                  {workerCount > 0 && (
+                    <span className="host-card-worker-count">
+                      {workerCount} worker{workerCount !== 1 ? 's' : ''}
+                    </span>
+                  )}
+                  {workerCount > 0 && (
+                    <ChevronDown
+                      size={14}
+                      className={`host-card-chevron ${isSelected ? 'rotated' : ''}`}
+                    />
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
 
-              {/* Worker cards — collapsible for non-default hosts */}
-              {(isDefault || !hg.collapsed) && workerList.map((w) => (
-                <WorkerCard
-                  key={w.id}
-                  worker={w}
-                  depTitles={depTitles}
-                  mode="gallery"
-                  selected={false}
-                  speaking={false}
-                  onSelect={() => {}}
-                  onResolvePermission={onResolvePermission}
-                />
-              ))}
-            </div>
-          );
-        })}
+        {/* Invite dropdown */}
+        {onAddHost && (
+          <div className="invite-dropdown-wrap">
+            {showInviteMenu && (
+              <div className="invite-menu">
+                <div className="invite-menu-title">邀请参会人</div>
+                {BACKEND_OPTIONS.map((opt) => {
+                  const alreadyAdded = sortedHostGroups.some(
+                    ([, hg]) => hg.backendId === opt.id
+                  );
+                  return (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      className={`invite-menu-item ${alreadyAdded ? 'disabled' : ''}`}
+                      onClick={() => !alreadyAdded && handleAddHost(opt.id)}
+                      disabled={alreadyAdded}
+                    >
+                      {opt.label}
+                      {alreadyAdded && <span className="invite-added-badge">已添加</span>}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+            <button
+              type="button"
+              className="invite-btn"
+              onClick={() => setShowInviteMenu((v) => !v)}
+              title="邀请新的参会人"
+            >
+              <UserPlus size={14} />
+              <span>邀请</span>
+            </button>
+          </div>
+        )}
       </div>
 
-      {/* Add host button */}
-      {onAddHost && (
-        <div className="host-group-add-wrap">
-          {showAddMenu && (
-            <div className="host-group-add-menu">
-              <div className="host-group-add-menu-title">添加主持</div>
-              {BACKEND_OPTIONS.map((opt) => (
-                <button
-                  key={opt.id}
-                  type="button"
-                  className="host-group-add-item"
-                  onClick={() => handleAddHost(opt.id)}
-                >
-                  {opt.label}
-                </button>
-              ))}
-            </div>
-          )}
-          <button
-            type="button"
-            className="host-group-add-btn"
-            onClick={() => setShowAddMenu((v) => !v)}
-            title="添加新的主持 (Host)"
-          >
-            <Plus size={14} />
-            <span>Host</span>
-          </button>
+      {/* Worker panel (below host strip when a host is selected) */}
+      {selectedHostId && selectedHostWorkers.length > 0 && (
+        <div className="worker-panel">
+          <div className="worker-panel-header">
+            <span className="worker-panel-title">
+              {BACKEND_LABELS[hostGroups.get(selectedHostId)?.backendId ?? ''] ?? 'Workers'}
+            </span>
+            <button
+              type="button"
+              className="worker-panel-close"
+              onClick={() => setSelectedHostId(null)}
+              title="收起 workers"
+            >
+              <ChevronUp size={14} />
+            </button>
+          </div>
+          <div className="worker-panel-scroll">
+            {selectedHostWorkers.map((w) => (
+              <WorkerCard
+                key={w.id}
+                worker={w}
+                depTitles={depTitles}
+                mode="gallery"
+                selected={false}
+                speaking={false}
+                onSelect={() => {}}
+                onResolvePermission={onResolvePermission}
+              />
+            ))}
+          </div>
         </div>
       )}
-
-      <button
-        type="button"
-        className="tiles-bar-collapse"
-        onClick={() => setBarCollapsed((v) => !v)}
-        aria-label={barCollapsed ? '展开参会人' : '收起参会人'}
-        title={barCollapsed ? '展开参会人' : '收起参会人'}
-      >
-        {barCollapsed ? <ChevronDown size={16} /> : <ChevronUp size={16} />}
-      </button>
     </div>
   );
 });

@@ -34,7 +34,7 @@ const DEFAULT_URL = 'https://www.google.com';
 const BROWSER_PARTITION = 'persist:embedded-browser';
 
 export class BrowserTabManager {
-  private tabs = new Map<string, { info: BrowserTabInfo; view: WebContentsView }>();
+  private tabs = new Map<string, { info: BrowserTabInfo; view: WebContentsView; eventHandler: () => void }>();
   private activeTabId: string | null = null;
   private visible = false;
   private currentBounds = { x: 0, y: 0, width: 0, height: 0 };
@@ -109,9 +109,8 @@ export class BrowserTabManager {
       canGoForward: false,
     };
 
-    this.tabs.set(id, { info, view });
-
-    this.wireEvents(id, view);
+    const eventHandler = this.wireEvents(id, view);
+    this.tabs.set(id, { info, view, eventHandler });
 
     if (this.visible) {
       win.contentView.addChildView(view);
@@ -133,6 +132,9 @@ export class BrowserTabManager {
   closeTab(tabId: string): void {
     const entry = this.tabs.get(tabId);
     if (!entry) return;
+
+    // Remove event listeners before destroying the view to prevent memory leaks
+    entry.eventHandler();
 
     const win = this.window;
     if (win && !win.isDestroyed()) {
@@ -422,7 +424,7 @@ export class BrowserTabManager {
     };
   }
 
-  private wireEvents(tabId: string, view: WebContentsView): void {
+  private wireEvents(tabId: string, view: WebContentsView): () => void {
     const wc = view.webContents;
     const updateInfo = () => {
       const entry = this.tabs.get(tabId);
@@ -449,5 +451,15 @@ export class BrowserTabManager {
       });
       return { action: 'deny' };
     });
+
+    // Return cleanup function that removes all registered listeners
+    return () => {
+      wc.removeListener('did-navigate', updateInfo);
+      wc.removeListener('did-navigate-in-page', updateInfo);
+      wc.removeListener('page-title-updated', updateInfo);
+      wc.removeListener('did-start-loading', updateInfo);
+      wc.removeListener('did-stop-loading', updateInfo);
+      wc.removeListener('did-fail-load', updateInfo);
+    };
   }
 }

@@ -16,6 +16,8 @@ interface VoiceSelectorProps {
   onChangeFilterMode: (mode: SpeechFilterMode) => void;
   voicePolishEnabled: boolean;
   onChangeVoicePolish: (enabled: boolean) => void;
+  reportModeEnabled: boolean;
+  onChangeReportMode: (enabled: boolean) => void;
 }
 
 function describeVoice(v: ListedVoice): string {
@@ -32,6 +34,8 @@ export function VoiceSelector({
   onChangeFilterMode,
   voicePolishEnabled,
   onChangeVoicePolish,
+  reportModeEnabled,
+  onChangeReportMode,
 }: VoiceSelectorProps) {
   const chineseVoices = listChineseVoices(voices);
   const hasPremium = chineseVoices.some((v) => v.tier !== 'default');
@@ -108,6 +112,25 @@ export function VoiceSelector({
           className={`drawer-toggle ${voicePolishEnabled ? 'drawer-toggle-on' : ''}`}
           aria-pressed={voicePolishEnabled}
           onClick={() => onChangeVoicePolish(!voicePolishEnabled)}
+        >
+          <span className="drawer-toggle-knob" />
+        </button>
+      </div>
+
+      <div className="drawer-settings-row" style={{ marginTop: 12 }}>
+        <div className="drawer-settings-label">
+          <div className="drawer-settings-title">汇报模式</div>
+          <div className="drawer-settings-hint">
+            {reportModeEnabled
+              ? '长回复保存为文档，只播报要点摘要'
+              : '完整播报所有回复内容'}
+          </div>
+        </div>
+        <button
+          type="button"
+          className={`drawer-toggle ${reportModeEnabled ? 'drawer-toggle-on' : ''}`}
+          aria-pressed={reportModeEnabled}
+          onClick={() => onChangeReportMode(!reportModeEnabled)}
         >
           <span className="drawer-toggle-knob" />
         </button>

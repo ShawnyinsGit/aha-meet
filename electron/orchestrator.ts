@@ -48,6 +48,9 @@ import {
 import { BrowserTabManager } from './browser-tab-manager.js';
 import { startRecap, type RecapHandle } from './recap.js';
 import { type SessionFactory } from './worker-scheduler.js';
+import { ensureDir, maybeAppendGitignore } from './attachments/workspace.js';
+import { promises as fsp } from 'node:fs';
+import path from 'node:path';
 import { HostGroup } from './host-group.js';
 import { CrossHostBus } from './cross-host-bus.js';
 import type {
@@ -501,6 +504,47 @@ export class Orchestrator implements OrchestratorBridge {
     });
     if (!r.ok) return { ok: false, error: r.error };
     return { ok: true, preview: input.content.slice(0, 40) };
+  }
+
+  /** Save a report-mode document to .vibe-docs/ and emit a document-saved
+   *  event so the renderer can display it. Filename is derived from date + title. */
+  async saveDocument(input: { title: string; content: string; spokenSummary: string }): Promise<{ ok: boolean; filename?: string; error?: string }> {
+    try {
+      const docsDir = await ensureDir(this.cwd, '.vibe-docs');
+      if (!docsDir) return { ok: false, error: 'could not create .vibe-docs directory' };
+
+      const now = new Date();
+      const pad2 = (n: number) => String(n).padStart(2, '0');
+      const dateStr = `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())}`;
+      const safeTitle = input.title
+        .replace(/[^a-zA-Z0-9一-鿿\s_-]/g, '')
+        .replace(/\s+/g, '-')
+        .slice(0, 40);
+      const filename = `${dateStr}-${safeTitle}.md`;
+      const filePath = path.join(docsDir, filename);
+
+      // Prepend YAML front-matter with title for the renderer to display
+      const header = `---\ntitle: ${input.title}\ncreated: ${now.toISOString()}\n---\n\n`;
+      await fsp.writeFile(filePath, header + input.content, 'utf8');
+      await maybeAppendGitignore(this.cwd, '.vibe-docs');
+
+      // Emit event so the renderer can show the document
+      this.safeEmit({
+        source: 'talker',
+        event: {
+          kind: 'document-saved',
+          title: input.title,
+          filename,
+          path: filePath,
+        },
+      });
+
+      return { ok: true, filename };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error('[orchestrator] saveDocument failed:', msg);
+      return { ok: false, error: msg };
+    }
   }
 
   markWorkerTaskDone(workerId: string, summary: string): void {

@@ -109,7 +109,16 @@ export function mergedSubprocessEnv(): NodeJS.ProcessEnv {
   const out: NodeJS.ProcessEnv = {};
   // 1. Inherit only allowlisted vars from the Electron main process env.
   for (const [k, v] of Object.entries(process.env)) {
-    if (typeof v === 'string' && isEnvAllowed(k)) out[k] = v;
+    if (typeof v === 'string' && isEnvAllowed(k)) {
+      // Strip dangerous NODE_OPTIONS flags (--inspect, --require) to prevent
+      // debug port exposure and arbitrary code loading via subprocess env.
+      if (k === 'NODE_OPTIONS') {
+        const cleaned = v.replace(/--inspect[^\s]*|--require[^\s]*/g, '').trim();
+        if (cleaned) out[k] = cleaned;
+        continue;
+      }
+      out[k] = v;
+    }
   }
   // 2. Overlay ~/.claude/settings.json env. User explicitly authored that
   //    file, so we trust every key in it (and let it override allowlisted

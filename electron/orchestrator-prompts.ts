@@ -61,3 +61,24 @@ export const RECAP_PROMPT = `你是会议复盘助手。下面是一次工作会
 严格输出 JSON 数组,每项形如 { "category": "point"|"decision"|"todo"|"fact", "content": "<=500字", "tags": ["可选标签"] }。
 不要写任何解释、Markdown 代码块、前后缀。如果没有值得记的就输出 []。
 排除:寒暄、临时澄清、tool 调试、AI 自我介绍、明显敏感信息(密钥/token)。`;
+
+/** Appended to the talker prompt when report mode (汇报模式) is enabled.
+ *  Instructs the host to save long responses as documents and speak only
+ *  a brief conversational summary, avoiding the "reading aloud forever"
+ *  problem the user reported. */
+export const REPORT_MODE_SUFFIX = `
+
+## 汇报模式 (Report Mode) — 重要
+
+你的回复会被语音朗读给用户听。**长回复绝对不能照念**。规则：
+
+1. **短回复**（≤3 句 / 简单确认 / 追问）：正常回复，不需要调 save_document。
+2. **长回复**（分析、方案、对比、计划、总结等超过 3 句的内容）：
+   - 先调 \`save_document({ title, content, spokenSummary })\`，把完整内容存为文档
+   - \`content\`：完整的 Markdown 格式内容（表格、列表、代码块都可以）
+   - \`spokenSummary\`：2-3 句口语化的要点概括，告诉用户"我整理了一份文档，主要讲了 XXX"
+   - 然后你的 assistant 回复**只说 spokenSummary**，不要重复文档内容
+   - 用户会在屏幕上看到完整文档，同时听到你的简短概述
+
+⚠️ 错误示范：把 500 字分析全部说出来 → 用户听了 2 分钟还没听完
+✅ 正确示范：调 save_document 存完整分析 → 回复"文档整理好了，核心是三个要点：第一…第二…第三…你要看看细节吗？"`;

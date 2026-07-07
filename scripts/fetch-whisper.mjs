@@ -4,7 +4,7 @@
 // plausible size. Designed to tolerate flaky CN networks.
 
 import { spawn, spawnSync } from 'node:child_process';
-import { createWriteStream, existsSync, mkdirSync, statSync, copyFileSync, chmodSync, readdirSync } from 'node:fs';
+import { createWriteStream, existsSync, mkdirSync, statSync, copyFileSync, chmodSync, readdirSync, renameSync, unlinkSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
@@ -78,8 +78,10 @@ function log(msg) {
 }
 
 function which(cmd) {
-  const r = spawnSync('which', [cmd], { encoding: 'utf8' });
-  return r.status === 0 ? r.stdout.trim() : null;
+  // Windows uses `where` instead of `which`
+  const tool = platform === 'win32' ? 'where' : 'which';
+  const r = spawnSync(tool, [cmd], { encoding: 'utf8' });
+  return r.status === 0 ? r.stdout.trim().split('\n')[0].trim() : null;
 }
 
 function fileSize(path) {
@@ -110,8 +112,9 @@ async function downloadWithCurl(url, dest) {
     p.on('exit', (code) => {
       if (code === 0) {
         try {
-          // rename .part → final
-          spawnSync('mv', [tmp, dest]);
+          // rename .part → final (cross-platform, no shell needed)
+          if (existsSync(dest)) unlinkSync(dest);
+          renameSync(tmp, dest);
           resolve();
         } catch (e) {
           reject(e);
@@ -133,15 +136,23 @@ async function downloadAndExtract(url, destDir, binaryName) {
 
   log(`extracting ${archive}`);
   if (ext === '.zip') {
-    const r = spawnSync('unzip', ['-o', archive, '-d', destDir], { encoding: 'utf8' });
-    if (r.status !== 0) throw new Error(`unzip failed: ${r.stderr}`);
+    if (platform === 'win32') {
+      // PowerShell Expand-Archive works on all Windows installations
+      const r = spawnSync('powershell', ['-NoProfile', '-Command',
+        `Expand-Archive -Force -Path '${archive}' -DestinationPath '${destDir}'`],
+        { encoding: 'utf8' });
+      if (r.status !== 0) throw new Error(`Expand-Archive failed: ${r.stderr}`);
+    } else {
+      const r = spawnSync('unzip', ['-o', archive, '-d', destDir], { encoding: 'utf8' });
+      if (r.status !== 0) throw new Error(`unzip failed: ${r.stderr}`);
+    }
   } else {
     const r = spawnSync('tar', ['-xzf', archive, '-C', destDir], { encoding: 'utf8' });
     if (r.status !== 0) throw new Error(`tar failed: ${r.stderr}`);
   }
 
-  // Clean up archive
-  try { spawnSync('rm', ['-f', archive]); } catch { /* ignore */ }
+  // Clean up archive (cross-platform, no shell needed)
+  try { unlinkSync(archive); } catch { /* ignore */ }
 
   // Ensure binary has execute permission
   const binPath = join(destDir, binaryName);

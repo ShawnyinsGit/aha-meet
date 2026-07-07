@@ -12,7 +12,7 @@
 
 import { homedir } from 'node:os';
 import { promises as fs, existsSync } from 'node:fs';
-import { join, basename, dirname, resolve } from 'node:path';
+import { join, basename, dirname, resolve, sep } from 'node:path';
 
 export interface SkillInfo {
   name: string;
@@ -33,7 +33,8 @@ function validateSkillName(name: string): string {
 
 function assertWithinBase(target: string, base: string): void {
   const resolved = resolve(base, target);
-  if (!resolved.startsWith(base + '/') && resolved !== base) {
+  const normalizedBase = base.endsWith(sep) ? base : base + sep;
+  if (!resolved.startsWith(normalizedBase) && resolved !== base) {
     throw new Error('路径越界');
   }
 }

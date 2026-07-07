@@ -59,6 +59,9 @@ export interface OrchestratorBridge {
   // Memory tool (exposed to both talker and workers)
   saveMemory(input: { category: MemoryCategory; content: string; tags: string[] }): Promise<SaveMemoryResult>;
 
+  // Document tool (report mode — saves full response as a reviewable document)
+  saveDocument(input: { title: string; content: string; spokenSummary: string }): Promise<{ ok: boolean; filename?: string; error?: string }>;
+
   // Worker tools
   markWorkerTaskDone(workerId: string, summary: string): void;
   submitWorkerDelivery(workerId: string, files: string[]): void;
@@ -195,6 +198,22 @@ export function buildTalkerMcp(bridge: OrchestratorBridge) {
               isError: true,
             };
           }
+        },
+      ),
+      tool(
+        'save_document',
+        'Save a detailed document for the user to review on screen. Use this when your response is long (3+ paragraphs, analysis, plans, comparisons) — save the full content as a document and reply with ONLY the short spoken summary (2-3 sentences). The user sees the document and hears your summary.',
+        {
+          title: z.string().min(1).max(200).describe('Document title shown to the user.'),
+          content: z.string().min(1).describe('Full document content in Markdown.'),
+          spokenSummary: z.string().min(1).max(300).describe('2-3 sentence conversational summary for TTS. Speak this as your assistant reply after calling save_document.'),
+        },
+        async ({ title, content, spokenSummary }) => {
+          const r = await bridge.saveDocument({ title, content, spokenSummary });
+          if (!r.ok) {
+            return { content: [{ type: 'text', text: `save_document failed: ${r.error}` }], isError: true };
+          }
+          return { content: [{ type: 'text', text: `Document "${title}" saved (${r.filename}). Now reply with your spoken summary: ${spokenSummary}` }] };
         },
       ),
     ],

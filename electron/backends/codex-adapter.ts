@@ -32,6 +32,7 @@ import type {
   ContentBlock,
 } from './cli-backend.js';
 import { resolveBinaryFromPath } from './subprocess-backend.js';
+import { mergedSubprocessEnv } from '../settings-loader.js';
 
 const CODEX_CAPABILITIES: BackendCapabilities = {
   displayName: 'Codex',
@@ -330,7 +331,13 @@ class CodexSession implements BackendSession {
           this.emit({ kind: 'error', error: `Codex error: ${String(err)}` });
         }
       }
-    }).catch(() => { /* Swallow errors to prevent unhandled rejections in queue */ });
+    }).catch((err: unknown) => {
+      // Log instead of silently swallowing — unhandled rejections in the queue
+      // chain indicate a bug that should surface, not disappear.
+      if (!this.closed) {
+        this.emit({ kind: 'error', error: `Codex turn queue error: ${String(err)}` });
+      }
+    });
   }
 
   sendUserContent(content: UserContentBlock[], _priority?: InputPriority): void {
@@ -338,6 +345,10 @@ class CodexSession implements BackendSession {
       .filter((b): b is { type: 'text'; text: string } => b.type === 'text')
       .map((b) => b.text)
       .join('\n');
+    const droppedImages = content.filter((b) => b.type === 'image').length;
+    if (droppedImages > 0) {
+      console.warn(`[codex] sendUserContent dropped ${droppedImages} image(s) — Codex SDK text-only mode`);
+    }
     if (text) this.sendUserText(text);
   }
 
@@ -377,7 +388,7 @@ export class CodexBackend implements CliBackend {
   }
 
   buildEnv(auth: BackendAuthConfig, extra?: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
-    const env = { ...process.env, ...extra };
+    const env = { ...mergedSubprocessEnv(), ...extra };
     if (auth.apiKey) {
       env.OPENAI_API_KEY = auth.apiKey;
     }
@@ -392,6 +403,12 @@ export class CodexBackend implements CliBackend {
       return { ok: false, error: 'OPENAI_API_KEY is required' };
     }
     return { ok: true };
+  }
+
+  async checkAuthStatus(): Promise<{ loggedIn: boolean }> {
+    // Codex is "logged in" if the binary is available OR an API key is set
+    const binary = this.resolveBinary();
+    return { loggedIn: binary !== null };
   }
 
   async loginOAuth(): Promise<{ ok: boolean; error?: string }> {
