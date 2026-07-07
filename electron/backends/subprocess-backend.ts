@@ -71,9 +71,11 @@ export abstract class SubprocessSession implements BackendSession {
     const args = this.buildArgs(this.config);
     // Use minimal environment if not explicitly provided to avoid leaking
     // Electron internals or other backend API keys.
+    const home = process.env.HOME ?? process.env.USERPROFILE;
     const spawnEnv = this.config.env ?? {
       PATH: process.env.PATH,
-      HOME: process.env.HOME,
+      HOME: home,
+      USERPROFILE: process.env.USERPROFILE,
       LANG: process.env.LANG ?? 'en_US.UTF-8',
     };
     try {
@@ -232,15 +234,25 @@ export abstract class SubprocessBackend implements CliBackend {
   buildEnv(auth: BackendAuthConfig, extra?: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
     // Build a minimal environment to avoid leaking Electron internals or other
     // backend API keys to subprocess CLIs.
+    const home = process.env.HOME ?? process.env.USERPROFILE;
+    const user = process.env.USER ?? process.env.USERNAME;
+    const shell = process.platform === 'win32'
+      ? process.env.ComSpec
+      : process.env.SHELL;
     const minimal: NodeJS.ProcessEnv = {
       PATH: process.env.PATH,
-      HOME: process.env.HOME,
-      USER: process.env.USER,
-      SHELL: process.env.SHELL,
+      HOME: home,
+      USERPROFILE: process.env.USERPROFILE,
+      USER: user,
+      USERNAME: process.env.USERNAME,
+      SHELL: shell,
+      ComSpec: process.env.ComSpec,
       LANG: process.env.LANG ?? 'en_US.UTF-8',
       LC_ALL: process.env.LC_ALL ?? 'en_US.UTF-8',
       TERM: process.env.TERM ?? 'xterm-256color',
       TMPDIR: process.env.TMPDIR,
+      TEMP: process.env.TEMP,
+      TMP: process.env.TMP,
     };
     return { ...minimal, ...extra };
   }
@@ -249,23 +261,34 @@ export abstract class SubprocessBackend implements CliBackend {
 // ── Binary resolution from PATH ────────────────────────────────────────────────
 // Tries to find a binary by name: system PATH first, then known locations.
 
-/** Standard binary directories on macOS/Linux. The Electron main process
+/** Standard binary directories per platform. The Electron main process
  *  launched from a .app bundle often has a minimal or empty PATH — we always
- *  augment the which(1) call and the filesystem candidate list with these
+ *  augment the which/where call and the filesystem candidate list with these
  *  locations so freshly-installed CLIs are discoverable without a relaunch. */
-const STANDARD_BIN_DIRS = ['/usr/local/bin', '/opt/homebrew/bin'];
+function getStandardBinDirs(): string[] {
+  const home = process.env.HOME ?? process.env.USERPROFILE ?? '';
+  if (process.platform === 'win32') {
+    const dirs: string[] = [];
+    // npm global installs
+    if (process.env.APPDATA) dirs.push(`${process.env.APPDATA}\\npm`);
+    // Scoop
+    if (home) dirs.push(`${home}\\scoop\\shims`);
+    // Chocolatey
+    dirs.push('C:\\ProgramData\\chocolatey\\bin');
+    return dirs;
+  }
+  const dirs = ['/usr/local/bin', '/opt/homebrew/bin'];
+  if (home) {
+    dirs.push(`${home}/.local/bin`, `${home}/.bin`, `${home}/bin`);
+  }
+  return dirs;
+}
 
 /** Build a PATH string that includes the inherited PATH plus standard dirs. */
 export function augmentedPath(): string {
   const parts = (process.env.PATH ?? '').split(delimiter).filter(Boolean);
-  for (const dir of STANDARD_BIN_DIRS) {
+  for (const dir of getStandardBinDirs()) {
     if (!parts.includes(dir)) parts.push(dir);
-  }
-  const home = process.env.HOME ?? '';
-  if (home) {
-    for (const dir of [`${home}/.local/bin`, `${home}/.bin`, `${home}/bin`]) {
-      if (!parts.includes(dir)) parts.push(dir);
-    }
   }
   return parts.join(delimiter);
 }
@@ -277,42 +300,60 @@ export function resolveBinaryFromPath(binaryName: string): string | null {
   }
 
   // 1. Check system PATH via execFileSync (no shell — prevents command injection)
+  //    Windows uses `where`, Unix uses `which`.
   try {
-    const result = execFileSync('which', [binaryName], {
+    const lookupCmd = process.platform === 'win32' ? 'where' : 'which';
+    const result = execFileSync(lookupCmd, [binaryName], {
       encoding: 'utf8',
       timeout: 3000,
       stdio: ['pipe', 'pipe', 'ignore'],
       env: { ...process.env, PATH: augmentedPath() },
     });
-    const path = result.trim();
-    if (path && existsSync(path)) return path;
+    const found = result.trim().split('\n')[0]?.trim();
+    if (found && existsSync(found)) return found;
   } catch { /* not found in PATH */ }
 
-  // 2. Known install locations
-  const home = process.env.HOME ?? '';
-  const candidates = [
-    `/usr/local/bin/${binaryName}`,
-    `/opt/homebrew/bin/${binaryName}`,
-    `${home}/.local/bin/${binaryName}`,
-    `${home}/.bin/${binaryName}`,
-    `${home}/bin/${binaryName}`,
-    // Homebrew npm global installs on Apple Silicon
-    `/opt/homebrew/lib/node_modules/${binaryName}/bin/${binaryName}`,
-    // npm global prefix on macOS (Intel)
-    `/usr/local/lib/node_modules/${binaryName}/bin/${binaryName}`,
-  ];
-  for (const candidate of candidates) {
-    if (existsSync(candidate)) return candidate;
-  }
+  // 2. Known install locations (platform-specific)
+  const home = process.env.HOME ?? process.env.USERPROFILE ?? '';
 
-  // 3. Windows .exe variants
   if (process.platform === 'win32') {
     const winCandidates = [
+      // Standard Program Files installs
       `C:\\Program Files\\${binaryName}\\${binaryName}.exe`,
+      `C:\\Program Files (x86)\\${binaryName}\\${binaryName}.exe`,
+      // User-local installs
       `${process.env.LOCALAPPDATA}\\${binaryName}\\${binaryName}.exe`,
+      `${process.env.LOCALAPPDATA}\\Programs\\${binaryName}\\${binaryName}.exe`,
+      // npm global installs (multiple extensions)
       `${process.env.APPDATA}\\npm\\${binaryName}.cmd`,
+      `${process.env.APPDATA}\\npm\\${binaryName}.exe`,
+      `${process.env.APPDATA}\\npm\\${binaryName}.ps1`,
+      // Scoop shims
+      `${home}\\scoop\\shims\\${binaryName}.exe`,
+      `${home}\\scoop\\apps\\${binaryName}\\current\\${binaryName}.exe`,
+      // Chocolatey
+      `C:\\ProgramData\\chocolatey\\bin\\${binaryName}.exe`,
     ];
     for (const candidate of winCandidates) {
+      if (candidate && existsSync(candidate)) return candidate;
+    }
+  } else {
+    // macOS / Linux candidates
+    const candidates = [
+      `/usr/local/bin/${binaryName}`,
+      `/opt/homebrew/bin/${binaryName}`,
+      `${home}/.local/bin/${binaryName}`,
+      `${home}/.bin/${binaryName}`,
+      `${home}/bin/${binaryName}`,
+      // Homebrew npm global installs on Apple Silicon
+      `/opt/homebrew/lib/node_modules/${binaryName}/bin/${binaryName}`,
+      // npm global prefix on macOS (Intel) / Linux
+      `/usr/local/lib/node_modules/${binaryName}/bin/${binaryName}`,
+      `/usr/lib/node_modules/${binaryName}/bin/${binaryName}`,
+      // Linux-specific
+      `/snap/bin/${binaryName}`,
+    ];
+    for (const candidate of candidates) {
       if (existsSync(candidate)) return candidate;
     }
   }

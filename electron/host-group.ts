@@ -123,7 +123,9 @@ export class HostGroup {
       confirmDestructive: this.confirmDestructive,
       sessionFactory: this.sessionFactory,
       buildWorkerMcp: (workerId) => buildWorkerMcp(this.bridge, workerId, this.cwd),
-      buildComputerUseMcp: (workerId) => buildComputerUseMcp(cuBridge, workerId),
+      buildComputerUseMcp: process.platform === 'darwin'
+        ? (workerId) => buildComputerUseMcp(cuBridge, workerId)
+        : undefined,
       buildBrowserMcp: this.browserTabManager
         ? (workerId) => buildBrowserMcp(this.browserTabManager!, browserBridge, workerId)
         : undefined,

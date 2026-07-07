@@ -60,7 +60,8 @@ function createWindow() {
     height: 820,
     title: 'AhaMeet',
     backgroundColor: getThemeBackgroundColor(),
-    titleBarStyle: 'hiddenInset',
+    // hiddenInset only works on macOS; Windows/Linux use the default title bar.
+    titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
     webPreferences: {
       preload: join(__dirname, 'preload.cjs'),
       contextIsolation: true,

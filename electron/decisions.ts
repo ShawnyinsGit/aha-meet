@@ -12,7 +12,7 @@
 //   boxed) never has to touch the disk directly.
 
 import { homedir } from 'node:os';
-import { join, resolve, isAbsolute } from 'node:path';
+import { join, resolve, isAbsolute, sep } from 'node:path';
 import { mkdir, writeFile, readFile } from 'node:fs/promises';
 import { watch, type FSWatcher } from 'node:fs';
 import { spawn } from 'node:child_process';
@@ -223,6 +223,12 @@ function reminderScript(title: string, notes: string, deadline: Date): string {
 }
 
 function runOsascript(script: string): Promise<{ ok: boolean; error?: string }> {
+  // Calendar.app and Reminders.app integration is macOS-only (JXA/osascript).
+  // On other platforms, skip gracefully — the decision markdown file is
+  // still written, just without the calendar/reminder side-channel.
+  if (process.platform !== 'darwin') {
+    return Promise.resolve({ ok: false, error: 'Calendar/Reminders integration requires macOS' });
+  }
   return new Promise((resolveP) => {
     const child = spawn('osascript', ['-e', script], { stdio: ['ignore', 'pipe', 'pipe'] });
     let stderr = '';
@@ -290,7 +296,8 @@ export function isInsideDecisionsRoot(path: string): boolean {
   if (!isAbsolute(path)) return false;
   const root = resolve(decisionsRoot());
   const target = resolve(path);
-  return target === root || target.startsWith(root + '/');
+  // Use platform-aware separator (sep is '/' on Unix, '\' on Windows)
+  return target === root || target.startsWith(root + sep);
 }
 
 interface WatchEntry {

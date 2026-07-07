@@ -26,21 +26,42 @@ let activeInstall: { backendId: string; proc: ReturnType<typeof spawn> } | null 
 /** Build a subprocess env with an augmented PATH so npm/curl can find their
  *  dependencies and freshly-installed binaries land in discoverable dirs. */
 function installEnv(): NodeJS.ProcessEnv {
-  return {
+  const env: NodeJS.ProcessEnv = {
     ...process.env,
     PATH: augmentedPath(),
-    HOME: process.env.HOME,
-    USER: process.env.USER,
-    SHELL: process.env.SHELL ?? '/bin/zsh',
     LANG: process.env.LANG ?? 'en_US.UTF-8',
   };
+  // Set HOME/USERPROFILE for tools that read config from home directory
+  if (process.env.HOME) env.HOME = process.env.HOME;
+  if (process.env.USERPROFILE) env.USERPROFILE = process.env.USERPROFILE;
+  // Set shell/comspec based on platform
+  if (process.platform === 'win32') {
+    env.ComSpec = process.env.ComSpec;
+    env.SYSTEMROOT = process.env.SYSTEMROOT;
+  } else {
+    env.SHELL = process.env.SHELL ?? '/bin/zsh';
+    env.USER = process.env.USER;
+  }
+  return env;
 }
 
-/** npm lives at different places depending on how Node was installed on macOS.
+/** npm lives at different places depending on how Node was installed.
  *  Check the common absolute paths before falling back to bare `npm` (which
  *  relies on the inherited PATH, unreliable from a .app bundle). */
 function resolveNpmBinary(): string {
-  const candidates = ['/usr/local/bin/npm', '/opt/homebrew/bin/npm'];
+  if (process.platform === 'win32') {
+    // Windows: check APPDATA/npm and Program Files
+    const candidates = [
+      process.env.APPDATA ? `${process.env.APPDATA}\\npm\\npm.cmd` : null,
+      'C:\\Program Files\\nodejs\\npm.cmd',
+    ].filter(Boolean) as string[];
+    for (const c of candidates) {
+      if (existsSync(c)) return c;
+    }
+    return 'npm.cmd';
+  }
+  // macOS/Linux: check common npm locations
+  const candidates = ['/usr/local/bin/npm', '/opt/homebrew/bin/npm', '/usr/bin/npm'];
   for (const c of candidates) {
     if (existsSync(c)) return c;
   }
@@ -293,8 +314,14 @@ export function registerBackendAuthIpc(): void {
       cmd = resolveNpmBinary();
       args = ['install', '-g', npmPackage];
     } else if (hint && hint !== 'Bundled with AhaMeet') {
-      cmd = '/bin/sh';
-      args = ['-c', hint];
+      // Use platform-appropriate shell
+      if (process.platform === 'win32') {
+        cmd = process.env.ComSpec ?? 'cmd.exe';
+        args = ['/c', hint];
+      } else {
+        cmd = '/bin/sh';
+        args = ['-c', hint];
+      }
     } else {
       return { ok: false, error: 'No install command available for this backend' };
     }

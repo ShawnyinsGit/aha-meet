@@ -53,11 +53,12 @@ function candidateDirs(): string[] {
 
 export function resolveWhisperPaths(): WhisperPaths | null {
   if (cachedPaths) return cachedPaths;
+  const ext = process.platform === 'win32' ? '.exe' : '';
   for (const dir of candidateDirs()) {
     const model = join(dir, WHISPER_MODEL_NAME);
     if (!existsSync(model)) continue;
-    const cli = join(dir, 'whisper-cli');
-    const server = join(dir, 'whisper-server');
+    const cli = join(dir, `whisper-cli${ext}`);
+    const server = join(dir, `whisper-server${ext}`);
     const hasCli = existsSync(cli);
     const hasServer = existsSync(server);
     if (!hasCli && !hasServer) continue;

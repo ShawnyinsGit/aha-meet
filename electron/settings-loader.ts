@@ -46,7 +46,16 @@ const ENV_ALLOWLIST: ReadonlySet<string> = new Set([
   'HOME',
   'SHELL',
   'USER',
+  'USERNAME',
   'LOGNAME',
+  // Windows equivalents
+  'USERPROFILE',
+  'APPDATA',
+  'LOCALAPPDATA',
+  'ComSpec',
+  'SYSTEMROOT',
+  'SystemRoot',
+  // Temp dirs (cross-platform)
   'TMPDIR',
   'TEMP',
   'TMP',
