@@ -63,7 +63,7 @@ export function MeetingHeader({
   useEffect(() => {
     if (!scopePickerOpen) return;
     const handler = (e: MouseEvent) => {
-      if (pickerRef.current && !pickerRef.current.contains(e.target as Node)) {
+      if (pickerRef.current && e.target instanceof Node && !pickerRef.current.contains(e.target)) {
         setScopePickerOpen(false);
       }
     };

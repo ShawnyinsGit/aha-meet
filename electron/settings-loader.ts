@@ -84,7 +84,10 @@ const ENV_ALLOWLIST: ReadonlySet<string> = new Set([
   // Node runtime knobs the SDK or its deps may honor
   'NODE_OPTIONS',
   'NODE_PATH',
-  'NODE_TLS_REJECT_UNAUTHORIZED',
+  // NODE_TLS_REJECT_UNAUTHORIZED=0 disables TLS verification and enables
+  // MITM on the API connection. Only forward it when the value is NOT '0'.
+  // Corporate proxy users should rely on NODE_EXTRA_CA_CERTS instead.
+  // (Handled specially in mergedSubprocessEnv below.)
 ]);
 
 // Prefix allowlist — forward anything starting with these. ANTHROPIC_* covers

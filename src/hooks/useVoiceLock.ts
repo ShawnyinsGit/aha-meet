@@ -48,8 +48,12 @@ export function useVoiceLock({ muted, setMuted, setAiSpeaking, speakingRef }: Us
           setVoicePrintEmbedding(new Float32Array(vp.embedding));
         }
       }
-      if (enabled) void prewarmSpeakerModel().catch(() => {});
-    }).catch(() => {});
+      if (enabled) void prewarmSpeakerModel().catch((err) => {
+        console.warn('[voiceLock] prewarmSpeakerModel failed:', err);
+      });
+    }).catch((err) => {
+      console.error('[voiceLock] getVoiceConfig failed:', err);
+    });
     return () => { cancelled = true; };
   }, []);
 

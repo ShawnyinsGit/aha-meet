@@ -75,7 +75,9 @@ export function App() {
   }, [aiSpeaking]);
 
   useEffect(() => {
-    void meetingStore.hydrateRestore();
+    meetingStore.hydrateRestore().catch((err) => {
+      console.error('[App] hydrateRestore failed:', err);
+    });
   }, []);
 
   const micEnabled = hasLiveTab || voiceLock.enrollmentActive;
@@ -91,8 +93,8 @@ export function App() {
       try {
         const result = await window.vibeMeet.polishAsrText(text);
         if (result.ok) finalText = result.text;
-      } catch {
-        // IPC failure → fall through with raw text
+      } catch (err) {
+        console.warn('[voice] polishAsrText IPC failed:', err);
       }
     }
     sendWithModeRef.current(finalText);

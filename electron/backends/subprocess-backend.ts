@@ -161,6 +161,9 @@ export abstract class SubprocessSession implements BackendSession {
     this.closed = true;
 
     if (this.process) {
+      // Close stdin first so the process knows no more input is coming.
+      // Some CLIs wait for stdin EOF before flushing pending output.
+      try { this.process.stdin?.end(); } catch { /* ignore */ }
       try {
         this.process.kill('SIGTERM');
         // Give it 2 seconds, then force kill

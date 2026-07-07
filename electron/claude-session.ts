@@ -242,6 +242,12 @@ export class ClaudeSession {
       } catch (err: unknown) {
         if (!this.closed) this.emit({ kind: 'error', error: errorMessage(err) });
       } finally {
+        // Deny all pending permissions so workers don't hang waiting for a
+        // response that will never come (e.g. if the SDK stream crashed).
+        for (const [, p] of this.pendingPerms) {
+          try { p.resolve({ behavior: 'deny', message: 'session crashed', interrupt: true }); } catch { /* ignore */ }
+        }
+        this.pendingPerms.clear();
         this.emit({ kind: 'ended' });
         // Drop the closure-captured emit so any lingering SDK callbacks (e.g.
         // late tool_result, post-interrupt error) can't pollute the next session.

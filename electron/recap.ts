@@ -57,7 +57,9 @@ export function startRecap(opts: RecapOpts): RecapHandle | null {
     try {
       await runRecap(opts, (q) => { activeQuery = q; }, () => aborted);
     } catch (err) {
-      console.warn('[memory] recap failed:', err);
+      console.error('[memory] recap failed:', err);
+      // User won't see a recap file, but the error is logged for debugging.
+      // Future: could emit an event to surface this in the UI.
     } finally {
       active = false;
       activeQuery = null;
@@ -239,6 +241,8 @@ async function writeMinutes(
     await maybeAppendGitignore(opts.cwd, MINUTES_DIR);
     console.log(`[minutes] wrote ${filename}`);
   } catch (err) {
-    console.warn('[minutes] writeMinutes failed:', err);
+    console.error('[minutes] writeMinutes failed:', err);
+    // Re-throw so caller knows minutes weren't saved
+    throw new Error(`Failed to write minutes: ${err instanceof Error ? err.message : String(err)}`);
   }
 }

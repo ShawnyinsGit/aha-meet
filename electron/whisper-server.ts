@@ -277,7 +277,9 @@ function attachExitHandler(child: ChildProcess, serverBin: string, modelPath: st
       return;
     }
     console.warn(`[whisper-server] exited (code=${code}, wasReady=${wasReady}) — attempting restart`);
-    void restartWithBackoff(serverBin, modelPath, cwd);
+    void restartWithBackoff(serverBin, modelPath, cwd).catch((err) => {
+      console.error('[whisper-server] unexpected restart error:', err);
+    });
   });
 }
 
@@ -343,7 +345,9 @@ async function restartWithBackoff(serverBin: string, modelPath: string, cwd: str
         return;
       }
     }
-    void restartWithBackoff(serverBin, modelPath, cwd);
+    void restartWithBackoff(serverBin, modelPath, cwd).catch((err) => {
+      console.error('[whisper-server] unexpected restart error:', err);
+    });
   }
 }
 

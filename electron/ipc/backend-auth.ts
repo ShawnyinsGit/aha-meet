@@ -17,31 +17,24 @@ import {
 } from '../store.js';
 import { getBackendRegistry } from '../backends/registry.js';
 import { augmentedPath } from '../backends/subprocess-backend.js';
+import { mergedSubprocessEnv } from '../settings-loader.js';
 import type { BackendAuthEntry } from '../store.js';
 
 /** One install at a time — prevents double-click races from stacking npm
  *  processes that fight over the same global node_modules lock. */
 let activeInstall: { backendId: string; proc: ReturnType<typeof spawn> } | null = null;
 
-/** Build a subprocess env with an augmented PATH so npm/curl can find their
- *  dependencies and freshly-installed binaries land in discoverable dirs. */
+/** Build a subprocess env using the same allowlist as the Claude SDK session
+ *  (see settings-loader.ts). Previously spread all of process.env, which
+ *  leaked AWS_*, GITHUB_TOKEN, DATABASE_URL, etc. into `npm install -g` and
+ *  `curl | bash` subprocesses — particularly dangerous for the Kimi install
+ *  which pipes a remote script into a shell. */
 function installEnv(): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = {
-    ...process.env,
-    PATH: augmentedPath(),
-    LANG: process.env.LANG ?? 'en_US.UTF-8',
-  };
-  // Set HOME/USERPROFILE for tools that read config from home directory
-  if (process.env.HOME) env.HOME = process.env.HOME;
-  if (process.env.USERPROFILE) env.USERPROFILE = process.env.USERPROFILE;
-  // Set shell/comspec based on platform
-  if (process.platform === 'win32') {
-    env.ComSpec = process.env.ComSpec;
-    env.SYSTEMROOT = process.env.SYSTEMROOT;
-  } else {
-    env.SHELL = process.env.SHELL ?? '/bin/zsh';
-    env.USER = process.env.USER;
-  }
+  const env = mergedSubprocessEnv();
+  // Ensure augmented PATH so npm can find node and freshly-installed
+  // binaries land in a location resolveBinaryFromPath() can discover.
+  env.PATH = augmentedPath();
+  if (!env.LANG) env.LANG = 'en_US.UTF-8';
   return env;
 }
 

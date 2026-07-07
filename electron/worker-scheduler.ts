@@ -464,6 +464,10 @@ export class WorkerScheduler {
   private startStallWatch(): void {
     if (this.stallTimer) return;
     this.stallTimer = setInterval(() => this.sweepStalls(), STALL_SWEEP_MS);
+    // Allow process exit even if the timer is still armed (e.g. graceful
+    // shutdown skipped endAll()). Without unref, this timer keeps the event
+    // loop alive indefinitely.
+    this.stallTimer.unref();
   }
 
   private stopStallWatch(): void {

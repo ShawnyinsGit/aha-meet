@@ -75,6 +75,19 @@ export class BrowserTabManager {
       throw new Error('No active window');
     }
 
+    // Restrict to http(s) — file:// would let the sandboxed browser read
+    // local files (e.g. ~/.ssh/id_rsa) via webContents.
+    const targetUrl = url || DEFAULT_URL;
+    try {
+      const u = new URL(targetUrl);
+      if (u.protocol !== 'http:' && u.protocol !== 'https:') {
+        throw new Error('Only http(s) URLs are allowed in the embedded browser');
+      }
+    } catch (err) {
+      if (err instanceof Error && err.message.startsWith('Only http')) throw err;
+      throw new Error(`Invalid URL: ${targetUrl}`);
+    }
+
     const id = randomUUID();
     const browserSession = session.fromPartition(BROWSER_PARTITION);
 
@@ -159,6 +172,15 @@ export class BrowserTabManager {
   async navigate(tabId: string, url: string): Promise<{ ok: boolean }> {
     const entry = this.tabs.get(tabId);
     if (!entry) return { ok: false };
+    // Restrict to http(s) — see openTab for rationale.
+    try {
+      const u = new URL(url);
+      if (u.protocol !== 'http:' && u.protocol !== 'https:') {
+        return { ok: false };
+      }
+    } catch {
+      return { ok: false };
+    }
     try {
       await entry.view.webContents.loadURL(url);
       return { ok: true };
@@ -422,7 +444,9 @@ export class BrowserTabManager {
 
     // Intercept window.open() to open new tabs instead of popup windows
     wc.setWindowOpenHandler(({ url }) => {
-      void this.openTab(url);
+      void this.openTab(url).catch((err) => {
+        console.warn('[browser-tab] openTab from window.open failed:', err);
+      });
       return { action: 'deny' };
     });
   }

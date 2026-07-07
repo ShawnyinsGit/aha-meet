@@ -873,24 +873,28 @@ class MeetingStore {
         // activeLiveSlot() which would route to whichever tab is active now.
         const targetId = slot.id;
         void (async () => {
-          for (const item of pending) {
-            try {
-              if (item.kind === 'text') {
-                await window.vibeMeet.sendUserText(targetId, item.text);
-              } else if (item.kind === 'image') {
-                await window.vibeMeet.sendUserImage(targetId, item.dataUrl, item.caption);
-              } else if (item.kind === 'attachments') {
-                const wire = item.staged.map((a) => ({
-                  name: a.name,
-                  mime: a.mime,
-                  sizeBytes: a.sizeBytes,
-                  dataBase64: a.dataBase64,
-                }));
-                await window.vibeMeet.sendUserAttachments(targetId, wire, item.text);
+          try {
+            for (const item of pending) {
+              try {
+                if (item.kind === 'text') {
+                  await window.vibeMeet.sendUserText(targetId, item.text);
+                } else if (item.kind === 'image') {
+                  await window.vibeMeet.sendUserImage(targetId, item.dataUrl, item.caption);
+                } else if (item.kind === 'attachments') {
+                  const wire = item.staged.map((a) => ({
+                    name: a.name,
+                    mime: a.mime,
+                    sizeBytes: a.sizeBytes,
+                    dataBase64: a.dataBase64,
+                  }));
+                  await window.vibeMeet.sendUserAttachments(targetId, wire, item.text);
+                }
+              } catch (err) {
+                console.warn('[meeting-store] pendingInput replay threw', err);
               }
-            } catch (err) {
-              console.warn('[meeting-store] pendingInput replay threw', err);
             }
+          } catch (err) {
+            console.error('[meeting-store] pendingInput IIFE failed', err);
           }
         })();
       }

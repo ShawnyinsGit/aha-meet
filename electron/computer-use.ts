@@ -109,10 +109,17 @@ function runJxa(script: string): Promise<{ ok: true; stdout: string } | { ok: fa
     });
     let stdout = '';
     let stderr = '';
+    // 30s timeout — osascript can hang on modal dialogs, JXA infinite loops,
+    // or CoreGraphics deadlocks. Without this the worker stalls forever.
+    const timer = setTimeout(() => {
+      try { child.kill('SIGKILL'); } catch { /* already exited */ }
+      resolve({ ok: false, error: 'JXA execution timed out (30s)' });
+    }, 30_000);
     child.stdout.on('data', (chunk: Buffer) => { stdout += chunk.toString(); });
     child.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString(); });
-    child.on('error', (err: Error) => resolve({ ok: false, error: err.message }));
+    child.on('error', (err: Error) => { clearTimeout(timer); resolve({ ok: false, error: err.message }); });
     child.on('close', (code) => {
+      clearTimeout(timer);
       if (code === 0) resolve({ ok: true, stdout: stdout.trim() });
       else resolve({ ok: false, error: stderr.trim() || `osascript exited ${code}` });
     });
@@ -199,7 +206,11 @@ export async function keyboardType(text: string): Promise<ActionResult> {
   const escaped = text
     .replace(/\\/g, '\\\\')
     .replace(/"/g, '\\"')
-    .replace(/\n/g, '\\n');
+    .replace(/\t/g, '\\t')
+    .replace(/\r\n/g, '\\n')
+    .replace(/\r/g, '\\r')
+    .replace(/\n/g, '\\n')
+    .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '');
 
   const script = `
     var se = Application('System Events');
@@ -241,9 +252,14 @@ export async function keyboardPress(
       se.keyCode(${keyCode}${usingClause});
     `;
   } else if (keyLower.length === 1) {
+    // Escape for JXA string literal — same rules as keyboardType
+    const safeKey = keyLower
+      .replace(/\\/g, '\\\\')
+      .replace(/"/g, '\\"')
+      .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '');
     script = `
       var se = Application('System Events');
-      se.keystroke("${keyLower}"${usingClause});
+      se.keystroke("${safeKey}"${usingClause});
     `;
   } else {
     return { ok: false, error: `Unknown key: "${key}". Use a single character or one of: ${Object.keys(KEY_MAP).join(', ')}` };

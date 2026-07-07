@@ -232,9 +232,10 @@ export class HostGroup {
 
   /** Tear down host + workers. Returns the final buffered worker lines. */
   end(): string[] {
-    if (!this.host && !this.scheduler) return [];
-    const finalLines = this.scheduler?.collectFinalBufferedLines() ?? [];
-    this.scheduler?.endAll();
+    // Scheduler always exists (set in constructor) and may have live workers
+    // even when host is null (e.g. tests that spawn workers directly).
+    const finalLines = this.scheduler.collectFinalBufferedLines();
+    this.scheduler.endAll();
     this.host?.end();
     this.host = null;
     return finalLines;

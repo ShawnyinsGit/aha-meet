@@ -90,13 +90,9 @@ function createWindow() {
 
   // Re-sync embedded browser bounds when the window is moved or resized,
   // since the renderer's ResizeObserver may not fire for window-level changes.
-  const syncBrowserBounds = () => {
-    // The renderer handles bounds sync via its own ResizeObserver. We just
-    // need to make sure it fires — which it does on window resize/move since
-    // the layout changes. No action needed here.
-  };
-  mainWindow.on('resize', syncBrowserBounds);
-  mainWindow.on('move', syncBrowserBounds);
+  // (Bounds are actually handled by the renderer's own ResizeObserver — no
+  // action needed from the main process side. The listeners were previously
+  // no-ops and have been removed.)
 
   // CSP injection. The packaged HTML has no <meta> CSP, so the renderer
   // would default to "anything goes" without this. Dev mode loosens the
@@ -397,6 +393,8 @@ app.whenReady().then(async () => {
         if (claudeShadowHome) {
           import('./skills.js').then(({ setShadowSkillsDir }) => {
             setShadowSkillsDir(claudeShadowHome);
+          }).catch((err) => {
+            console.error('[claude-defaults] failed to set shadow skills dir:', err);
           });
           const cachedSuffix = result.stats.cached ? ' [cached]' : '';
           console.log(
@@ -414,6 +412,8 @@ app.whenReady().then(async () => {
         return null;
       },
     );
+  }).catch((err) => {
+    console.error('[main] claude-defaults import failed:', err);
   });
 
   createWindow();
@@ -423,6 +423,8 @@ app.whenReady().then(async () => {
     void startWhisperServer().then((r) => {
       if (!r.ok) console.warn('[whisper-server] disabled:', r.reason);
     });
+  }).catch((err) => {
+    console.error('[main] whisper-server import failed:', err);
   });
 
   // Prompt for microphone access at launch.
@@ -438,6 +440,8 @@ app.whenReady().then(async () => {
       void startWhisperServer().then((r) => {
         if (!r.ok) console.warn('[whisper-server] activate restart skipped:', r.reason);
       });
+    }).catch((err) => {
+      console.error('[main] whisper-server activate import failed:', err);
     });
   });
 });

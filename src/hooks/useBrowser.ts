@@ -9,13 +9,19 @@ export function useBrowser() {
   const state = useSyncExternalStore(browserStore.subscribe, browserStore.getSnapshot);
   const viewportRef = useRef<HTMLDivElement | null>(null);
 
+  // Use a ref for `state.visible` so the syncBounds callback (which has
+  // empty deps for stability) always reads the current value instead of
+  // a stale closure capture.
+  const visibleRef = useRef(state.visible);
+  useEffect(() => { visibleRef.current = state.visible; }, [state.visible]);
+
   const syncBounds = useCallback(() => {
     const el = viewportRef.current;
     if (!el) return;
     // Skip bounds sync when browser overlay is hidden — prevents race where
     // setBounds repositions the WebContentsView after setVisible(false) was
     // sent but before the main process has processed it.
-    if (!state.visible) return;
+    if (!visibleRef.current) return;
     const rect = el.getBoundingClientRect();
     // The viewport div's position relative to the window content area.
     // Electron's WebContentsView uses coordinates relative to the BrowserWindow's
