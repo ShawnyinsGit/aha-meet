@@ -332,6 +332,8 @@ class MeetingStore {
   private activeId: string | null = null;
   private recentCwds: RecentCwdMeta[] = [];
   private restoreHydrated = false;
+  /** User's preferred default backend for new sessions (set from Lobby). */
+  defaultBackendId: string | null = null;
   /** Sticky empty state returned by getSnapshot() when no slot is active.
    *  Held as a stable reference so useSyncExternalStore's identity check
    *  doesn't fire spurious renders. */
@@ -703,7 +705,7 @@ class MeetingStore {
       await this.setActive(existing.id);
       return { ok: true, sessionId: existing.id };
     }
-    const res = await window.vibeMeet.sessions.open(cwd, effectiveGreeting);
+    const res = await window.vibeMeet.sessions.open(cwd, effectiveGreeting, this.defaultBackendId ?? undefined);
     if (!res.ok) {
       if (res.error === 'duplicate' && 'sessionId' in res && res.sessionId) {
         await this.setActive(res.sessionId);
@@ -732,7 +734,7 @@ class MeetingStore {
     const ph = this.slots.get(placeholderSlotId);
     if (!ph || !ph.placeholder) return { ok: false, error: 'not-placeholder' };
     const effectiveGreeting = greeting ?? DEFAULT_GREETING;
-    const res = await window.vibeMeet.sessions.open(ph.cwd, effectiveGreeting);
+    const res = await window.vibeMeet.sessions.open(ph.cwd, effectiveGreeting, this.defaultBackendId ?? undefined);
     if (!res.ok) {
       if (res.error === 'duplicate' && 'sessionId' in res && res.sessionId) {
         // Race: another tab already opened it. Drop our placeholder and focus

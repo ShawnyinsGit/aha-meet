@@ -6,7 +6,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 // been threaded for tabs yet.
 const api = {
   sessions: {
-    open: (cwd, greeting) => ipcRenderer.invoke('sessions:open', { cwd, greeting }),
+    open: (cwd, greeting, backendId) => ipcRenderer.invoke('sessions:open', { cwd, greeting, backendId }),
     close: (id) => ipcRenderer.invoke('sessions:close', { id }),
     setActive: (id) => ipcRenderer.invoke('sessions:set-active', { id }),
     list: () => ipcRenderer.invoke('sessions:list'),
@@ -65,6 +65,12 @@ const api = {
     setMode: (backendId, mode) => ipcRenderer.invoke('backend-auth:set-mode', { backendId, mode }),
     setDefault: (backendId) => ipcRenderer.invoke('backend-auth:set-default', backendId),
     checkStatus: (backendId) => ipcRenderer.invoke('backend-auth:check-status', backendId),
+    install: (backendId) => ipcRenderer.invoke('backend-auth:install', backendId),
+    onInstallProgress: (cb) => {
+      const listener = (_, data) => cb(data);
+      ipcRenderer.on('backend:install-progress', listener);
+      return () => ipcRenderer.removeListener('backend:install-progress', listener);
+    },
   },
   memory: {
     list: (filter) => ipcRenderer.invoke('memory:list', filter ?? null),

@@ -1,10 +1,11 @@
 // BackendSettings.tsx — per-CLI-backend auth configuration panel.
 //
-// Displays a card for each registered CLI backend (Claude Code, Codex, Kimi,
-// Qoder) with auth status, API key input, base URL, model selector, and
-// a "set as default" toggle. Only shown in the SettingsWindow.
+// Displays a horizontal tab bar with one tab per registered CLI backend
+// (Claude Code, Codex, Kimi, Qoder). Selecting a tab shows that backend's
+// auth config card — API key, base URL, model selector, default toggle,
+// and an install button for unavailable backends.
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { BackendInfo } from '../types';
 
 export function BackendSettings() {
@@ -13,6 +14,11 @@ export function BackendSettings() {
   const [error, setError] = useState<string | null>(null);
   const [editingApiKey, setEditingApiKey] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState<Record<string, boolean>>({});
+  const [activeTab, setActiveTab] = useState<string | null>(null);
+  // Install state — one backend at a time.
+  const [installing, setInstalling] = useState<string | null>(null);
+  const [installLog, setInstallLog] = useState('');
+  const [installTarget, setInstallTarget] = useState<string | null>(null);
 
   const reload = useCallback(async () => {
     setLoading(true);
@@ -20,6 +26,13 @@ export function BackendSettings() {
     try {
       const list = await window.vibeMeet.backendAuth.list();
       setBackends(list);
+      // Auto-select the default backend tab on first load, or keep the current
+      // selection if it still exists.
+      setActiveTab((prev) => {
+        if (prev && list.some((b) => b.id === prev)) return prev;
+        const def = list.find((b) => b.isDefault);
+        return def?.id ?? list[0]?.id ?? null;
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -103,6 +116,37 @@ export function BackendSettings() {
     }
   }, [handleSetApiKey]);
 
+  const handleInstall = useCallback(async (backendId: string) => {
+    if (installing) return;
+    setInstalling(backendId);
+    setInstallTarget(backendId);
+    setInstallLog('');
+    const unsubscribe = window.vibeMeet.backendAuth.onInstallProgress((event) => {
+      if (event.backendId === backendId) {
+        setInstallLog((prev) => prev + event.data);
+      }
+    });
+    try {
+      const res = await window.vibeMeet.backendAuth.install(backendId);
+      if (res.ok) {
+        setInstallLog((prev) => prev + '\n✓ 安装成功 · Installed successfully.\n');
+        await reload();
+      } else {
+        setInstallLog((prev) => prev + `\n✗ ${res.error ?? '安装失败'}\n`);
+      }
+    } catch (err) {
+      setInstallLog((prev) => prev + `\n✗ ${err instanceof Error ? err.message : String(err)}\n`);
+    } finally {
+      unsubscribe();
+      setInstalling(null);
+    }
+  }, [installing, reload]);
+
+  const activeBackend = useMemo(
+    () => backends.find((b) => b.id === activeTab) ?? null,
+    [backends, activeTab],
+  );
+
   if (loading) {
     return <div className="backend-settings-loading">加载中…</div>;
   }
@@ -125,22 +169,48 @@ export function BackendSettings() {
         </div>
       )}
 
-      <div className="backend-settings-list">
-        {backends.map((b) => (
-          <BackendCard
-            key={b.id}
-            backend={b}
-            editingApiKey={editingApiKey[b.id] ?? ''}
-            saving={saving[b.id] ?? false}
-            onApiKeyChange={(val) => setEditingApiKey((e) => ({ ...e, [b.id]: val }))}
-            onSaveApiKey={() => handleSetApiKey(b.id)}
-            onSaveBaseUrl={(url) => handleSetBaseUrl(b.id, url)}
-            onSaveModel={(model) => handleSetModel(b.id, model)}
-            onSetDefault={() => handleSetDefault(b.id)}
-            onKeyDown={(e) => handleKeyDown(e, b.id)}
-          />
-        ))}
+      {/* Tab bar */}
+      <div className="backend-tabs" role="tablist" aria-label="后端选择">
+        {backends.map((b) => {
+          const hasAuth = b.hasApiKey || b.authMode !== 'none';
+          const isActive = b.id === activeTab;
+          return (
+            <button
+              key={b.id}
+              type="button"
+              role="tab"
+              aria-selected={isActive}
+              className={`backend-tab ${isActive ? 'backend-tab-active' : ''}`}
+              onClick={() => setActiveTab(b.id)}
+            >
+              <BackendIcon iconId={b.iconId} />
+              <span className="backend-tab-label">{b.displayName}</span>
+              {b.isDefault && <span className="backend-tab-default">默认</span>}
+              {!b.available && <span className="backend-tab-dot unavailable" />}
+              {hasAuth && b.available && <span className="backend-tab-dot ok" />}
+            </button>
+          );
+        })}
       </div>
+
+      {/* Active tab content */}
+      {activeBackend && (
+        <BackendCard
+          key={activeBackend.id}
+          backend={activeBackend}
+          editingApiKey={editingApiKey[activeBackend.id] ?? ''}
+          saving={saving[activeBackend.id] ?? false}
+          installing={installing}
+          installLog={installTarget === activeBackend.id ? installLog : ''}
+          onApiKeyChange={(val) => setEditingApiKey((e) => ({ ...e, [activeBackend.id]: val }))}
+          onSaveApiKey={() => handleSetApiKey(activeBackend.id)}
+          onSaveBaseUrl={(url) => handleSetBaseUrl(activeBackend.id, url)}
+          onSaveModel={(model) => handleSetModel(activeBackend.id, model)}
+          onSetDefault={() => handleSetDefault(activeBackend.id)}
+          onInstall={() => handleInstall(activeBackend.id)}
+          onKeyDown={(e) => handleKeyDown(e, activeBackend.id)}
+        />
+      )}
     </div>
   );
 }
@@ -149,11 +219,14 @@ interface BackendCardProps {
   backend: BackendInfo;
   editingApiKey: string;
   saving: boolean;
+  installing: string | null;
+  installLog: string;
   onApiKeyChange: (val: string) => void;
   onSaveApiKey: () => void;
   onSaveBaseUrl: (url: string) => void;
   onSaveModel: (model: string) => void;
   onSetDefault: () => void;
+  onInstall: () => void;
   onKeyDown: (e: React.KeyboardEvent) => void;
 }
 
@@ -161,11 +234,14 @@ function BackendCard({
   backend: b,
   editingApiKey,
   saving,
+  installing,
+  installLog,
   onApiKeyChange,
   onSaveApiKey,
   onSaveBaseUrl,
   onSaveModel,
   onSetDefault,
+  onInstall,
   onKeyDown,
 }: BackendCardProps) {
   const hasAuth = b.hasApiKey || b.authMode !== 'none';
@@ -280,6 +356,26 @@ function BackendCard({
       {!b.available && b.installHint && (
         <div className="backend-card-install">
           <code>{b.installHint}</code>
+          {b.installHint !== 'Bundled with AhaMeet' && (
+            <button
+              type="button"
+              className="backend-btn backend-install-btn"
+              onClick={onInstall}
+              disabled={installing !== null}
+            >
+              {installing === b.id ? '安装中…' : `安装 ${b.displayName}`}
+            </button>
+          )}
+          {installLog && (
+            <pre className="backend-install-log">{installLog}</pre>
+          )}
+        </div>
+      )}
+
+      {/* Install log persists after success when backend becomes available */}
+      {b.available && installLog && (
+        <div className="backend-card-install">
+          <pre className="backend-install-log">{installLog}</pre>
         </div>
       )}
     </div>

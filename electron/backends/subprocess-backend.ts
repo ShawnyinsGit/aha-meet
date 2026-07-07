@@ -249,6 +249,27 @@ export abstract class SubprocessBackend implements CliBackend {
 // ── Binary resolution from PATH ────────────────────────────────────────────────
 // Tries to find a binary by name: system PATH first, then known locations.
 
+/** Standard binary directories on macOS/Linux. The Electron main process
+ *  launched from a .app bundle often has a minimal or empty PATH — we always
+ *  augment the which(1) call and the filesystem candidate list with these
+ *  locations so freshly-installed CLIs are discoverable without a relaunch. */
+const STANDARD_BIN_DIRS = ['/usr/local/bin', '/opt/homebrew/bin'];
+
+/** Build a PATH string that includes the inherited PATH plus standard dirs. */
+export function augmentedPath(): string {
+  const parts = (process.env.PATH ?? '').split(delimiter).filter(Boolean);
+  for (const dir of STANDARD_BIN_DIRS) {
+    if (!parts.includes(dir)) parts.push(dir);
+  }
+  const home = process.env.HOME ?? '';
+  if (home) {
+    for (const dir of [`${home}/.local/bin`, `${home}/.bin`, `${home}/bin`]) {
+      if (!parts.includes(dir)) parts.push(dir);
+    }
+  }
+  return parts.join(delimiter);
+}
+
 export function resolveBinaryFromPath(binaryName: string): string | null {
   // Validate binaryName: only alphanumeric, hyphens, underscores, dots allowed
   if (!/^[a-zA-Z0-9._-]+$/.test(binaryName)) {
@@ -261,6 +282,7 @@ export function resolveBinaryFromPath(binaryName: string): string | null {
       encoding: 'utf8',
       timeout: 3000,
       stdio: ['pipe', 'pipe', 'ignore'],
+      env: { ...process.env, PATH: augmentedPath() },
     });
     const path = result.trim();
     if (path && existsSync(path)) return path;
@@ -274,6 +296,10 @@ export function resolveBinaryFromPath(binaryName: string): string | null {
     `${home}/.local/bin/${binaryName}`,
     `${home}/.bin/${binaryName}`,
     `${home}/bin/${binaryName}`,
+    // Homebrew npm global installs on Apple Silicon
+    `/opt/homebrew/lib/node_modules/${binaryName}/bin/${binaryName}`,
+    // npm global prefix on macOS (Intel)
+    `/usr/local/lib/node_modules/${binaryName}/bin/${binaryName}`,
   ];
   for (const candidate of candidates) {
     if (existsSync(candidate)) return candidate;

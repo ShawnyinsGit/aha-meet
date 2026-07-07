@@ -93,6 +93,8 @@ interface OrchestratorOpts {
   /** Optional browser tab manager for embedded browser MCP tools. When
    *  provided, all workers get browser_navigate/screenshot/click/type tools. */
   browserTabManager?: BrowserTabManager;
+  /** Backend ID for the default host group. Defaults to 'claude-code'. */
+  defaultBackendId?: string;
 }
 
 export class Orchestrator implements OrchestratorBridge {
@@ -167,9 +169,9 @@ export class Orchestrator implements OrchestratorBridge {
     this.meetingId = randomUUID();
     this.sessionFactory = opts.sessionFactory ?? ((o) => new ClaudeSession(o) as unknown as import('./backends/cli-backend.js').BackendSession);
 
-    // Create the default HostGroup. This is always present; single-host
-    // meetings use only this group and behave identically to pre-multi-host.
-    this.createHostGroup(DEFAULT_HOST_ID, DEFAULT_BACKEND_ID);
+    // Create the default HostGroup. Use the user's preferred backend if specified.
+    const defaultBackend = opts.defaultBackendId ?? DEFAULT_BACKEND_ID;
+    this.createHostGroup(DEFAULT_HOST_ID, defaultBackend);
 
     Orchestrator.liveInstances.add(this);
     Orchestrator.ensureShutdownHook();

@@ -1376,6 +1376,45 @@ button:disabled {
 .join-auth-input:focus { border-color: var(--accent); }
 .join-auth-input-full { flex: none; width: 100%; box-sizing: border-box; margin-top: 8px; }
 
+.lobby-backend-select {
+  width: 100%; padding: 7px 10px; font-size: 12px; font-family: inherit;
+  background: var(--bg-app); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); color: var(--text-primary);
+  outline: none; cursor: pointer;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23999' d='M3 4.5l3 3 3-3'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  padding-right: 28px;
+  transition: border-color var(--transition);
+}
+.lobby-backend-select:focus { border-color: var(--accent); }
+.lobby-backend-select option { padding: 4px 8px; }
+
+.lobby-install-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  margin-top: 6px;
+  padding: 7px 14px; font-size: 12px; font-weight: 500;
+  border-radius: var(--radius-sm);
+  background: var(--accent); color: #fff;
+  border: 1px solid var(--accent);
+  cursor: pointer; white-space: nowrap;
+  transition: background var(--transition), border-color var(--transition), opacity var(--transition);
+}
+.lobby-install-btn:hover:not(:disabled) { filter: brightness(1.1); }
+.lobby-install-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.lobby-install-log {
+  margin-top: 8px; padding: 8px 10px;
+  font-size: 10px; line-height: 1.5;
+  font-family: var(--mono-font, 'SF Mono', Menlo, monospace);
+  background: var(--bg-app); border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  max-height: 160px; overflow-y: auto;
+  white-space: pre-wrap; word-break: break-all;
+}
+
 .join-auth-btn {
   padding: 7px 14px; font-size: 12px; font-weight: 500;
   border-radius: var(--radius-sm);
@@ -6040,9 +6079,80 @@ html.settings-view #root {
   margin-top: 12px;
 }
 
+/* ---- Backend tabs ---- */
+
+.backend-tabs {
+  display: flex;
+  gap: 2px;
+  margin-top: 14px;
+  padding: 3px;
+  background: var(--bg-hover);
+  border-radius: var(--radius-md);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.backend-tabs::-webkit-scrollbar { display: none; }
+
+.backend-tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 8px 12px;
+  border: none;
+  border-radius: calc(var(--radius-md) - 2px);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background var(--transition), color var(--transition), box-shadow var(--transition);
+  white-space: nowrap;
+}
+.backend-tab svg {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+}
+.backend-tab-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.backend-tab:hover:not(.backend-tab-active) {
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+}
+.backend-tab-active {
+  background: var(--bg-app);
+  color: var(--text-primary);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+  font-weight: 600;
+}
+.backend-tab-default {
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: 6px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+  line-height: 1.4;
+}
+.backend-tab-dot {
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+.backend-tab-dot.ok { background: #34c759; }
+.backend-tab-dot.unavailable { background: #ff9f0a; }
+
 /* ---- Backend card ---- */
 
 .backend-card {
+  margin-top: 12px;
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-md);
   background: var(--bg-app);
@@ -6287,6 +6397,38 @@ html.settings-view #root {
   font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
   word-break: break-all;
   line-height: 1.5;
+}
+
+.backend-install-btn {
+  margin-top: 8px;
+  width: 100%;
+  background: var(--accent);
+  color: #fff;
+  border: 1px solid var(--accent);
+}
+.backend-install-btn:hover:not(:disabled) {
+  filter: brightness(1.1);
+  background: var(--accent);
+}
+.backend-install-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.backend-install-log {
+  margin-top: 8px;
+  padding: 8px 10px;
+  font-size: 10px;
+  line-height: 1.5;
+  font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
+  background: var(--bg-input);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  max-height: 160px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
 }
 
 /* ==========================================================================

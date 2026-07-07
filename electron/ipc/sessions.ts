@@ -30,6 +30,7 @@ import { clearApprovedExternalDirs } from './documents.js';
 interface OpenPayload {
   cwd?: unknown;
   greeting?: unknown;
+  backendId?: unknown;
 }
 
 // Coalesce rapid-fire `setOpenTabs` writes (lobby-restore can fire 5+
@@ -78,6 +79,7 @@ export function registerSessionsIpc(ctx: IpcContext): void {
     try {
       const rawCwd = typeof payload?.cwd === 'string' ? payload.cwd : '';
       const greeting = typeof payload?.greeting === 'string' ? payload.greeting : undefined;
+      const backendId = typeof payload?.backendId === 'string' ? payload.backendId : undefined;
       const candidateCwd = rawCwd && rawCwd.length > 0 ? rawCwd : homedir();
 
       // S8: validate cwd before doing anything. A compromised renderer could
@@ -126,6 +128,7 @@ export function registerSessionsIpc(ctx: IpcContext): void {
         talkerModel,
         confirmDestructive: ctx.nativeConfirmDestructive,
         browserTabManager: ctx.browserTabManager,
+        defaultBackendId: backendId,
       });
 
       const result = ctx.registry.open(sessionId, resolvedCwd, orch);

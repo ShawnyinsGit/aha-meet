@@ -4,7 +4,9 @@
 // These handlers manage the backendAuth array in settings.json, which stores
 // per-backend API keys (encrypted), base URLs, models, and auth modes.
 
-import { ipcMain } from 'electron';
+import { ipcMain, BrowserWindow } from 'electron';
+import { spawn } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import {
   getBackendAuth,
   listBackendAuth,
@@ -14,7 +16,36 @@ import {
   getSettings,
 } from '../store.js';
 import { getBackendRegistry } from '../backends/registry.js';
+import { augmentedPath } from '../backends/subprocess-backend.js';
 import type { BackendAuthEntry } from '../store.js';
+
+/** One install at a time — prevents double-click races from stacking npm
+ *  processes that fight over the same global node_modules lock. */
+let activeInstall: { backendId: string; proc: ReturnType<typeof spawn> } | null = null;
+
+/** Build a subprocess env with an augmented PATH so npm/curl can find their
+ *  dependencies and freshly-installed binaries land in discoverable dirs. */
+function installEnv(): NodeJS.ProcessEnv {
+  return {
+    ...process.env,
+    PATH: augmentedPath(),
+    HOME: process.env.HOME,
+    USER: process.env.USER,
+    SHELL: process.env.SHELL ?? '/bin/zsh',
+    LANG: process.env.LANG ?? 'en_US.UTF-8',
+  };
+}
+
+/** npm lives at different places depending on how Node was installed on macOS.
+ *  Check the common absolute paths before falling back to bare `npm` (which
+ *  relies on the inherited PATH, unreliable from a .app bundle). */
+function resolveNpmBinary(): string {
+  const candidates = ['/usr/local/bin/npm', '/opt/homebrew/bin/npm'];
+  for (const c of candidates) {
+    if (existsSync(c)) return c;
+  }
+  return 'npm';
+}
 
 export function registerBackendAuthIpc(): void {
   /** Validate that a backendId corresponds to a registered backend. */
@@ -221,5 +252,94 @@ export function registerBackendAuthIpc(): void {
       ok: true,
       loggedIn: Boolean(auth?.apiKey) || available,
     };
+  });
+
+  /** Run the install command for a backend that isn't available yet.
+   *
+   *  Streams `backend:install-progress` events to the renderer while the
+   *  subprocess runs. Final result is returned via the invoke reply. Only
+   *  one install may be active at a time — a second concurrent call for
+   *  the same backend returns "in progress"; a different backend is
+   *  rejected until the first finishes. */
+  ipcMain.handle('backend-auth:install', async (_e, backendId: unknown) => {
+    if (typeof backendId !== 'string') {
+      return { ok: false, error: 'backendId must be a string' };
+    }
+    const vErr = validateBackendId(backendId);
+    if (vErr) return { ok: false, error: vErr };
+
+    // Guard against concurrent installs.
+    if (activeInstall) {
+      if (activeInstall.backendId === backendId) {
+        return { ok: false, error: 'Install already in progress' };
+      }
+      return { ok: false, error: `Another install is in progress (${activeInstall.backendId})` };
+    }
+
+    const registry = getBackendRegistry();
+    const backend = registry.get(backendId);
+    if (!backend) {
+      return { ok: false, error: `unknown backend: ${backendId}` };
+    }
+
+    // Decide what to spawn based on whether the backend has an npm package
+    // (structured install) or only a shell hint (e.g. curl | bash for Kimi).
+    const npmPackage = backend.capabilities.npmPackage;
+    const hint = backend.capabilities.installHint ?? '';
+
+    let cmd: string;
+    let args: string[];
+    if (npmPackage) {
+      cmd = resolveNpmBinary();
+      args = ['install', '-g', npmPackage];
+    } else if (hint && hint !== 'Bundled with AhaMeet') {
+      cmd = '/bin/sh';
+      args = ['-c', hint];
+    } else {
+      return { ok: false, error: 'No install command available for this backend' };
+    }
+
+    return new Promise<{ ok: boolean; error?: string }>((resolve) => {
+      try {
+        const child = spawn(cmd, args, {
+          stdio: ['ignore', 'pipe', 'pipe'],
+          // Augmented PATH so npm can find node and the freshly-installed
+          // binary lands in a location resolveBinaryFromPath() can discover.
+          env: installEnv(),
+        });
+        activeInstall = { backendId, proc: child };
+
+        const sendProgress = (data: string) => {
+          for (const win of BrowserWindow.getAllWindows()) {
+            win.webContents.send('backend:install-progress', { backendId, data });
+          }
+        };
+
+        // Show the user what we're running — without this the log is empty
+        // until npm starts printing, which can take several seconds.
+        sendProgress(`$ ${cmd} ${args.join(' ')}\n\n`);
+
+        child.stdout?.on('data', (buf: Buffer) => sendProgress(buf.toString()));
+        child.stderr?.on('data', (buf: Buffer) => sendProgress(buf.toString()));
+
+        child.on('close', (code) => {
+          activeInstall = null;
+          if (code === 0) {
+            resolve({ ok: true });
+          } else {
+            resolve({ ok: false, error: `Install exited with code ${code}` });
+          }
+        });
+
+        child.on('error', (err) => {
+          activeInstall = null;
+          sendProgress(`\n✗ Failed to start install: ${err.message}\n`);
+          resolve({ ok: false, error: err.message });
+        });
+      } catch (err) {
+        activeInstall = null;
+        resolve({ ok: false, error: err instanceof Error ? err.message : String(err) });
+      }
+    });
   });
 }

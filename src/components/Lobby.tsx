@@ -1,12 +1,11 @@
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
-import { ChevronDown, Clock, FolderOpen, KeyRound, LogIn, Mic, MonitorUp } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
+import { ChevronDown, Clock, DownloadCloud, FolderOpen, KeyRound, LogIn, Mic, MonitorUp } from 'lucide-react';
 import { meetingStore } from '../lib/meeting-store';
+import type { BackendInfo } from '../types';
 
 interface LobbyProps {
   lastError?: string | null;
 }
-
-type AuthMode = 'apikey' | 'subscription' | null;
 
 function formatRelative(ts: number): string {
   const diff = Date.now() - ts;
@@ -27,37 +26,69 @@ function shortPath(cwd: string): { label: string; parent: string } {
   return { label, parent: parent ? `/${parent}/` : '/' };
 }
 
+/** Get auth status label for a backend. */
+function backendAuthLabel(b: BackendInfo): string {
+  if (b.hasApiKey || b.authMode !== 'none') return '✓';
+  return '';
+}
+
 export function Lobby({ lastError }: LobbyProps) {
   const lobby = useSyncExternalStore(meetingStore.subscribeTabs, meetingStore.getLobbyData);
 
-  const [authMode, setAuthMode] = useState<AuthMode>(null);
-  const [hasApiKey, setHasApiKey] = useState(false);
-  const [subscriptionLoggedIn, setSubscriptionLoggedIn] = useState(false);
+  const [backends, setBackends] = useState<BackendInfo[]>([]);
+  const [selectedBackend, setSelectedBackend] = useState('codex');
   const [authOpen, setAuthOpen] = useState(false);
-  const [apiKeyInput, setApiKeyInput] = useState('');
+
+  // Per-backend auth editing state
+  const [apiKeyInputs, setApiKeyInputs] = useState<Record<string, string>>({});
   const [baseUrlInput, setBaseUrlInput] = useState('');
   const [modelInput, setModelInput] = useState('');
   const [apiKeyStatus, setApiKeyStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+
+  // Claude-specific OAuth state
   const [loginStatus, setLoginStatus] = useState<'idle' | 'pending' | 'done' | 'error'>('idle');
   const [loginError, setLoginError] = useState<string>('');
-  const apiKeyRef = useRef<HTMLInputElement>(null);
 
   const [opening, setOpening] = useState(false);
   const [openError, setOpenError] = useState<string | null>(null);
 
-  useEffect(() => {
-    window.vibeMeet.auth.getConfig().then((cfg) => {
-      setAuthMode(cfg.authMode);
-      setHasApiKey(cfg.hasApiKey);
-      // Base URL + model are non-secret; prefill them directly so the user can
-      // see and edit what's currently in effect.
-      setBaseUrlInput(cfg.baseUrl ?? '');
-      setModelInput(cfg.model ?? '');
-    });
-    window.vibeMeet.auth.checkSubscriptionStatus().then((s) => {
-      setSubscriptionLoggedIn(s.loggedIn);
-    });
+  // Install state — one backend at a time; log accumulates streamed output.
+  const [installing, setInstalling] = useState<string | null>(null);
+  const [installLog, setInstallLog] = useState('');
+
+  // Load backends on mount
+  const reloadBackends = useCallback(async () => {
+    try {
+      const list = await window.vibeMeet.backendAuth.list();
+      setBackends(list);
+      // Find the default backend, fallback to codex
+      const defaultBe = list.find((b) => b.isDefault);
+      const fallback = list.find((b) => b.id === 'codex');
+      const selected = defaultBe?.id ?? fallback?.id ?? list[0]?.id ?? 'codex';
+      setSelectedBackend(selected);
+      meetingStore.defaultBackendId = selected;
+    } catch (err) {
+      console.warn('[Lobby] failed to load backends:', err);
+    }
   }, []);
+
+  useEffect(() => {
+    void reloadBackends();
+  }, [reloadBackends]);
+
+  // When selected backend changes, prefill inputs from its config
+  useEffect(() => {
+    const b = backends.find((x) => x.id === selectedBackend);
+    if (b) {
+      setBaseUrlInput(b.baseUrl ?? '');
+      setModelInput(b.model ?? '');
+    }
+  }, [selectedBackend, backends]);
+
+  const currentBackend = useMemo(
+    () => backends.find((b) => b.id === selectedBackend) ?? null,
+    [backends, selectedBackend],
+  );
 
   const openCwd = useCallback(async (cwd: string) => {
     if (opening) return;
@@ -77,22 +108,39 @@ export function Lobby({ lastError }: LobbyProps) {
     await openCwd(dir);
   }, [openCwd]);
 
-  const saveAuthConfig = useCallback(async () => {
+  const handleBackendChange = useCallback(async (backendId: string) => {
+    setSelectedBackend(backendId);
+    meetingStore.defaultBackendId = backendId;
+    await window.vibeMeet.backendAuth.setDefault(backendId);
+    await reloadBackends();
+  }, [reloadBackends]);
+
+  const saveApiKey = useCallback(async () => {
+    if (!currentBackend) return;
     setApiKeyStatus('saving');
-    // Save key + gateway + model together. The key save drives authMode; an
-    // empty key clears it. Base URL / model only take effect in apikey mode.
-    const keyRes = await window.vibeMeet.auth.setApiKey(apiKeyInput);
-    const baseRes = await window.vibeMeet.auth.setBaseUrl(baseUrlInput);
-    const modelRes = await window.vibeMeet.auth.setModel(modelInput);
-    if (keyRes.ok && baseRes.ok && modelRes.ok) {
+    const key = apiKeyInputs[currentBackend.id] ?? '';
+    const res = await window.vibeMeet.backendAuth.setApiKey(currentBackend.id, key);
+    if (res.ok) {
       setApiKeyStatus('saved');
-      setHasApiKey(apiKeyInput.trim().length > 0);
-      setAuthMode(apiKeyInput.trim().length > 0 ? 'apikey' : null);
+      setApiKeyInputs((prev) => ({ ...prev, [currentBackend.id]: '' }));
       setTimeout(() => setApiKeyStatus('idle'), 2000);
+      await reloadBackends();
     } else {
       setApiKeyStatus('error');
     }
-  }, [apiKeyInput, baseUrlInput, modelInput]);
+  }, [currentBackend, apiKeyInputs, reloadBackends]);
+
+  const saveBaseUrl = useCallback(async (url: string) => {
+    if (!currentBackend) return;
+    await window.vibeMeet.backendAuth.setBaseUrl(currentBackend.id, url);
+    await reloadBackends();
+  }, [currentBackend, reloadBackends]);
+
+  const saveModel = useCallback(async (model: string) => {
+    if (!currentBackend) return;
+    await window.vibeMeet.backendAuth.setModel(currentBackend.id, model);
+    await reloadBackends();
+  }, [currentBackend, reloadBackends]);
 
   const loginSubscription = useCallback(async () => {
     setLoginStatus('pending');
@@ -100,21 +148,46 @@ export function Lobby({ lastError }: LobbyProps) {
     const res = await window.vibeMeet.auth.loginSubscription();
     if (res.ok) {
       setLoginStatus('done');
-      setAuthMode('subscription');
-      setHasApiKey(false);
-      window.vibeMeet.auth.checkSubscriptionStatus().then((s) => {
-        setSubscriptionLoggedIn(s.loggedIn);
-      });
+      await reloadBackends();
     } else {
       setLoginStatus('error');
       setLoginError(res.error ?? 'Login failed');
     }
-  }, []);
+  }, [reloadBackends]);
 
-  const authLabel = authMode === 'apikey'
-    ? (hasApiKey ? 'API Key ✓' : 'API Key')
-    : authMode === 'subscription'
-    ? (subscriptionLoggedIn ? 'Claude Account ✓' : 'Claude Account')
+  const installBackend = useCallback(async (backendId: string) => {
+    if (installing) return;
+    setInstalling(backendId);
+    setInstallLog('');
+    // Subscribe before invoking — the main process begins emitting progress
+    // events as soon as the subprocess starts, and we don't want to miss the
+    // first few lines.
+    const unsubscribe = window.vibeMeet.backendAuth.onInstallProgress((event) => {
+      if (event.backendId === backendId) {
+        setInstallLog((prev) => prev + event.data);
+      }
+    });
+    try {
+      const res = await window.vibeMeet.backendAuth.install(backendId);
+      if (res.ok) {
+        setInstallLog((prev) => prev + '\n✓ Installed successfully.\n');
+        await reloadBackends();
+      } else {
+        setInstallLog((prev) => prev + `\n✗ ${res.error ?? 'Install failed'}\n`);
+      }
+    } catch (err) {
+      setInstallLog((prev) => prev + `\n✗ ${err instanceof Error ? err.message : String(err)}\n`);
+    } finally {
+      unsubscribe();
+      // Clear installing state but keep installLog visible — the log panel
+      // renders even when installing is null so the user can read the result.
+      setInstalling(null);
+    }
+  }, [installing, reloadBackends]);
+
+  // Build the toggle label
+  const toggleLabel = currentBackend
+    ? `${currentBackend.displayName} ${backendAuthLabel(currentBackend)}`
     : 'Not configured';
 
   return (
@@ -126,7 +199,7 @@ export function Lobby({ lastError }: LobbyProps) {
           </div>
           <div>
             <div className="join-title">AhaMeet</div>
-            <div className="join-sub">Pair with Claude over screen + voice</div>
+            <div className="join-sub">Pair with AI over screen + voice</div>
           </div>
         </div>
 
@@ -137,98 +210,174 @@ export function Lobby({ lastError }: LobbyProps) {
             onClick={() => setAuthOpen((v) => !v)}
           >
             <KeyRound size={14} aria-hidden="true" />
-            <span>Claude authentication — {authLabel}</span>
+            <span>Host CLI — {toggleLabel}</span>
             <ChevronDown size={14} className={authOpen ? 'join-auth-chevron open' : 'join-auth-chevron'} />
           </button>
 
           {authOpen && (
             <div className="join-auth-body">
               <p className="join-auth-desc">
-                Choose how AhaMeet connects to Claude. Use an API key for programmatic access,
-                or log in with your Claude.ai subscription account.
+                Choose which CLI backend to use as the host. Each backend has its own auth configuration.
               </p>
 
+              {/* Backend selector dropdown */}
               <div className="join-auth-block">
                 <div className="join-auth-block-title">
-                  <KeyRound size={13} aria-hidden="true" /> API Key
-                  {authMode === 'apikey' && hasApiKey && <span className="join-auth-badge active">Active</span>}
+                  Host CLI
                 </div>
-                <div className="join-auth-row">
-                  <input
-                    ref={apiKeyRef}
-                    type="password"
-                    className="join-auth-input"
-                    placeholder={hasApiKey ? '••••••••••••••••••••••' : 'sk-ant-...'}
-                    value={apiKeyInput}
-                    onChange={(e) => setApiKeyInput(e.target.value)}
-                    onKeyDown={(e) => e.key === 'Enter' && saveAuthConfig()}
-                    autoComplete="off"
-                    spellCheck={false}
-                  />
-                  <button
-                    type="button"
-                    className="join-auth-btn"
-                    onClick={saveAuthConfig}
-                    disabled={apiKeyStatus === 'saving'}
-                  >
-                    {apiKeyStatus === 'saving' ? 'Saving…'
-                      : apiKeyStatus === 'saved' ? 'Saved ✓'
-                      : 'Save'}
-                  </button>
-                </div>
-                <input
-                  type="text"
-                  className="join-auth-input join-auth-input-full"
-                  placeholder="Base URL (optional) — https://api.anthropic.com"
-                  value={baseUrlInput}
-                  onChange={(e) => setBaseUrlInput(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && saveAuthConfig()}
-                  autoComplete="off"
-                  spellCheck={false}
-                />
-                <input
-                  type="text"
-                  className="join-auth-input join-auth-input-full"
-                  placeholder="Model (optional) — claude-haiku-4-5"
-                  value={modelInput}
-                  onChange={(e) => setModelInput(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && saveAuthConfig()}
-                  autoComplete="off"
-                  spellCheck={false}
-                />
-                {apiKeyStatus === 'error' && (
-                  <div className="join-auth-error">Failed to save settings.</div>
-                )}
-                <div className="join-auth-hint">
-                  Base URL and Model only apply when using an API key. Leave a field blank and save to clear it.
-                </div>
+                <select
+                  className="lobby-backend-select"
+                  value={selectedBackend}
+                  onChange={(e) => { void handleBackendChange(e.target.value); }}
+                >
+                  {backends.map((b) => (
+                    <option key={b.id} value={b.id}>
+                      {b.displayName} {b.hasApiKey || b.authMode !== 'none' ? '✓' : ''} {b.isDefault ? '(default)' : ''} {!b.available ? '(not installed)' : ''}
+                    </option>
+                  ))}
+                </select>
               </div>
 
-              <div className="join-auth-block">
-                <div className="join-auth-block-title">
-                  <LogIn size={13} aria-hidden="true" /> Claude Account (Pro/Max)
-                  {authMode === 'subscription' && subscriptionLoggedIn && (
-                    <span className="join-auth-badge active">Active</span>
+              {/* Auth fields for selected backend */}
+              {currentBackend?.available ? (
+                <>
+                  <div className="join-auth-block">
+                    <div className="join-auth-block-title">
+                      <KeyRound size={13} aria-hidden="true" /> API Key
+                      {(currentBackend.hasApiKey || currentBackend.authMode !== 'none') && (
+                        <span className="join-auth-badge active">Active</span>
+                      )}
+                    </div>
+                    <div className="join-auth-row">
+                      <input
+                        type="password"
+                        className="join-auth-input"
+                        placeholder={currentBackend.hasApiKey ? '••••••••••••••••••••••' : 'Enter API key…'}
+                        value={apiKeyInputs[currentBackend.id] ?? ''}
+                        onChange={(e) => setApiKeyInputs((prev) => ({ ...prev, [currentBackend.id]: e.target.value }))}
+                        onKeyDown={(e) => e.key === 'Enter' && void saveApiKey()}
+                        autoComplete="off"
+                        spellCheck={false}
+                      />
+                      <button
+                        type="button"
+                        className="join-auth-btn"
+                        onClick={saveApiKey}
+                        disabled={apiKeyStatus === 'saving'}
+                      >
+                        {apiKeyStatus === 'saving' ? 'Saving…'
+                          : apiKeyStatus === 'saved' ? 'Saved ✓'
+                          : 'Save'}
+                      </button>
+                    </div>
+                    <input
+                      type="text"
+                      className="join-auth-input join-auth-input-full"
+                      placeholder={`Base URL (optional)${currentBackend.baseUrl ? ` — ${currentBackend.baseUrl}` : ''}`}
+                      value={baseUrlInput}
+                      onChange={(e) => setBaseUrlInput(e.target.value)}
+                      onBlur={(e) => {
+                        if (e.target.value !== (currentBackend.baseUrl ?? '')) {
+                          void saveBaseUrl(e.target.value);
+                        }
+                      }}
+                      autoComplete="off"
+                      spellCheck={false}
+                    />
+                    {currentBackend.models && currentBackend.models.length > 0 ? (
+                      <select
+                        className="join-auth-input join-auth-input-full lobby-backend-select"
+                        value={modelInput || ''}
+                        onChange={(e) => {
+                          setModelInput(e.target.value);
+                          void saveModel(e.target.value);
+                        }}
+                      >
+                        <option value="">Default model</option>
+                        {currentBackend.models.map((m) => (
+                          <option key={m} value={m}>{m}</option>
+                        ))}
+                      </select>
+                    ) : (
+                      <input
+                        type="text"
+                        className="join-auth-input join-auth-input-full"
+                        placeholder={`Model (optional)${currentBackend.defaultModel ? ` — ${currentBackend.defaultModel}` : ''}`}
+                        value={modelInput}
+                        onChange={(e) => setModelInput(e.target.value)}
+                        onBlur={(e) => {
+                          if (e.target.value !== (currentBackend.model ?? '')) {
+                            void saveModel(e.target.value);
+                          }
+                        }}
+                        autoComplete="off"
+                        spellCheck={false}
+                      />
+                    )}
+                    {apiKeyStatus === 'error' && (
+                      <div className="join-auth-error">Failed to save settings.</div>
+                    )}
+                    <div className="join-auth-hint">
+                      Base URL and Model only apply when using an API key. Leave a field blank to clear it.
+                    </div>
+                  </div>
+
+                  {/* Claude-specific OAuth section */}
+                  {currentBackend.id === 'claude-code' && (
+                    <div className="join-auth-block">
+                      <div className="join-auth-block-title">
+                        <LogIn size={13} aria-hidden="true" /> Claude Account (Pro/Max)
+                        {currentBackend.authMode === 'oauth' && (
+                          <span className="join-auth-badge active">Active</span>
+                        )}
+                      </div>
+                      <button
+                        type="button"
+                        className="join-auth-btn join-auth-btn-login"
+                        onClick={loginSubscription}
+                        disabled={loginStatus === 'pending'}
+                      >
+                        {loginStatus === 'pending' ? 'Opening browser…'
+                          : loginStatus === 'done' ? 'Logged in ✓'
+                          : currentBackend.authMode === 'oauth' ? 'Re-authenticate'
+                          : 'Log in with Claude'}
+                      </button>
+                      {loginStatus === 'error' && (
+                        <div className="join-auth-error">{loginError || 'Login failed.'}</div>
+                      )}
+                      <div className="join-auth-hint">
+                        Opens a browser window for OAuth. Requires Claude CLI bundled with this app.
+                      </div>
+                    </div>
+                  )}
+                </>
+              ) : currentBackend ? (
+                <div className="join-auth-block">
+                  <div className="join-auth-hint">
+                    {currentBackend.installHint ?? `${currentBackend.displayName} is not installed. Install it to use this backend.`}
+                  </div>
+                  {currentBackend.installHint && currentBackend.installHint !== 'Bundled with AhaMeet' && (
+                    <button
+                      type="button"
+                      className="join-auth-btn lobby-install-btn"
+                      onClick={() => { void installBackend(currentBackend.id); }}
+                      disabled={installing !== null}
+                    >
+                      <DownloadCloud size={13} aria-hidden="true" />
+                      {installing === currentBackend.id ? 'Installing…' : `Install ${currentBackend.displayName}`}
+                    </button>
                   )}
                 </div>
-                <button
-                  type="button"
-                  className="join-auth-btn join-auth-btn-login"
-                  onClick={loginSubscription}
-                  disabled={loginStatus === 'pending'}
-                >
-                  {loginStatus === 'pending' ? 'Opening browser…'
-                    : loginStatus === 'done' ? 'Logged in ✓'
-                    : subscriptionLoggedIn ? 'Re-authenticate'
-                    : 'Log in with Claude'}
-                </button>
-                {loginStatus === 'error' && (
-                  <div className="join-auth-error">{loginError || 'Login failed.'}</div>
-                )}
-                <div className="join-auth-hint">
-                  Opens a browser window for OAuth. Requires Claude CLI bundled with this app.
+              ) : null}
+
+              {/* Install log renders outside the conditional above so it stays
+                  visible after a successful install, when the backend becomes
+                  available and the "not installed" block unmounts. */}
+              {installLog && (
+                <div className="join-auth-block">
+                  <pre className="lobby-install-log">{installLog}</pre>
                 </div>
-              </div>
+              )}
             </div>
           )}
         </div>

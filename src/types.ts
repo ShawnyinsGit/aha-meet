@@ -162,6 +162,8 @@ export interface BackendAuthApi {
   setMode: (backendId: string, mode: 'apikey' | 'oauth' | 'none') => Promise<{ ok: boolean; error?: string }>;
   setDefault: (backendId: string) => Promise<{ ok: boolean; error?: string }>;
   checkStatus: (backendId: string) => Promise<{ ok: boolean; loggedIn: boolean; error?: string }>;
+  install: (backendId: string) => Promise<{ ok: boolean; error?: string }>;
+  onInstallProgress: (cb: (data: { backendId: string; data: string }) => void) => () => void;
 }
 
 export type AttachmentKind = 'text' | 'image' | 'word' | 'pdf';
@@ -216,6 +218,7 @@ export interface SessionsApi {
   open: (
     cwd: string,
     greeting?: string,
+    backendId?: string,
   ) => Promise<
     | { ok: true; sessionId: string; cwd: string; status?: 'starting' }
     | { ok: false; error: 'duplicate'; sessionId: string; cwd?: string }
