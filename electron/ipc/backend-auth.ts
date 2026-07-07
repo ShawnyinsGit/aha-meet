@@ -14,8 +14,12 @@ import {
   removeBackendAuth,
   setDefaultBackend,
   getSettings,
+  listCustomBackends,
+  addCustomBackend,
+  updateCustomBackend,
+  removeCustomBackend,
 } from '../store.js';
-import { getBackendRegistry } from '../backends/registry.js';
+import { getBackendRegistry, registerCustomBackends } from '../backends/registry.js';
 import { augmentedPath } from '../backends/subprocess-backend.js';
 import { mergedSubprocessEnv } from '../settings-loader.js';
 import type { BackendAuthEntry } from '../store.js';
@@ -362,4 +366,119 @@ export function registerBackendAuthIpc(): void {
       }
     });
   });
+
+  // ── Custom backend CRUD ─────────────────────────────────────────────────────
+
+  /** List all custom backend entries. */
+  ipcMain.handle('custom-backend:list', async () => {
+    return listCustomBackends();
+  });
+
+  /** Add a new custom backend. */
+  ipcMain.handle('custom-backend:add', async (_e, payload: unknown) => {
+    if (typeof payload !== 'object' || payload === null) {
+      return { ok: false, error: 'payload must be an object' };
+    }
+    const { id, displayName, binaryName, apiKeyEnv, baseUrlEnv, defaultModel, installHint, npmPackage } =
+      payload as {
+        id?: string;
+        displayName?: string;
+        binaryName?: string;
+        apiKeyEnv?: string;
+        baseUrlEnv?: string;
+        defaultModel?: string;
+        installHint?: string;
+        npmPackage?: string;
+      };
+
+    if (typeof id !== 'string' || id.trim().length === 0) {
+      return { ok: false, error: 'ID is required' };
+    }
+    if (typeof displayName !== 'string' || displayName.trim().length === 0) {
+      return { ok: false, error: 'Display name is required' };
+    }
+    if (typeof binaryName !== 'string' || binaryName.trim().length === 0) {
+      return { ok: false, error: 'Binary name is required' };
+    }
+    if (!/^[a-zA-Z0-9._-]+$/.test(binaryName.trim())) {
+      return { ok: false, error: 'Binary name contains invalid characters (only alphanumeric, dots, hyphens, underscores allowed)' };
+    }
+
+    // Prefix custom backends with "custom-" to avoid collisions with built-in IDs
+    const finalId = id.startsWith('custom-') ? id : `custom-${id}`;
+
+    const result = await addCustomBackend({
+      id: finalId,
+      displayName: displayName.trim(),
+      binaryName: binaryName.trim(),
+      apiKeyEnv: apiKeyEnv?.trim() || undefined,
+      baseUrlEnv: baseUrlEnv?.trim() || undefined,
+      defaultModel: defaultModel?.trim() || undefined,
+      installHint: installHint?.trim() || undefined,
+      npmPackage: npmPackage?.trim() || undefined,
+    });
+
+    if (result.ok) {
+      // Re-register all custom backends so the new one is immediately available
+      registerCustomBackends();
+    }
+
+    return result;
+  });
+
+  /** Update a custom backend. */
+  ipcMain.handle('custom-backend:update', async (_e, payload: unknown) => {
+    if (typeof payload !== 'object' || payload === null) {
+      return { ok: false, error: 'payload must be an object' };
+    }
+    const { id, ...patch } = payload as { id?: string; [key: string]: unknown };
+
+    if (typeof id !== 'string') {
+      return { ok: false, error: 'ID is required' };
+    }
+
+    // Validate binaryName if present — must be safe for PATH resolution
+    if (typeof patch.binaryName === 'string' && patch.binaryName.length > 0) {
+      if (!/^[a-zA-Z0-9._-]+$/.test(patch.binaryName)) {
+        return { ok: false, error: 'binaryName contains invalid characters (only alphanumeric, dots, hyphens, underscores allowed)' };
+      }
+    }
+
+    const result = await updateCustomBackend(id, patch as {
+      displayName?: string;
+      binaryName?: string;
+      apiKeyEnv?: string;
+      baseUrlEnv?: string;
+      defaultModel?: string;
+      installHint?: string;
+      npmPackage?: string;
+    });
+
+    if (result.ok) {
+      // Re-register all custom backends to pick up changes
+      registerCustomBackends();
+    }
+
+    return result;
+  });
+
+  /** Remove a custom backend. */
+  ipcMain.handle('custom-backend:remove', async (_e, id: unknown) => {
+    if (typeof id !== 'string') {
+      return { ok: false, error: 'ID must be a string' };
+    }
+
+    const registry = getBackendRegistry();
+    const result = await removeCustomBackend(id);
+
+    if (result.ok) {
+      // Unregister the backend from the registry
+      registry.unregister(id);
+      // Also remove any auth entry for this backend
+      await removeBackendAuth(id);
+    }
+
+    return result;
+  });
 }
+

@@ -41,13 +41,25 @@ export interface OpenTabEntry {
 }
 
 export interface BackendAuthEntry {
-  backendId: string;  // 'claude-code' | 'codex' | 'kimi' | 'qoder'
+  backendId: string;  // 'claude-code' | 'codex' | 'kimi' | 'qoder' | custom ID
   authMode: 'apikey' | 'oauth' | 'none';
   apiKeyEnc?: string;  // base64 of safeStorage.encryptString(apiKey)
   apiKey?: string;     // plaintext in memory only, never written to disk when encryption available
   baseUrl?: string;
   model?: string;
   lastValidatedAt?: number;  // timestamp of last successful auth check
+}
+
+export interface CustomBackendEntry {
+  id: string;
+  displayName: string;
+  binaryName: string;
+  apiKeyEnv?: string;      // e.g. "OPENAI_API_KEY"
+  baseUrlEnv?: string;     // e.g. "OPENAI_BASE_URL"
+  defaultModel?: string;
+  installHint?: string;
+  npmPackage?: string;
+  createdAt: number;
 }
 
 export interface Settings {
@@ -75,6 +87,10 @@ export interface Settings {
   // TTS noise filter: 'strict' drops English-only sentences and worker
   // tool-call narration before playback (default); 'off' speaks raw.
   speechFilterMode?: 'strict' | 'off';
+  // Report mode: when true, the talker is instructed to save long responses
+  // as documents and only speak a 2-3 sentence conversational summary. The
+  // full document is displayed in the UI for review. Default off.
+  reportModeEnabled?: boolean;
   // Voice polish: when true, raw ASR output is run through the configured LLM
   // to convert colloquial spoken language into clean written form before
   // sending to the Talker. Uses the same API credentials as the rest of the
@@ -104,6 +120,10 @@ export interface Settings {
   backendAuth?: BackendAuthEntry[];
   /** Default backend ID for new sessions. Falls back to 'claude-code' if unset. */
   defaultBackend?: string;
+  /** User-defined custom CLI backends. Each entry is registered as a
+   *  CustomBackend at app startup so it appears in the backend list and
+   *  can be invited to meetings like any built-in backend. */
+  customBackends?: CustomBackendEntry[];
 }
 
 const RECENT_CWDS_MAX = 10;
@@ -451,4 +471,70 @@ export function removeBackendAuth(backendId: string): Promise<Settings> {
 export function setDefaultBackend(backendId: string): Promise<Settings> {
   return updateSettings({ defaultBackend: backendId });
 }
+
+// ── Custom backend CRUD ──────────────────────────────────────────────────────
+
+/** List all custom backend entries. */
+export function listCustomBackends(): CustomBackendEntry[] {
+  return getSettings().customBackends ?? [];
+}
+
+/** Add a new custom backend. Returns the created entry. */
+export function addCustomBackend(
+  entry: Omit<CustomBackendEntry, 'createdAt'>,
+): Promise<{ ok: true; entry: CustomBackendEntry } | { ok: false; error: string }> {
+  return withWriteLock(async () => {
+    const current = load();
+    const list = current.customBackends ?? [];
+    // Check for duplicate ID
+    if (list.some((b) => b.id === entry.id)) {
+      return { ok: false, error: `Custom backend "${entry.id}" already exists` };
+    }
+    // Validate ID format
+    if (!/^[a-zA-Z0-9._-]{1,64}$/.test(entry.id)) {
+      return { ok: false, error: 'ID must be alphanumeric with dots/hyphens/underscores, max 64 chars' };
+    }
+    const created: CustomBackendEntry = { ...entry, createdAt: Date.now() };
+    const next: Settings = { ...current, customBackends: [...list, created] };
+    await persist(next);
+    return { ok: true, entry: created };
+  });
+}
+
+/** Update a custom backend entry. */
+export function updateCustomBackend(
+  id: string,
+  patch: Partial<Omit<CustomBackendEntry, 'id' | 'createdAt'>>,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  return withWriteLock(async () => {
+    const current = load();
+    const list = current.customBackends ?? [];
+    const idx = list.findIndex((b) => b.id === id);
+    if (idx < 0) {
+      return { ok: false, error: `Custom backend "${id}" not found` };
+    }
+    const updated = [...list];
+    updated[idx] = { ...updated[idx], ...patch };
+    const next: Settings = { ...current, customBackends: updated };
+    await persist(next);
+    return { ok: true };
+  });
+}
+
+/** Remove a custom backend. */
+export function removeCustomBackend(
+  id: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  return withWriteLock(async () => {
+    const current = load();
+    const list = current.customBackends ?? [];
+    const next: Settings = {
+      ...current,
+      customBackends: list.filter((b) => b.id !== id),
+    };
+    await persist(next);
+    return { ok: true };
+  });
+}
+
 

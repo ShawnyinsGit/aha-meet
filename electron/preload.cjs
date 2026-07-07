@@ -72,6 +72,12 @@ const api = {
       return () => ipcRenderer.removeListener('backend:install-progress', listener);
     },
   },
+  customBackend: {
+    list: () => ipcRenderer.invoke('custom-backend:list'),
+    add: (payload) => ipcRenderer.invoke('custom-backend:add', payload),
+    update: (payload) => ipcRenderer.invoke('custom-backend:update', payload),
+    remove: (id) => ipcRenderer.invoke('custom-backend:remove', id),
+  },
   memory: {
     list: (filter) => ipcRenderer.invoke('memory:list', filter ?? null),
     update: (id, patch) => ipcRenderer.invoke('memory:update', { id, patch }),

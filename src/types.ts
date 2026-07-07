@@ -57,6 +57,7 @@ export type RendererEvent =
   | { kind: 'plan-updated'; plan: MeetingPlan; source?: AgentSource; sessionId?: string; hostId?: string }
   | { kind: 'decision-pending'; decisionId: string; question: string; path: string; recommendedTitle: string; calendarOk: boolean; remindersOk: boolean; source?: AgentSource; sessionId?: string; hostId?: string }
   | { kind: 'decision-resolved'; decisionId: string; question: string; path: string; conclusion: string; source?: AgentSource; sessionId?: string; hostId?: string }
+  | { kind: 'document-saved'; title: string; filename: string; path: string; source?: AgentSource; sessionId?: string; hostId?: string }
   | { kind: 'session-ready'; source?: AgentSource; sessionId?: string; hostId?: string }
   | { kind: 'session-start-failed'; error: string; source?: AgentSource; sessionId?: string; hostId?: string };
 
@@ -164,6 +165,34 @@ export interface BackendAuthApi {
   checkStatus: (backendId: string) => Promise<{ ok: boolean; loggedIn: boolean; error?: string }>;
   install: (backendId: string) => Promise<{ ok: boolean; error?: string }>;
   onInstallProgress: (cb: (data: { backendId: string; data: string }) => void) => () => void;
+}
+
+export interface CustomBackendInfo {
+  id: string;
+  displayName: string;
+  binaryName: string;
+  apiKeyEnv?: string;
+  baseUrlEnv?: string;
+  defaultModel?: string;
+  installHint?: string;
+  npmPackage?: string;
+  createdAt: number;
+}
+
+export interface CustomBackendApi {
+  list: () => Promise<CustomBackendInfo[]>;
+  add: (payload: {
+    id: string;
+    displayName: string;
+    binaryName: string;
+    apiKeyEnv?: string;
+    baseUrlEnv?: string;
+    defaultModel?: string;
+    installHint?: string;
+    npmPackage?: string;
+  }) => Promise<{ ok: true; entry: CustomBackendInfo } | { ok: false; error: string }>;
+  update: (payload: { id: string } & Partial<Omit<CustomBackendInfo, 'id' | 'createdAt'>>) => Promise<{ ok: boolean; error?: string }>;
+  remove: (id: string) => Promise<{ ok: boolean; error?: string }>;
 }
 
 export type AttachmentKind = 'text' | 'image' | 'word' | 'pdf';
@@ -308,8 +337,8 @@ export interface VibeMeetApi {
   getVoiceConfig: () => Promise<{ enabled: boolean; voicePrint: VoicePrint | null }>;
   setVoiceLockEnabled: (on: boolean) => Promise<{ ok: boolean }>;
   setVoicePrint: (vp: VoicePrint | null) => Promise<{ ok: boolean }>;
-  getVoicePref: () => Promise<{ selectedVoiceName: string | null; guidanceDismissed: boolean; speechFilterMode: 'strict' | 'off'; voicePolishEnabled: boolean }>;
-  setVoicePref: (patch: { selectedVoiceName?: string | null; guidanceDismissed?: boolean; speechFilterMode?: 'strict' | 'off'; voicePolishEnabled?: boolean }) => Promise<{ ok: boolean }>;
+  getVoicePref: () => Promise<{ selectedVoiceName: string | null; guidanceDismissed: boolean; speechFilterMode: 'strict' | 'off'; voicePolishEnabled: boolean; reportModeEnabled: boolean }>;
+  setVoicePref: (patch: { selectedVoiceName?: string | null; guidanceDismissed?: boolean; speechFilterMode?: 'strict' | 'off'; voicePolishEnabled?: boolean; reportModeEnabled?: boolean }) => Promise<{ ok: boolean }>;
   openVoiceSettings: () => Promise<{ ok: boolean }>;
   useSystemPicker: () => Promise<boolean>;
   getDesktopSources: () => Promise<
@@ -330,6 +359,7 @@ export interface VibeMeetApi {
   ) => Promise<{ ok: true; text: string } | { ok: false; error: string; text: string }>;
   auth: AuthApi;
   backendAuth: BackendAuthApi;
+  customBackend: CustomBackendApi;
   memory: MemoryApi;
   decisions: {
     open: (path: string) => Promise<{ ok: boolean; error?: string }>;
@@ -436,7 +466,7 @@ export interface TranscriptEntry {
 
 export interface ActivityEntry {
   id: string;
-  kind: 'tool-call' | 'tool-result' | 'system' | 'error';
+  kind: 'tool-call' | 'tool-result' | 'system' | 'error' | 'document';
   title: string;
   detail?: string;
   ts: number;

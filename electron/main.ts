@@ -4,6 +4,7 @@ import { dirname, join } from 'node:path';
 import type { AutoApproveScope } from './auto-approve-policy.js';
 import { SessionRegistry } from './sessions.js';
 import { flushSettingsWrites } from './store.js';
+import { registerCustomBackends } from './backends/registry.js';
 import type { IpcContext, IpcEmittedEvent } from './ipc/context.js';
 import { BrowserTabManager } from './browser-tab-manager.js';
 
@@ -369,6 +370,8 @@ async function registerAllIpc(ctx: IpcContext): Promise<void> {
   registerSkillsIpc();
   registerBrowserIpc(browserTabManager);
   registerBackendAuthIpc();
+  // Register custom backends from settings so they appear in the backend list
+  registerCustomBackends();
 }
 
 // ---- App lifecycle ----------------------------------------------------------

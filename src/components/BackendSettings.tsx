@@ -1,15 +1,39 @@
 // BackendSettings.tsx — per-CLI-backend auth configuration panel.
 //
 // Displays a horizontal tab bar with one tab per registered CLI backend
-// (Claude Code, Codex, Kimi, Qoder). Selecting a tab shows that backend's
-// auth config card — API key, base URL, model selector, default toggle,
-// and an install button for unavailable backends.
+// (Claude Code, Codex, Kimi, Qoder, plus any custom backends). Selecting a
+// tab shows that backend's auth config card — API key, base URL, model
+// selector, default toggle, and an install button for unavailable backends.
+// Includes a "+" button to add custom CLI backends.
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import type { BackendInfo } from '../types';
+import type { BackendInfo, CustomBackendInfo } from '../types';
+
+interface CustomBackendFormData {
+  id: string;
+  displayName: string;
+  binaryName: string;
+  apiKeyEnv: string;
+  baseUrlEnv: string;
+  defaultModel: string;
+  installHint: string;
+  npmPackage: string;
+}
+
+const emptyCustomForm: CustomBackendFormData = {
+  id: '',
+  displayName: '',
+  binaryName: '',
+  apiKeyEnv: '',
+  baseUrlEnv: '',
+  defaultModel: '',
+  installHint: '',
+  npmPackage: '',
+};
 
 export function BackendSettings() {
   const [backends, setBackends] = useState<BackendInfo[]>([]);
+  const [customBackends, setCustomBackends] = useState<CustomBackendInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [editingApiKey, setEditingApiKey] = useState<Record<string, string>>({});
@@ -19,13 +43,22 @@ export function BackendSettings() {
   const [installing, setInstalling] = useState<string | null>(null);
   const [installLog, setInstallLog] = useState('');
   const [installTarget, setInstallTarget] = useState<string | null>(null);
+  // Custom backend form state
+  const [showCustomForm, setShowCustomForm] = useState(false);
+  const [customForm, setCustomForm] = useState<CustomBackendFormData>(emptyCustomForm);
+  const [customFormError, setCustomFormError] = useState<string | null>(null);
+  const [customFormSaving, setCustomFormSaving] = useState(false);
 
   const reload = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const list = await window.vibeMeet.backendAuth.list();
+      const [list, customList] = await Promise.all([
+        window.vibeMeet.backendAuth.list(),
+        window.vibeMeet.customBackend.list(),
+      ]);
       setBackends(list);
+      setCustomBackends(customList);
       // Auto-select the default backend tab on first load, or keep the current
       // selection if it still exists.
       setActiveTab((prev) => {
@@ -142,6 +175,57 @@ export function BackendSettings() {
     }
   }, [installing, reload]);
 
+  // Custom backend form handlers
+  const handleCustomFormChange = useCallback((field: keyof CustomBackendFormData, value: string) => {
+    setCustomForm((prev) => ({ ...prev, [field]: value }));
+  }, []);
+
+  const handleAddCustomBackend = useCallback(async () => {
+    setCustomFormError(null);
+    setCustomFormSaving(true);
+    try {
+      const result = await window.vibeMeet.customBackend.add({
+        id: customForm.id,
+        displayName: customForm.displayName,
+        binaryName: customForm.binaryName,
+        apiKeyEnv: customForm.apiKeyEnv || undefined,
+        baseUrlEnv: customForm.baseUrlEnv || undefined,
+        defaultModel: customForm.defaultModel || undefined,
+        installHint: customForm.installHint || undefined,
+        npmPackage: customForm.npmPackage || undefined,
+      });
+      if (result.ok) {
+        setShowCustomForm(false);
+        setCustomForm(emptyCustomForm);
+        await reload();
+        // Auto-select the newly added backend
+        setActiveTab(result.entry.id);
+      } else {
+        setCustomFormError(result.error);
+      }
+    } catch (err) {
+      setCustomFormError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setCustomFormSaving(false);
+    }
+  }, [customForm, reload]);
+
+  const handleRemoveCustomBackend = useCallback(async (id: string) => {
+    if (!window.confirm('确定要删除这个自定义后端吗？')) return;
+    try {
+      const result = await window.vibeMeet.customBackend.remove(id);
+      if (result.ok) {
+        await reload();
+        // If the removed backend was active, clear selection (reload will pick first available)
+        setActiveTab((prev) => prev === id ? null : prev);
+      } else {
+        setError(result.error ?? '删除失败');
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }, [reload]);
+
   const activeBackend = useMemo(
     () => backends.find((b) => b.id === activeTab) ?? null,
     [backends, activeTab],
@@ -174,6 +258,7 @@ export function BackendSettings() {
         {backends.map((b) => {
           const hasAuth = b.hasApiKey || b.authMode !== 'none';
           const isActive = b.id === activeTab;
+          const isCustom = b.id.startsWith('custom-');
           return (
             <button
               key={b.id}
@@ -183,15 +268,169 @@ export function BackendSettings() {
               className={`backend-tab ${isActive ? 'backend-tab-active' : ''}`}
               onClick={() => setActiveTab(b.id)}
             >
-              <BackendIcon iconId={b.iconId} />
               <span className="backend-tab-label">{b.displayName}</span>
               {b.isDefault && <span className="backend-tab-default">默认</span>}
               {!b.available && <span className="backend-tab-dot unavailable" />}
               {hasAuth && b.available && <span className="backend-tab-dot ok" />}
+              {isCustom && (
+                <span
+                  className="backend-tab-custom-remove"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    void handleRemoveCustomBackend(b.id);
+                  }}
+                  title="删除此自定义后端"
+                >
+                  ×
+                </span>
+              )}
             </button>
           );
         })}
+        <button
+          type="button"
+          className={`backend-tab backend-tab-add ${showCustomForm ? 'backend-tab-active' : ''}`}
+          onClick={() => setShowCustomForm(!showCustomForm)}
+          title="添加自定义 CLI 后端"
+        >
+          <span className="backend-tab-label">＋ 新增</span>
+        </button>
       </div>
+
+      {/* Custom backend form */}
+      {showCustomForm && (
+        <div className="custom-backend-form">
+          <div className="custom-backend-form-header">
+            <div className="custom-backend-form-title">新增自定义 CLI 后端</div>
+            <button
+              type="button"
+              className="custom-backend-form-close"
+              onClick={() => {
+                setShowCustomForm(false);
+                setCustomForm(emptyCustomForm);
+                setCustomFormError(null);
+              }}
+            >
+              ×
+            </button>
+          </div>
+          {customFormError && (
+            <div className="custom-backend-form-error">✕ {customFormError}</div>
+          )}
+          <div className="custom-backend-form-fields">
+            <div className="backend-field">
+              <label className="backend-field-label">ID (唯一标识)</label>
+              <input
+                className="backend-field-input"
+                type="text"
+                value={customForm.id}
+                onChange={(e) => handleCustomFormChange('id', e.target.value)}
+                placeholder="my-cli"
+                disabled={customFormSaving}
+              />
+            </div>
+            <div className="backend-field">
+              <label className="backend-field-label">显示名称</label>
+              <input
+                className="backend-field-input"
+                type="text"
+                value={customForm.displayName}
+                onChange={(e) => handleCustomFormChange('displayName', e.target.value)}
+                placeholder="My CLI"
+                disabled={customFormSaving}
+              />
+            </div>
+            <div className="backend-field">
+              <label className="backend-field-label">命令名称 (二进制文件)</label>
+              <input
+                className="backend-field-input"
+                type="text"
+                value={customForm.binaryName}
+                onChange={(e) => handleCustomFormChange('binaryName', e.target.value)}
+                placeholder="my-cli"
+                disabled={customFormSaving}
+              />
+            </div>
+            <div className="backend-field">
+              <label className="backend-field-label">API Key 环境变量名 (可选)</label>
+              <input
+                className="backend-field-input"
+                type="text"
+                value={customForm.apiKeyEnv}
+                onChange={(e) => handleCustomFormChange('apiKeyEnv', e.target.value)}
+                placeholder="MY_API_KEY"
+                disabled={customFormSaving}
+              />
+            </div>
+            <div className="backend-field">
+              <label className="backend-field-label">Base URL 环境变量名 (可选)</label>
+              <input
+                className="backend-field-input"
+                type="text"
+                value={customForm.baseUrlEnv}
+                onChange={(e) => handleCustomFormChange('baseUrlEnv', e.target.value)}
+                placeholder="MY_BASE_URL"
+                disabled={customFormSaving}
+              />
+            </div>
+            <div className="backend-field">
+              <label className="backend-field-label">默认模型 (可选)</label>
+              <input
+                className="backend-field-input"
+                type="text"
+                value={customForm.defaultModel}
+                onChange={(e) => handleCustomFormChange('defaultModel', e.target.value)}
+                placeholder="default-model"
+                disabled={customFormSaving}
+              />
+            </div>
+            <div className="backend-field">
+              <label className="backend-field-label">npm 包名 (可选)</label>
+              <input
+                className="backend-field-input"
+                type="text"
+                value={customForm.npmPackage}
+                onChange={(e) => handleCustomFormChange('npmPackage', e.target.value)}
+                placeholder="@scope/my-cli"
+                disabled={customFormSaving}
+              />
+            </div>
+            <div className="backend-field">
+              <label className="backend-field-label">安装提示 (可选)</label>
+              <input
+                className="backend-field-input"
+                type="text"
+                value={customForm.installHint}
+                onChange={(e) => handleCustomFormChange('installHint', e.target.value)}
+                placeholder="npm install -g @scope/my-cli"
+                disabled={customFormSaving}
+              />
+            </div>
+          </div>
+          <div className="custom-backend-form-actions">
+            <button
+              type="button"
+              className="backend-btn"
+              onClick={handleAddCustomBackend}
+              disabled={customFormSaving || !customForm.id || !customForm.displayName || !customForm.binaryName}
+            >
+              {customFormSaving ? '添加中…' : '添加'}
+            </button>
+            <button
+              type="button"
+              className="backend-btn backend-btn-secondary"
+              onClick={() => {
+                setShowCustomForm(false);
+                setCustomForm(emptyCustomForm);
+                setCustomFormError(null);
+              }}
+              disabled={customFormSaving}
+            >
+              取消
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Active tab content */}
       {activeBackend && (

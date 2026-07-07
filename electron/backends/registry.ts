@@ -9,6 +9,7 @@ import { ClaudeCodeBackend } from './claude-code-adapter.js';
 import { CodexBackend } from './codex-adapter.js';
 import { KimiBackend } from './kimi-adapter.js';
 import { QoderBackend } from './qoder-adapter.js';
+import { CustomBackend, type CustomBackendOptions } from './custom-adapter.js';
 import type { ConfirmDestructive } from '../claude-session.js';
 
 export interface BackendStatus {
@@ -22,6 +23,11 @@ export class BackendRegistry {
 
   register(backend: CliBackend): void {
     this.backends.set(backend.id, backend);
+  }
+
+  /** Remove a backend by ID. Used when a custom backend is deleted. */
+  unregister(id: string): void {
+    this.backends.delete(id);
   }
 
   get(id: string): CliBackend | undefined {
@@ -54,6 +60,11 @@ export class BackendRegistry {
     const backend = this.backends.get(id);
     return backend !== undefined && backend.resolveBinary() !== null;
   }
+
+  /** Register a custom backend from user-provided options. */
+  registerCustom(options: CustomBackendOptions): void {
+    this.register(new CustomBackend(options));
+  }
 }
 
 // ── Singleton instance ─────────────────────────────────────────────────────────
@@ -70,6 +81,40 @@ export function getBackendRegistry(confirmDestructive?: ConfirmDestructive): Bac
     instance.register(new QoderBackend());
   }
   return instance;
+}
+
+/** Register custom backends from settings. Called after settings are loaded. */
+export function registerCustomBackends(): void {
+  const registry = getBackendRegistry();
+  // Lazy import to avoid circular dependency at module load time.
+  // settings-loader will call this after settings are available.
+  let listCustomBackends: () => import('../store.js').CustomBackendEntry[];
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const store = require('../store.js');
+    listCustomBackends = store.listCustomBackends;
+  } catch {
+    // Settings module not yet available — custom backends will be registered later
+    return;
+  }
+
+  try {
+    const customBackends = listCustomBackends();
+    for (const entry of customBackends) {
+      registry.registerCustom({
+        id: entry.id,
+        displayName: entry.displayName,
+        binaryName: entry.binaryName,
+        apiKeyEnv: entry.apiKeyEnv,
+        baseUrlEnv: entry.baseUrlEnv,
+        defaultModel: entry.defaultModel,
+        installHint: entry.installHint,
+        npmPackage: entry.npmPackage,
+      });
+    }
+  } catch (err) {
+    console.error('[registry] failed to register custom backends:', err);
+  }
 }
 
 /** Reset the singleton (for testing). */
