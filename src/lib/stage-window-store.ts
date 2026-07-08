@@ -181,6 +181,16 @@ class StageWindowStore {
   }
 
   async openFile(filePath: string): Promise<void> {
+    const fileName = filePath.split('/').pop() || filePath;
+    const ext = fileName.split('.').pop()?.toLowerCase();
+
+    // Route HTML files through the embedded browser for rich rendering
+    // instead of the file viewer (which uses a restrictive sandbox iframe).
+    if (ext === 'html' || ext === 'htm') {
+      await this.openHtmlInBrowser(filePath, fileName);
+      return;
+    }
+
     const existing = this.state.windows.find((w) => w.type === 'file' && w.filePath === filePath);
     if (existing) {
       await this.setActiveWindow(existing.id);
@@ -198,7 +208,67 @@ class StageWindowStore {
     }
 
     const id = genId();
-    const fileName = filePath.split('/').pop() || filePath;
+    const window: StageWindow = { id, type: 'file', title: fileName, filePath };
+    this.update({
+      windows: [...this.state.windows, window],
+      activeWindowId: id,
+    });
+  }
+
+  /** Open an HTML file in a browser stage tab using a file:// URL. */
+  private async openHtmlInBrowser(filePath: string, fileName: string): Promise<void> {
+    // Check if we already have a browser tab open for this file
+    const fileUrl = `file://${filePath}`;
+    const existingBrowserWin = this.state.windows.find(
+      (w) => w.type === 'browser' && w.filePath === filePath,
+    );
+    if (existingBrowserWin) {
+      await this.setActiveWindow(existingBrowserWin.id);
+      return;
+    }
+
+    const tab = await browserStore.openTab(fileUrl);
+    if (!tab) {
+      // Fallback to file viewer if browser fails
+      await this.openFileAsRegularFile(filePath, fileName);
+      return;
+    }
+
+    const id = genId();
+    const window: StageWindow = {
+      id,
+      type: 'browser',
+      title: fileName,
+      browserTabId: tab.id,
+      filePath, // store filePath for dedup detection
+    };
+
+    // Subscribe to browser title updates
+    const unsub = browserStore.subscribe(() => {
+      const snap = browserStore.getSnapshot();
+      const bTab = snap.tabs.find((t) => t.id === tab.id);
+      if (bTab) {
+        const current = this.state.windows.find((w) => w.id === id);
+        if (current && current.title !== bTab.title && bTab.title !== '新标签页') {
+          this.update({
+            windows: this.state.windows.map((w) =>
+              w.id === id ? { ...w, title: bTab.title } : w,
+            ),
+          });
+        }
+      }
+    });
+    this.browserUnsubs.set(id, unsub);
+    this.update({
+      windows: [...this.state.windows, window],
+      activeWindowId: id,
+    });
+    await browserStore.setActiveTab(tab.id);
+  }
+
+  /** Fallback: open as a regular file tab (non-HTML path). */
+  private async openFileAsRegularFile(filePath: string, fileName: string): Promise<void> {
+    const id = genId();
     const window: StageWindow = { id, type: 'file', title: fileName, filePath };
     this.update({
       windows: [...this.state.windows, window],

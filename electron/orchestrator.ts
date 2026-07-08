@@ -22,6 +22,7 @@
 import { randomUUID } from 'node:crypto';
 import { ClaudeSession, type SessionEvent } from './claude-session.js';
 import type { BackendSession } from './backends/cli-backend.js';
+import { getBackendRegistry } from './backends/registry.js';
 import type { AutoApproveScope } from './auto-approve-policy.js';
 import type { PlanMeetingTask } from './meeting-tools.js';
 import {
@@ -183,7 +184,54 @@ export class Orchestrator implements OrchestratorBridge {
   // ---------------------------------------------------------------------------
   // HostGroup management
 
+  /** Build a SessionFactory for a specific backend. Falls back to ClaudeSession
+   *  when the backend is 'claude-code' or when the adapter is not found. */
+  private buildSessionFactory(backendId: string): SessionFactory {
+    // If a test-injected factory is set, use it for all backends.
+    if (this.sessionFactory !== Orchestrator.defaultClaudeFactory) {
+      return this.sessionFactory;
+    }
+    if (backendId === DEFAULT_BACKEND_ID || backendId === 'claude-code') {
+      return Orchestrator.defaultClaudeFactory;
+    }
+    const backend = getBackendRegistry().get(backendId);
+    if (!backend) {
+      console.warn(`[orchestrator] backend '${backendId}' not found in registry, falling back to claude-code`);
+      return Orchestrator.defaultClaudeFactory;
+    }
+    // Wrap the adapter's createSession to accept ClaudeSession-shaped opts,
+    // translating the fields that differ between the two interfaces.
+    return (opts) => {
+      const so = opts.sessionOptions ?? {};
+      let systemPrompt: string | undefined;
+      if (typeof so.systemPrompt === 'string') {
+        systemPrompt = so.systemPrompt;
+      } else if (so.systemPrompt && typeof so.systemPrompt === 'object' && 'append' in so.systemPrompt) {
+        systemPrompt = (so.systemPrompt as { append?: string }).append;
+      }
+      return backend.createSession(
+        {
+          cwd: opts.cwd,
+          systemPrompt,
+          model: so.model,
+          env: opts.envOverride,
+          mcpServers: so.mcpServers as Record<string, unknown> | undefined,
+          skills: Array.isArray(so.skills) ? so.skills : undefined,
+          autoApproveScope: opts.autoApproveScope,
+        },
+        // BackendSessionEvent is structurally compatible with SessionEvent
+        // (same kind discriminators, NormalizedMessage mirrors SDKMessage shape).
+        opts.emit as (e: import('./backends/cli-backend.js').BackendSessionEvent) => void,
+      );
+    };
+  }
+
+  /** Default ClaudeSession factory, used as identity check for test overrides. */
+  private static readonly defaultClaudeFactory: SessionFactory =
+    (o) => new ClaudeSession(o) as unknown as BackendSession;
+
   private createHostGroup(id: string, backendId: string): HostGroup {
+    const factory = this.buildSessionFactory(backendId);
     const hg = new HostGroup({
       id,
       backendId,
@@ -194,7 +242,7 @@ export class Orchestrator implements OrchestratorBridge {
       workerEnv: this.workerEnv,
       talkerModel: this.talkerModel,
       confirmDestructive: this.confirmDestructive,
-      sessionFactory: this.sessionFactory,
+      sessionFactory: factory,
       browserTabManager: this.browserTabManager,
       bridge: this,
       isClosed: () => this.closed,
@@ -213,7 +261,9 @@ export class Orchestrator implements OrchestratorBridge {
     return hg;
   }
 
-  /** Add a new host group to this meeting. Returns the host group id. */
+  /** Add a new host group to this meeting. Returns the host group id.
+   *  The host's talker session is started asynchronously — the renderer shows
+   *  a "Connecting…" placeholder until the session-ready event arrives. */
   addHost(backendId: string, hostId?: string): { ok: true; hostId: string } | { ok: false; error: string } {
     if (this.closed) return { ok: false, error: 'orchestrator is closed' };
     if (hostId && !/^[a-zA-Z0-9._-]{1,64}$/.test(hostId)) {
@@ -223,7 +273,33 @@ export class Orchestrator implements OrchestratorBridge {
     if (this.hostGroups.has(id)) {
       return { ok: false, error: `host group '${id}' already exists` };
     }
-    this.createHostGroup(id, backendId);
+    const hg = this.createHostGroup(id, backendId);
+
+    // Fire-and-forget the talker spawn. Without this the HostGroup sits idle
+    // forever — the renderer shows "Connecting…" but no session ever starts.
+    void (async () => {
+      try {
+        await hg.start();
+        if (!this.closed) {
+          this.safeEmit({
+            source: 'system',
+            hostId: id,
+            event: { kind: 'session-ready' },
+          });
+        }
+      } catch (err: unknown) {
+        console.error(`[orchestrator] failed to start host '${id}':`, err);
+        this.safeEmit({
+          source: 'system',
+          hostId: id,
+          event: {
+            kind: 'session-start-failed',
+            error: err instanceof Error ? err.message : String(err),
+          },
+        });
+      }
+    })();
+
     return { ok: true, hostId: id };
   }
 

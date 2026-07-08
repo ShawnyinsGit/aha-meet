@@ -1078,7 +1078,7 @@ class MeetingStore {
           [{ id: uid(), kind: 'error', title: 'Error', detail: e.error, ts: Date.now(), source }],
           MAX_ACTIVITY,
         ),
-      }));
+      }), e.hostId);
       this.mutateSlot(slot.id, (s) => ({ ...s, lastError: e.error }));
       this.bumpUnread(slot);
       return;
@@ -1094,7 +1094,7 @@ class MeetingStore {
           [{ id: uid(), kind: 'system', title: `${source} ended`, ts: Date.now(), source }],
           MAX_ACTIVITY,
         ),
-      }));
+      }), e.hostId);
       if (source === 'talker') {
         const intended = slot.intendedExit;
         this.mutateSlot(slot.id, (s) => ({
@@ -1121,7 +1121,7 @@ class MeetingStore {
           }],
           MAX_ACTIVITY,
         ),
-      }));
+      }), e.hostId);
       this.bumpUnread(slot);
       // The whole point of the feature: don't leave the user waiting in
       // silence when an agent is blocked on a confirmation. A permission-request
@@ -1129,7 +1129,7 @@ class MeetingStore {
       // or the degraded 'read' path with no native confirmer) — 'all' never
       // emits one. So announce whenever it arrives, except under 'all'.
       if (slot.id === this.activeId && this.autoApproveScope !== 'all') {
-        const name = this.workerLabel(slot, source);
+        const name = this.workerLabel(slot, source, e.hostId);
         this.announce(`${name}卡住了，需要你确认是否允许 ${e.toolName}`);
       }
       return;
@@ -1157,7 +1157,7 @@ class MeetingStore {
           }],
           MAX_ACTIVITY,
         ),
-      }));
+      }), e.hostId);
       this.bumpUnread(slot);
       if (slot.id === this.activeId) {
         this.announce(`等你确认：${e.question}`);
@@ -1180,7 +1180,7 @@ class MeetingStore {
           }],
           MAX_ACTIVITY,
         ),
-      }));
+      }), e.hostId);
       return;
     }
     if (e.kind === 'document-saved') {
@@ -1199,34 +1199,48 @@ class MeetingStore {
           }],
           MAX_ACTIVITY,
         ),
-      }));
+      }), e.hostId);
       if (slot.id === this.activeId) {
         this.announce(`文档已整理好：${e.title}`);
       }
       return;
     }
     if (e.kind === 'message') {
-      this.handleMessage(slot, source, e.message);
+      this.handleMessage(slot, source, e.message, e.hostId);
     }
   }
 
   /** Human-friendly name for spoken status lines. */
-  private workerLabel(slot: SlotInternal, id: AgentSource): string {
-    if (id === 'talker') return '助手';
-    return slot.state.workers.get(id)?.title || '工作者';
+  private workerLabel(slot: SlotInternal, id: AgentSource, hostId?: string): string {
+    if (id === 'talker') {
+      const hg = slot.state.hostGroups.get(hostId ?? 'default');
+      return hg ? `助手(${hg.backendId})` : '助手';
+    }
+    const key = this.talkerWorkerKey(id, hostId);
+    return slot.state.workers.get(key)?.title || '工作者';
   }
 
-  private updateWorker(slot: SlotInternal, id: AgentSource, patch: (w: WorkerState) => WorkerState) {
+  /** Compute the worker map key for a talker, scoped by hostId so multiple
+   *  hosts' talkers don't collide under the same 'talker' key. Workers use
+   *  their unique workerId directly, so they don't need this. */
+  private talkerWorkerKey(source: AgentSource, hostId?: string): string {
+    if (source !== 'talker') return source;
+    if (!hostId || hostId === 'default') return 'talker';
+    return `talker:${hostId}`;
+  }
+
+  private updateWorker(slot: SlotInternal, id: AgentSource, patch: (w: WorkerState) => WorkerState, hostId?: string) {
+    const key = this.talkerWorkerKey(id, hostId);
     this.mutateSlot(slot.id, (s) => {
-      const current = s.workers.get(id) ?? this.makeBlankWorker(id);
+      const current = s.workers.get(key) ?? this.makeBlankWorker(id, hostId);
       const next = patch(current);
       const workers = new Map(s.workers);
-      workers.set(id, next);
+      workers.set(key, next);
       return { ...s, workers };
     });
   }
 
-  private makeBlankWorker(id: AgentSource): WorkerState {
+  private makeBlankWorker(id: AgentSource, hostId?: string): WorkerState {
     return {
       id,
       title: id,
@@ -1244,11 +1258,11 @@ class MeetingStore {
       specialty: 'general',
       startedAt: null,
       taskHistory: [],
-      hostId: 'default',
+      hostId: hostId ?? 'default',
     };
   }
 
-  private handleAgentApiError(slot: SlotInternal, source: AgentSource, code: string, msg?: any) {
+  private handleAgentApiError(slot: SlotInternal, source: AgentSource, code: string, msg?: any, hostId?: string) {
     // The SDK frequently carries the real, human-readable API error inside the
     // assistant message content (and a request_id for support). For opaque
     // codes like 'unknown' this underlying text is the only actionable signal,
@@ -1299,12 +1313,12 @@ class MeetingStore {
         [{ id: uid(), kind: 'error', title: 'API error', detail: fullDetail, ts: Date.now(), source }],
         MAX_ACTIVITY,
       ),
-    }));
+    }), hostId);
     this.mutateSlot(slot.id, (s) => ({ ...s, lastError: fullDetail }));
     this.bumpUnread(slot);
   }
 
-  private handleMessage(slot: SlotInternal, source: AgentSource, msg: any) {
+  private handleMessage(slot: SlotInternal, source: AgentSource, msg: any, hostId?: string) {
     const type = msg?.type;
     // Sentence-streaming path: only the talker has a streaming TTS sink; for
     // workers we ignore stream_events entirely (their narration is already
@@ -1317,7 +1331,7 @@ class MeetingStore {
     }
     if (type === 'assistant') {
       if (typeof msg?.error === 'string' && msg.error.length > 0) {
-        this.handleAgentApiError(slot, source, msg.error as string, msg);
+        this.handleAgentApiError(slot, source, msg.error as string, msg, hostId);
         return;
       }
       const content = msg?.message?.content;
@@ -1459,7 +1473,7 @@ class MeetingStore {
           }
         }
         return next;
-      });
+      }, hostId);
       if (talkerEntry) this.persistTalkerEntry(slot, talkerEntry);
       if (shouldSpeak) this.speakCallback?.supersede(text);
       if (source === 'talker' && text.trim().length > 0) this.bumpUnread(slot);

@@ -1,7 +1,7 @@
 import { ReactNode, RefObject, useState, useCallback, useMemo } from 'react';
 import type { ScreenShareState } from '../hooks/useScreenShare';
 import type { DeliverySnapshot, WorkerState } from '../lib/meeting-store';
-import type { BrowserTabInfo, MeetingPlan } from '../types';
+import type { ActivityEntry, BrowserTabInfo, MeetingPlan } from '../types';
 import type { StageWindow, StageWindowType } from '../lib/stage-window-store';
 import { DeliveryViewer } from './DeliveryViewer';
 import { FileViewer } from './FileViewer';
@@ -97,13 +97,26 @@ export function ScreenStage({
   const isActivityTab = activeWindow?.type === 'activity' || activeWindowId === ACTIVITY_TAB_ID;
 
   // For terminal stage windows, find the worker whose activity should be
-  // displayed. Falls back to the first talker if no workerId is specified.
+  // displayed. When no workerId is specified, aggregate all workers' Bash
+  // activity so the terminal tab shows real command output instead of being
+  // empty (talkers have `tools: []` and never produce Bash activity).
   const terminalActivity = useMemo(() => {
     if (activeWindow?.type !== 'terminal') return [];
-    const target = activeWindow.workerId
-      ? workers.find((w) => w.id === activeWindow.workerId)
-      : workers.find((w) => w.role === 'talker');
-    return target?.activity ?? [];
+    if (activeWindow.workerId) {
+      const target = workers.find((w) => w.id === activeWindow.workerId);
+      return target?.activity ?? [];
+    }
+    // Aggregate all workers' Bash-related activity chronologically
+    const bashEntries: ActivityEntry[] = [];
+    for (const w of workers) {
+      for (const a of w.activity) {
+        if (a.title?.toLowerCase().includes('bash') || a.kind === 'tool-call' || a.kind === 'tool-result') {
+          bashEntries.push(a);
+        }
+      }
+    }
+    bashEntries.sort((a, b) => a.ts - b.ts);
+    return bashEntries;
   }, [activeWindow, workers]);
 
   const stageClass = share.active
