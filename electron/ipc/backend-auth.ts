@@ -276,6 +276,41 @@ export function registerBackendAuthIpc(): void {
     };
   });
 
+  /** Run OAuth login flow for a backend. Spawns the CLI's login command
+   *  (e.g. `claude auth login`, `kimi /login`, `codex auth login`).
+   *  The CLI typically opens a browser for the user to authenticate. */
+  ipcMain.handle('backend-auth:login-oauth', async (_e, backendId: unknown) => {
+    if (typeof backendId !== 'string') {
+      return { ok: false, error: 'backendId must be a string' };
+    }
+    const vErr = validateBackendId(backendId);
+    if (vErr) return { ok: false, error: vErr };
+
+    const registry = getBackendRegistry();
+    const backend = registry.get(backendId);
+    if (!backend) {
+      return { ok: false, error: `unknown backend: ${backendId}` };
+    }
+
+    // Claude Code uses a special auth:login-subscription handler because
+    // it needs to resolve the bundled claude binary from the SDK package.
+    if (backendId === 'claude-code') {
+      // Delegate to the existing auth:login-subscription handler
+      return { ok: false, error: 'Use auth:login-subscription for Claude Code' };
+    }
+
+    if (!backend.loginOAuth) {
+      return { ok: false, error: `${backend.capabilities.displayName} does not support OAuth login` };
+    }
+
+    const result = await backend.loginOAuth();
+    if (result.ok) {
+      // Update auth mode to oauth on success
+      await setBackendAuth(backendId, { authMode: 'oauth', apiKey: undefined });
+    }
+    return result;
+  });
+
   /** Run the install command for a backend that isn't available yet.
    *
    *  Streams `backend:install-progress` events to the renderer while the

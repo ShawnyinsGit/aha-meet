@@ -10,13 +10,16 @@
 // npm: @qoder-ai/qodercli v1.0.38 (the CLI binary)
 //
 // Auth: config-based, API key via environment variable or config file.
+//       Also supports `qoder auth login` for OAuth.
 
+import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import {
   SubprocessBackend,
   SubprocessSession,
   resolveBinaryFromPath,
 } from './subprocess-backend.js';
+import { mergedSubprocessEnv } from '../settings-loader.js';
 import type {
   BackendSession,
   BackendSessionConfig,
@@ -237,5 +240,30 @@ export class QoderBackend extends SubprocessBackend {
     // Qoder is "logged in" if the binary is available OR an API key is set
     const binary = this.resolveBinary();
     return { loggedIn: binary !== null };
+  }
+
+  async loginOAuth(): Promise<{ ok: boolean; error?: string }> {
+    const binary = this.resolveBinary();
+    if (!binary) {
+      return { ok: false, error: 'Qoder CLI not found. Install it first.' };
+    }
+    return new Promise<{ ok: boolean; error?: string }>((resolve) => {
+      const env = mergedSubprocessEnv();
+      const proc = spawn(binary, ['auth', 'login'], {
+        env,
+        stdio: 'ignore',
+        detached: false,
+      });
+      proc.on('error', (err: Error) => {
+        resolve({ ok: false, error: err.message });
+      });
+      proc.on('close', (code: number | null) => {
+        if (code === 0) {
+          resolve({ ok: true });
+        } else {
+          resolve({ ok: false, error: `qoder auth login exited with code ${code}` });
+        }
+      });
+    });
   }
 }

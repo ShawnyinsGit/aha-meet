@@ -17,7 +17,9 @@
 //        ErrorItem
 //
 // Auth: apiKey in CodexOptions or OPENAI_API_KEY env var.
+//       Also supports `codex auth login` for ChatGPT Plus/Pro OAuth.
 
+import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import type {
   BackendSession,
@@ -412,6 +414,27 @@ export class CodexBackend implements CliBackend {
   }
 
   async loginOAuth(): Promise<{ ok: boolean; error?: string }> {
-    return { ok: false, error: 'Codex uses API key auth. Set your OPENAI_API_KEY.' };
+    const binary = this.resolveBinary();
+    if (!binary) {
+      return { ok: false, error: 'Codex CLI not found. Install it first.' };
+    }
+    return new Promise<{ ok: boolean; error?: string }>((resolve) => {
+      const env = mergedSubprocessEnv();
+      const proc = spawn(binary, ['auth', 'login'], {
+        env,
+        stdio: 'ignore',
+        detached: false,
+      });
+      proc.on('error', (err: Error) => {
+        resolve({ ok: false, error: err.message });
+      });
+      proc.on('close', (code: number | null) => {
+        if (code === 0) {
+          resolve({ ok: true });
+        } else {
+          resolve({ ok: false, error: `codex auth login exited with code ${code}` });
+        }
+      });
+    });
   }
 }

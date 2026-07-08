@@ -48,6 +48,9 @@ export function BackendSettings() {
   const [customForm, setCustomForm] = useState<CustomBackendFormData>(emptyCustomForm);
   const [customFormError, setCustomFormError] = useState<string | null>(null);
   const [customFormSaving, setCustomFormSaving] = useState(false);
+  // OAuth login state
+  const [loginStatus, setLoginStatus] = useState<Record<string, 'idle' | 'pending' | 'done' | 'error'>>({});
+  const [loginError, setLoginError] = useState<Record<string, string>>({});
 
   const reload = useCallback(async () => {
     setLoading(true);
@@ -174,6 +177,29 @@ export function BackendSettings() {
       setInstalling(null);
     }
   }, [installing, reload]);
+
+  const handleLoginOAuth = useCallback(async (backendId: string) => {
+    setLoginStatus((s) => ({ ...s, [backendId]: 'pending' }));
+    setLoginError((e) => { const next = { ...e }; delete next[backendId]; return next; });
+    try {
+      let res: { ok: boolean; error?: string };
+      if (backendId === 'claude-code') {
+        res = await window.vibeMeet.auth.loginSubscription();
+      } else {
+        res = await window.vibeMeet.backendAuth.loginOAuth(backendId);
+      }
+      if (res.ok) {
+        setLoginStatus((s) => ({ ...s, [backendId]: 'done' }));
+        await reload();
+      } else {
+        setLoginStatus((s) => ({ ...s, [backendId]: 'error' }));
+        setLoginError((e) => ({ ...e, [backendId]: res.error ?? 'Login failed' }));
+      }
+    } catch (err) {
+      setLoginStatus((s) => ({ ...s, [backendId]: 'error' }));
+      setLoginError((e) => ({ ...e, [backendId]: err instanceof Error ? err.message : String(err) }));
+    }
+  }, [reload]);
 
   // Custom backend form handlers
   const handleCustomFormChange = useCallback((field: keyof CustomBackendFormData, value: string) => {
@@ -441,12 +467,15 @@ export function BackendSettings() {
           saving={saving[activeBackend.id] ?? false}
           installing={installing}
           installLog={installTarget === activeBackend.id ? installLog : ''}
+          loginStatus={loginStatus[activeBackend.id] ?? 'idle'}
+          loginError={loginError[activeBackend.id]}
           onApiKeyChange={(val) => setEditingApiKey((e) => ({ ...e, [activeBackend.id]: val }))}
           onSaveApiKey={() => handleSetApiKey(activeBackend.id)}
           onSaveBaseUrl={(url) => handleSetBaseUrl(activeBackend.id, url)}
           onSaveModel={(model) => handleSetModel(activeBackend.id, model)}
           onSetDefault={() => handleSetDefault(activeBackend.id)}
           onInstall={() => handleInstall(activeBackend.id)}
+          onLoginOAuth={() => handleLoginOAuth(activeBackend.id)}
           onKeyDown={(e) => handleKeyDown(e, activeBackend.id)}
         />
       )}
@@ -460,12 +489,15 @@ interface BackendCardProps {
   saving: boolean;
   installing: string | null;
   installLog: string;
+  loginStatus: 'idle' | 'pending' | 'done' | 'error';
+  loginError: string | undefined;
   onApiKeyChange: (val: string) => void;
   onSaveApiKey: () => void;
   onSaveBaseUrl: (url: string) => void;
   onSaveModel: (model: string) => void;
   onSetDefault: () => void;
   onInstall: () => void;
+  onLoginOAuth: () => void;
   onKeyDown: (e: React.KeyboardEvent) => void;
 }
 
@@ -475,12 +507,15 @@ function BackendCard({
   saving,
   installing,
   installLog,
+  loginStatus,
+  loginError,
   onApiKeyChange,
   onSaveApiKey,
   onSaveBaseUrl,
   onSaveModel,
   onSetDefault,
   onInstall,
+  onLoginOAuth,
   onKeyDown,
 }: BackendCardProps) {
   const hasAuth = b.hasApiKey || b.authMode !== 'none';
@@ -584,6 +619,30 @@ function BackendCard({
               />
             )}
           </div>
+
+          {/* OAuth login section for supported backends */}
+          {(b.id === 'claude-code' || b.id === 'kimi' || b.id === 'codex' || b.id === 'qoder') && (
+            <div className="backend-field">
+              <label className="backend-field-label">
+                OAuth 登录
+                {b.authMode === 'oauth' && <span className="backend-status-dot status-ok" style={{ marginLeft: 6 }} />}
+              </label>
+              <button
+                type="button"
+                className="backend-btn backend-btn-sm backend-btn-login"
+                onClick={onLoginOAuth}
+                disabled={loginStatus === 'pending'}
+              >
+                {loginStatus === 'pending' ? '正在打开浏览器…'
+                  : loginStatus === 'done' ? '已登录 ✓'
+                  : b.authMode === 'oauth' ? '重新认证'
+                  : `使用 ${b.displayName} 登录`}
+              </button>
+              {loginStatus === 'error' && loginError && (
+                <div className="backend-settings-error" style={{ marginTop: 4, fontSize: 12 }}>✕ {loginError}</div>
+              )}
+            </div>
+          )}
 
           <div className="backend-card-caps">
             {b.supportsMcp && <span className="backend-cap-badge">MCP</span>}

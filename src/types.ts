@@ -163,6 +163,7 @@ export interface BackendAuthApi {
   setMode: (backendId: string, mode: 'apikey' | 'oauth' | 'none') => Promise<{ ok: boolean; error?: string }>;
   setDefault: (backendId: string) => Promise<{ ok: boolean; error?: string }>;
   checkStatus: (backendId: string) => Promise<{ ok: boolean; loggedIn: boolean; error?: string }>;
+  loginOAuth: (backendId: string) => Promise<{ ok: boolean; error?: string }>;
   install: (backendId: string) => Promise<{ ok: boolean; error?: string }>;
   onInstallProgress: (cb: (data: { backendId: string; data: string }) => void) => () => void;
 }

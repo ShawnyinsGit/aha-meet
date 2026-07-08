@@ -1,5 +1,5 @@
 import { memo, useMemo, useState } from 'react';
-import { ChevronDown, ChevronUp, Plus } from 'lucide-react';
+import { ChevronDown, ChevronUp, Plus, Wifi } from 'lucide-react';
 import type { HostGroupState, WorkerState } from '../lib/meeting-store';
 import { WorkerCard } from './WorkerCard';
 
@@ -22,11 +22,23 @@ export const ParticipantPanel = memo(function ParticipantPanel({
 }: ParticipantPanelProps) {
   const [barCollapsed, setBarCollapsed] = useState(false);
 
-  // Find the talker worker for each host group
+  // Map hostId -> talker worker (if any)
   const hostTalkers = useMemo(() => {
     const map = new Map<string, WorkerState>();
     for (const w of workers) {
       if (w.role === 'talker') map.set(w.hostId || 'default', w);
+    }
+    return map;
+  }, [workers]);
+
+  // Map hostId -> all workers for that host (for fallback when no talker)
+  const hostWorkers = useMemo(() => {
+    const map = new Map<string, WorkerState[]>();
+    for (const w of workers) {
+      const hId = w.hostId || 'default';
+      const arr = map.get(hId) ?? [];
+      arr.push(w);
+      map.set(hId, arr);
     }
     return map;
   }, [workers]);
@@ -48,22 +60,48 @@ export const ParticipantPanel = memo(function ParticipantPanel({
         {/* Self tile */}
         <div className="tiles-gallery-self">{selfTile}</div>
 
-        {/* Host talker tiles */}
+        {/* Host group tiles — show talker, or first worker, or a placeholder */}
         {sortedHostGroups.map(([hostId, hg]) => {
           const talker = hostTalkers.get(hostId);
-          if (!talker) return null;
-
+          if (talker) {
+            return (
+              <WorkerCard
+                key={hostId}
+                worker={talker}
+                depTitles={new Map()}
+                mode="gallery"
+                selected={false}
+                speaking={aiSpeaking}
+                onSelect={() => {}}
+                onResolvePermission={onResolvePermission}
+              />
+            );
+          }
+          // No talker — fall back to first worker of this host group
+          const hw = hostWorkers.get(hostId);
+          if (hw && hw.length > 0) {
+            return (
+              <WorkerCard
+                key={hostId}
+                worker={hw[0]}
+                depTitles={new Map()}
+                mode="gallery"
+                selected={false}
+                speaking={false}
+                onSelect={() => {}}
+                onResolvePermission={onResolvePermission}
+              />
+            );
+          }
+          // No workers yet — render placeholder "connecting" tile
           return (
-            <WorkerCard
-              key={hostId}
-              worker={talker}
-              depTitles={new Map()}
-              mode="gallery"
-              selected={false}
-              speaking={aiSpeaking && talker.role === 'talker'}
-              onSelect={() => {}}
-              onResolvePermission={onResolvePermission}
-            />
+            <div key={hostId} className="tiles-gallery-placeholder" title={hg.backendId}>
+              <div className="tiles-gallery-placeholder-avatar">
+                <Wifi size={20} />
+              </div>
+              <div className="tiles-gallery-placeholder-label">{hg.backendId}</div>
+              <div className="tiles-gallery-placeholder-status">Connecting…</div>
+            </div>
           );
         })}
 

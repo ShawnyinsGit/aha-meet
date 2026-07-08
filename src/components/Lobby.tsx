@@ -155,6 +155,19 @@ export function Lobby({ lastError }: LobbyProps) {
     }
   }, [reloadBackends]);
 
+  const loginOAuth = useCallback(async (backendId: string) => {
+    setLoginStatus('pending');
+    setLoginError('');
+    const res = await window.vibeMeet.backendAuth.loginOAuth(backendId);
+    if (res.ok) {
+      setLoginStatus('done');
+      await reloadBackends();
+    } else {
+      setLoginStatus('error');
+      setLoginError(res.error ?? 'Login failed');
+    }
+  }, [reloadBackends]);
+
   const installBackend = useCallback(async (backendId: string) => {
     if (installing) return;
     setInstalling(backendId);
@@ -322,11 +335,14 @@ export function Lobby({ lastError }: LobbyProps) {
                     </div>
                   </div>
 
-                  {/* Claude-specific OAuth section */}
-                  {currentBackend.id === 'claude-code' && (
+                  {/* OAuth login section — for backends that support it */}
+                  {(currentBackend.id === 'claude-code' ||
+                    currentBackend.id === 'kimi' ||
+                    currentBackend.id === 'codex' ||
+                    currentBackend.id === 'qoder') && (
                     <div className="join-auth-block">
                       <div className="join-auth-block-title">
-                        <LogIn size={13} aria-hidden="true" /> Claude Account (Pro/Max)
+                        <LogIn size={13} aria-hidden="true" /> {currentBackend.displayName} Account
                         {currentBackend.authMode === 'oauth' && (
                           <span className="join-auth-badge active">Active</span>
                         )}
@@ -334,19 +350,25 @@ export function Lobby({ lastError }: LobbyProps) {
                       <button
                         type="button"
                         className="join-auth-btn join-auth-btn-login"
-                        onClick={loginSubscription}
+                        onClick={() => {
+                          if (currentBackend.id === 'claude-code') {
+                            void loginSubscription();
+                          } else {
+                            void loginOAuth(currentBackend.id);
+                          }
+                        }}
                         disabled={loginStatus === 'pending'}
                       >
                         {loginStatus === 'pending' ? 'Opening browser…'
                           : loginStatus === 'done' ? 'Logged in ✓'
                           : currentBackend.authMode === 'oauth' ? 'Re-authenticate'
-                          : 'Log in with Claude'}
+                          : `Log in with ${currentBackend.displayName}`}
                       </button>
                       {loginStatus === 'error' && (
                         <div className="join-auth-error">{loginError || 'Login failed.'}</div>
                       )}
                       <div className="join-auth-hint">
-                        Opens a browser window for OAuth. Requires Claude CLI bundled with this app.
+                        Opens a browser window for OAuth. Requires {currentBackend.displayName} CLI {currentBackend.id === 'claude-code' ? 'bundled with this app' : 'installed'}.
                       </div>
                     </div>
                   )}

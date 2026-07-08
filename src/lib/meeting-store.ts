@@ -647,6 +647,27 @@ class MeetingStore {
     }
   }
 
+  /** Build a greeting that includes resume context from the transcript.
+   *  Loads the on-disk transcript for `cwd` and, if there's history, appends
+   *  a summary of the last few exchanges so the AI can pick up where it
+   *  left off instead of starting cold. */
+  private async buildResumeGreeting(cwd: string, baseGreeting: string): Promise<string> {
+    try {
+      const r = await window.vibeMeet.transcripts.load(cwd);
+      if (!r.ok || r.entries.length === 0) return baseGreeting;
+      // Take the last 8 entries (4 exchanges) for context — enough to
+      // understand what was happening without overwhelming the prompt.
+      const recent = r.entries.slice(-8);
+      const summary = recent
+        .map((e) => `${e.role === 'user' ? 'User' : 'Assistant'}: ${e.text.slice(0, 200)}`)
+        .join('\n');
+      return `${baseGreeting}\n\n[RESUME CONTEXT — Previous conversation in this project:]\n${summary}\n\nIf the user was working on something, acknowledge it and ask if they want to continue or start fresh. Keep your greeting warm and brief.`;
+    } catch (err) {
+      console.warn('[meeting-store] buildResumeGreeting failed:', err);
+      return baseGreeting;
+    }
+  }
+
   // --- Slot lifecycle -------------------------------------------------------
 
   async hydrateRestore(): Promise<void> {
@@ -693,7 +714,7 @@ class MeetingStore {
     // Default greeting kicks the Talker into speaking on session start so the
     // user gets an immediate "hello, what should we work on?" instead of a
     // dead-air tab. Without this the SDK input loop sits idle.
-    const effectiveGreeting = greeting ?? DEFAULT_GREETING;
+    let effectiveGreeting = greeting ?? DEFAULT_GREETING;
     // If a placeholder already exists for this cwd, resume it instead of
     // creating a second tab. Mirrors main-side cwd uniqueness.
     const existing = this.findByCwd(cwd);
@@ -705,6 +726,11 @@ class MeetingStore {
       await this.setActive(existing.id);
       return { ok: true, sessionId: existing.id };
     }
+    // Pre-load transcript to inject resume context if there's history.
+    // This gives the AI awareness of the previous conversation so it can
+    // continue tasks instead of starting cold each time.
+    effectiveGreeting = await this.buildResumeGreeting(cwd, effectiveGreeting);
+
     const res = await window.vibeMeet.sessions.open(cwd, effectiveGreeting, this.defaultBackendId ?? undefined);
     if (!res.ok) {
       if (res.error === 'duplicate' && 'sessionId' in res && res.sessionId) {
@@ -733,7 +759,10 @@ class MeetingStore {
   async resumePlaceholder(placeholderSlotId: string, greeting?: string): Promise<{ ok: boolean; error?: string; sessionId?: string }> {
     const ph = this.slots.get(placeholderSlotId);
     if (!ph || !ph.placeholder) return { ok: false, error: 'not-placeholder' };
-    const effectiveGreeting = greeting ?? DEFAULT_GREETING;
+    // Pre-load transcript to inject resume context if there's history.
+    let effectiveGreeting = greeting ?? DEFAULT_GREETING;
+    effectiveGreeting = await this.buildResumeGreeting(ph.cwd, effectiveGreeting);
+
     const res = await window.vibeMeet.sessions.open(ph.cwd, effectiveGreeting, this.defaultBackendId ?? undefined);
     if (!res.ok) {
       if (res.error === 'duplicate' && 'sessionId' in res && res.sessionId) {

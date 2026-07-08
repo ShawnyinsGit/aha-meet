@@ -83,9 +83,10 @@ export function registerTranscriptsIpc(ctx: IpcContext): void {
       if (!isNonEmptyString(cwd)) {
         return { ok: false as const, error: 'invalid cwd' };
       }
-      if (!ctx.registry.findByCwd(cwd)) {
-        return { ok: false as const, error: 'cwd has no active session' };
-      }
+      // No session gate — transcripts are keyed by projectId (sha1 of realpath),
+      // so a stale/missing session just returns [] from the file store. This
+      // lets the renderer load history for a cwd even if the session hasn't
+      // finished registering yet, or was already torn down.
       const entries = await loadTranscript(cwd);
       return { ok: true as const, entries };
     } catch (err: unknown) {
@@ -100,10 +101,12 @@ export function registerTranscriptsIpc(ctx: IpcContext): void {
       console.warn('[transcripts] append: invalid cwd, dropping');
       return;
     }
-    if (!ctx.registry.findByCwd(cwd)) {
-      console.warn('[transcripts] append: cwd has no active session, dropping');
-      return;
-    }
+    // No session gate — the transcript store writes to a per-projectId JSONL
+    // file keyed by sha1(realpath(cwd)). Writing without an active session is
+    // safe: the file is created on demand and only the renderer that owns the
+    // slot calls append. Previously the gate dropped the last few entries
+    // during session teardown (registry cleared before the IPC pipeline
+    // drained), causing the tail of the conversation to vanish on reopen.
     if (!p || p.entry === undefined || p.entry === null) {
       console.warn('[transcripts] append: missing entry, dropping');
       return;
@@ -117,16 +120,19 @@ export function registerTranscriptsIpc(ctx: IpcContext): void {
       console.error('[transcripts] append failed:', errorMessage(err));
     });
     // Also save to local materials directory for persistent reference.
-    saveChatMessage({
-      cwd,
-      role: cleaned.role,
-      text: cleaned.text,
-      ts: cleaned.ts,
-      imageUrl: cleaned.imageUrl,
-      attachments: cleaned.attachments,
-    }).catch((err: unknown) => {
-      console.warn('[transcripts] saveChatMessage failed:', errorMessage(err));
-    });
+    // Only when a session is active — materials are session-scoped.
+    if (ctx.registry.findByCwd(cwd)) {
+      saveChatMessage({
+        cwd,
+        role: cleaned.role,
+        text: cleaned.text,
+        ts: cleaned.ts,
+        imageUrl: cleaned.imageUrl,
+        attachments: cleaned.attachments,
+      }).catch((err: unknown) => {
+        console.warn('[transcripts] saveChatMessage failed:', errorMessage(err));
+      });
+    }
   });
 
   ipcMain.handle('transcripts:clear', async (_e, payload: unknown) => {
@@ -135,9 +141,8 @@ export function registerTranscriptsIpc(ctx: IpcContext): void {
       if (!isNonEmptyString(cwd)) {
         return { ok: false as const, error: 'invalid cwd' };
       }
-      if (!ctx.registry.findByCwd(cwd)) {
-        return { ok: false as const, error: 'cwd has no active session' };
-      }
+      // No session gate — clear the JSONL regardless of session state so the
+      // renderer can wipe history even during teardown.
       await clearTranscript(cwd);
       return { ok: true as const };
     } catch (err: unknown) {

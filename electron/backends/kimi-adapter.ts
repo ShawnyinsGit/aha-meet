@@ -12,11 +12,13 @@
 // Built-in tools: Shell, ReadFile, WriteFile, Grep, Glob, SearchWeb, FetchURL.
 // No MCP support — uses its own built-in tool set.
 
+import { spawn } from 'node:child_process';
 import {
   SubprocessBackend,
   SubprocessSession,
   type resolveBinaryFromPath,
 } from './subprocess-backend.js';
+import { mergedSubprocessEnv } from '../settings-loader.js';
 import type {
   BackendSession,
   BackendSessionConfig,
@@ -207,8 +209,28 @@ export class KimiBackend extends SubprocessBackend {
   }
 
   async loginOAuth(): Promise<{ ok: boolean; error?: string }> {
-    // Kimi OAuth is done via `kimi /login` in an interactive terminal.
-    return { ok: false, error: 'Run "kimi /login" in a terminal to authenticate.' };
+    const binary = this.resolveBinary();
+    if (!binary) {
+      return { ok: false, error: 'Kimi CLI not found. Install it first.' };
+    }
+    return new Promise<{ ok: boolean; error?: string }>((resolve) => {
+      const env = mergedSubprocessEnv();
+      const proc = spawn(binary, ['/login'], {
+        env,
+        stdio: 'ignore',
+        detached: false,
+      });
+      proc.on('error', (err: Error) => {
+        resolve({ ok: false, error: err.message });
+      });
+      proc.on('close', (code: number | null) => {
+        if (code === 0) {
+          resolve({ ok: true });
+        } else {
+          resolve({ ok: false, error: `kimi /login exited with code ${code}` });
+        }
+      });
+    });
   }
 }
 

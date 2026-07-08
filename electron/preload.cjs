@@ -65,6 +65,7 @@ const api = {
     setMode: (backendId, mode) => ipcRenderer.invoke('backend-auth:set-mode', { backendId, mode }),
     setDefault: (backendId) => ipcRenderer.invoke('backend-auth:set-default', backendId),
     checkStatus: (backendId) => ipcRenderer.invoke('backend-auth:check-status', backendId),
+    loginOAuth: (backendId) => ipcRenderer.invoke('backend-auth:login-oauth', backendId),
     install: (backendId) => ipcRenderer.invoke('backend-auth:install', backendId),
     onInstallProgress: (cb) => {
       const listener = (_, data) => cb(data);
