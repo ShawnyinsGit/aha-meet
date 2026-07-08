@@ -17,7 +17,6 @@ import { meetingStore } from './lib/meeting-store';
 import { Lobby } from './components/Lobby';
 import { TabStrip } from './components/TabStrip';
 import { MeetingHeader } from './components/MeetingHeader';
-import { ParticipantTile } from './components/ParticipantTile';
 import { ScreenStage } from './components/ScreenStage';
 import { SourcePicker } from './components/SourcePicker';
 import { BottomToolbar } from './components/BottomToolbar';
@@ -260,23 +259,17 @@ ${trimmed}`
               <ParticipantPanel
                 workers={workers.workerList}
                 hostGroups={workers.hostGroups}
-                plan={workers.plan}
                 running={state.running}
                 aiSpeaking={aiSpeaking}
-                onResolvePermission={resolvePermission}
-                onToggleHostGroup={workers.toggleHostGroupCollapsed}
                 onAddHost={workers.addHostGroup}
                 selfTile={
-                  <ParticipantTile
-                    name="You"
-                    role="You"
-                    initials="You"
-                    variant="self"
-                    speaking={effectiveListening && !muted}
-                    muted={muted}
-                    status={muted ? 'Muted' : effectiveListening ? 'Speaking' : 'Mic idle'}
-                    ariaLabel="查看我派出的任务"
-                  />
+                  <>
+                    <div className={`self-avatar ${effectiveListening && !muted ? 'speaking' : ''}`}>
+                      Y
+                    </div>
+                    <span className="host-label">You</span>
+                    {muted && <span className="self-muted-chip">Muted</span>}
+                  </>
                 }
               />
             }
