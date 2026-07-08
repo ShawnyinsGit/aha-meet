@@ -278,7 +278,12 @@ export class BrowserTabManager {
     const wc = this.getActiveWebContents();
     if (!wc) return false;
     try {
-      // Send mouseDown then mouseUp to simulate a click
+      // Move cursor to position first, then send mouseDown + mouseUp
+      wc.sendInputEvent({
+        type: 'mouseMove',
+        x: event.x,
+        y: event.y,
+      });
       wc.sendInputEvent({
         type: 'mouseDown',
         x: event.x,
@@ -372,6 +377,7 @@ export class BrowserTabManager {
   destroy(): void {
     const win = this.window;
     for (const [, entry] of this.tabs) {
+      entry.eventHandler();  // detach listeners before destroying
       if (win && !win.isDestroyed()) {
         try { win.contentView.removeChildView(entry.view); } catch { /* ok */ }
       }

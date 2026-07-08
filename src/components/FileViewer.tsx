@@ -446,7 +446,7 @@ function MarkdownRenderer({ text }: { text: string }) {
 }
 
 function escapeHtml(s: string): string {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
 function simpleMarkdown(text: string): string {
@@ -514,7 +514,12 @@ function simpleMarkdown(text: string): string {
 function sanitizeHref(url: string): string {
   const decoded = url.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"');
   const scheme = decoded.trim().toLowerCase().replace(/[\x00-\x1f\x7f]/g, '');
-  if (/^(javascript|vbscript|data|blob):/i.test(scheme)) return '';
+  // Allowlist: only http(s) and anchor-only links
+  if (/^https?:/.test(scheme) || /^#/.test(scheme) || /^mailto:/.test(scheme)) return url;
+  // Block dangerous schemes
+  if (/^(javascript|vbscript|data|blob|file|ssh|ftp|sftp):/i.test(scheme)) return '';
+  // Unknown scheme — block for safety
+  if (/^[a-z][a-z0-9+.-]*:/i.test(scheme)) return '';
   return url;
 }
 

@@ -136,12 +136,16 @@ export class ClaudeSession {
         return { behavior: 'deny', message: 'session ended', interrupt: true };
       }
       if (this.autoApproveScope !== 'off') {
-        // 'all' scope: every tool is auto-approved (user explicitly chose this).
+        // 'all' scope: most tools auto-approved, but ALWAYS_DESTRUCTIVE
+        // tools (e.g. browser_evaluate) still require native OS confirmation.
         if (this.autoApproveScope === 'all') {
-          return { behavior: 'allow', updatedInput: input };
+          if (classifyToolRisk(toolName) !== 'destructive') {
+            return { behavior: 'allow', updatedInput: input };
+          }
+          // Destructive tool under 'all' — fall through to confirmDestructive.
         }
         // 'read' scope: only safe tools auto-approved; destructive ones escalate.
-        if (classifyToolRisk(toolName) === 'safe') {
+        if (this.autoApproveScope === 'read' && classifyToolRisk(toolName) === 'safe') {
           return { behavior: 'allow', updatedInput: input };
         }
         if (this.confirmDestructive) {

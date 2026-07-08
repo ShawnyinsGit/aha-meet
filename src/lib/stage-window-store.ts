@@ -12,6 +12,8 @@ export interface StageWindow {
   title: string;
   browserTabId?: string;
   filePath?: string;
+  /** For terminal windows: the worker id whose activity should be displayed */
+  workerId?: string;
 }
 
 export interface StageWindowState {
@@ -36,6 +38,7 @@ const initialState: StageWindowState = {
 class StageWindowStore {
   private state: StageWindowState = { ...initialState };
   private listeners = new Set<Listener>();
+  private browserUnsubs = new Map<string, () => void>();
 
   subscribe = (listener: Listener): (() => void) => {
     this.listeners.add(listener);
@@ -55,7 +58,7 @@ class StageWindowStore {
     this.notify();
   }
 
-  async createWindow(type: StageWindowType): Promise<void> {
+  async createWindow(type: StageWindowType, opts?: { workerId?: string; title?: string }): Promise<void> {
     if (type === 'activity') {
       this.setActiveWindow(ACTIVITY_TAB_ID);
       return;
@@ -72,7 +75,7 @@ class StageWindowStore {
         title: '新标签页',
         browserTabId: tab.id,
       };
-      browserStore.subscribe(() => {
+      const unsub = browserStore.subscribe(() => {
         const snap = browserStore.getSnapshot();
         const bTab = snap.tabs.find((t) => t.id === tab.id);
         if (bTab) {
@@ -86,13 +89,27 @@ class StageWindowStore {
           }
         }
       });
+      this.browserUnsubs.set(id, unsub);
       this.update({
         windows: [...this.state.windows, window],
         activeWindowId: id,
       });
       await browserStore.setActiveTab(tab.id);
+    } else if (type === 'terminal') {
+      // Terminal windows can be associated with a specific worker whose
+      // activity should be rendered. Multiple terminal tabs are allowed.
+      const window: StageWindow = {
+        id,
+        type: 'terminal',
+        title: opts?.title ?? '终端',
+        workerId: opts?.workerId,
+      };
+      this.update({
+        windows: [...this.state.windows, window],
+        activeWindowId: id,
+      });
     } else {
-      const title = type === 'terminal' ? '终端' : type === 'file' ? '文件' : '交付';
+      const title = type === 'file' ? '文件' : '交付';
       const window: StageWindow = { id, type, title };
       this.update({
         windows: [...this.state.windows, window],
@@ -107,6 +124,12 @@ class StageWindowStore {
     if (!win) return;
 
     if (win.type === 'browser' && win.browserTabId) {
+      // Clean up the browser title subscription to prevent memory leak
+      const unsub = this.browserUnsubs.get(id);
+      if (unsub) {
+        unsub();
+        this.browserUnsubs.delete(id);
+      }
       await browserStore.closeTab(win.browserTabId);
     }
 

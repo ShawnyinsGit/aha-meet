@@ -49,12 +49,32 @@ const SAFE_MCP_PREFIXES: ReadonlyArray<string> = [
 // mouse_move, and scroll are read-only / low-risk; click and keyboard actions
 // are destructive (they modify external application state).
 const SAFE_COMPUTER_USE_TOOLS: ReadonlySet<string> = new Set([
+  'mcp__embedded-browser__browser_navigate',
+  'mcp__embedded-browser__browser_snapshot',
+  'mcp__embedded-browser__browser_console_messages',
+  'mcp__embedded-browser__browser_close',
+  'mcp__embedded-browser__browser_tab_list',
+  'mcp__embedded-browser__browser_tab_select',
+  'mcp__embedded-browser__browser_tab_new',
+  'mcp__embedded-browser__browser_tab_close',
   'mcp__computer-use__screenshot',
   'mcp__computer-use__mouse_move',
   'mcp__computer-use__scroll',
 ]);
 
+// Embedded browser tools that execute arbitrary JavaScript in a web context.
+// These are always destructive — even under 'all' auto-approve, they must go
+// through the native OS confirmation dialog. An AI worker (or prompt injection)
+// could exfiltrate cookies/session tokens from authenticated web sessions.
+const ALWAYS_DESTRUCTIVE_PREFIXES: ReadonlyArray<string> = [
+  'mcp__embedded-browser__browser_evaluate',
+];
+
 export function classifyToolRisk(toolName: string): ToolRisk {
+  // Always-destructive tools bypass auto-approve entirely, even at 'all' scope.
+  for (const prefix of ALWAYS_DESTRUCTIVE_PREFIXES) {
+    if (toolName === prefix || toolName.startsWith(prefix + '_')) return 'destructive';
+  }
   if (SAFE_BUILTIN_TOOLS.has(toolName)) return 'safe';
   if (SAFE_COMPUTER_USE_TOOLS.has(toolName)) return 'safe';
   for (const prefix of SAFE_MCP_PREFIXES) {

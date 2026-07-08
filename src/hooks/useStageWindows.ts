@@ -8,8 +8,8 @@ export function useStageWindows() {
     stageWindowStore.getSnapshot,
   );
 
-  const createWindow = useCallback((type: StageWindowType) => {
-    void stageWindowStore.createWindow(type);
+  const createWindow = useCallback((type: StageWindowType, opts?: { workerId?: string; title?: string }) => {
+    void stageWindowStore.createWindow(type, opts);
   }, []);
 
   const closeWindow = useCallback((id: string) => {

@@ -1,4 +1,4 @@
-import { ReactNode, RefObject, useState, useCallback } from 'react';
+import { ReactNode, RefObject, useState, useCallback, useMemo } from 'react';
 import type { ScreenShareState } from '../hooks/useScreenShare';
 import type { DeliverySnapshot, WorkerState } from '../lib/meeting-store';
 import type { BrowserTabInfo, MeetingPlan } from '../types';
@@ -33,7 +33,7 @@ interface ScreenStageProps {
   activeWindowId: string | null;
   onSelectWindow: (id: string) => void;
   onCloseWindow: (id: string) => void;
-  onCreateWindow: (type: StageWindowType) => void;
+  onCreateWindow: (type: StageWindowType, opts?: { workerId?: string; title?: string }) => void;
   onResolvePermission: (id: string, decision: 'allow' | 'deny') => void;
   browserTabs?: BrowserTabInfo[];
   browserActiveTabId?: string | null;
@@ -95,6 +95,16 @@ export function ScreenStage({
 
   const activeWindow = stageWindows.find((w) => w.id === activeWindowId) ?? null;
   const isActivityTab = activeWindow?.type === 'activity' || activeWindowId === ACTIVITY_TAB_ID;
+
+  // For terminal stage windows, find the worker whose activity should be
+  // displayed. Falls back to the first talker if no workerId is specified.
+  const terminalActivity = useMemo(() => {
+    if (activeWindow?.type !== 'terminal') return [];
+    const target = activeWindow.workerId
+      ? workers.find((w) => w.id === activeWindow.workerId)
+      : workers.find((w) => w.role === 'talker');
+    return target?.activity ?? [];
+  }, [activeWindow, workers]);
 
   const stageClass = share.active
     ? 'stage-sharing'
@@ -175,11 +185,11 @@ export function ScreenStage({
 
             {activeWindow?.type === 'terminal' && (
               <div className="stage-terminal-content">
-                <TerminalPanel activity={[]} />
+                <TerminalPanel activity={terminalActivity} />
               </div>
             )}
 
-            {activeWindow?.type === 'file' && viewingFile && activeWindow.filePath && (
+            {activeWindow?.type === 'file' && activeWindow.filePath && (
               <div className="stage-file-content">
                 <FileViewer
                   relativePath={activeWindow.filePath}

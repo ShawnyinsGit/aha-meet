@@ -173,8 +173,12 @@ export function registerBackendAuthIpc(): void {
     if (trimmed.length > 0) {
       try {
         const parsed = new URL(trimmed);
-        if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
-          return { ok: false, error: 'base URL must use http:// or https://' };
+        if (parsed.protocol !== 'https:') {
+          // Allow http:// only for localhost (local development)
+          const isLocalhost = parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1' || parsed.hostname === '::1';
+          if (parsed.protocol !== 'http:' || !isLocalhost) {
+            return { ok: false, error: 'base URL must use https:// (http:// allowed only for localhost)' };
+          }
         }
       } catch {
         return { ok: false, error: 'invalid URL format' };

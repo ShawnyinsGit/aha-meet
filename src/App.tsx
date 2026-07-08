@@ -25,7 +25,7 @@ import { SideDrawer } from './components/SideDrawer';
 import { SettingsMenu } from './components/SettingsMenu';
 import { VoiceGuideModal } from './components/VoiceGuideModal';
 import { ParticipantPanel } from './components/ParticipantPanel';
-import type { AutoApproveScope, DesktopSource } from './types';
+import type { AutoApproveScope, BackendInfo, DesktopSource } from './types';
 
 export function App() {
   const { state, restartSession, sendText, sendImage, sendAttachments, publishDroppedFiles, onDroppedFiles, resolvePermission, interrupt, setSpeakCallback } = useClaude();
@@ -48,7 +48,20 @@ export function App() {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [aiSpeaking, setAiSpeaking] = useState(false);
   const [viewingFile, setViewingFile] = useState<{ relativePath: string } | null>(null);
+  const [openParticipantsTab, setOpenParticipantsTab] = useState(false);
+  const [backends, setBackends] = useState<BackendInfo[]>([]);
   const elapsed = useElapsedSeconds(activeOpenedAt);
+
+  // Load available backends for the participants tab
+  useEffect(() => {
+    window.vibeMeet.backendAuth.list().then(setBackends).catch(() => setBackends([]));
+  }, []);
+
+  const activeBackendIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const [, hg] of workers.hostGroups) ids.add(hg.backendId);
+    return ids;
+  }, [workers.hostGroups]);
 
   const speakingRef = useRef(false);
   const sendWithModeRef = useRef<(text: string) => void>(sendText);
@@ -73,6 +86,13 @@ export function App() {
     }, 300);
     return () => window.clearInterval(id);
   }, [aiSpeaking]);
+
+  // Reset the participants-tab signal once SideDrawer has consumed it
+  useEffect(() => {
+    if (openParticipantsTab && drawerOpen) {
+      setOpenParticipantsTab(false);
+    }
+  }, [openParticipantsTab, drawerOpen]);
 
   useEffect(() => {
     meetingStore.hydrateRestore().catch((err) => {
@@ -260,9 +280,12 @@ ${trimmed}`
               <ParticipantPanel
                 workers={workers.workerList}
                 hostGroups={workers.hostGroups}
-                running={state.running}
                 aiSpeaking={aiSpeaking}
-                onAddHost={workers.addHostGroup}
+                onResolvePermission={resolvePermission}
+                onOpenParticipantsTab={() => {
+                  setDrawerOpen(true);
+                  setOpenParticipantsTab(true);
+                }}
                 selfTile={
                   <ParticipantTile
                     name="You"
@@ -319,6 +342,14 @@ ${trimmed}`
             stageWindows.openFile(path);
           }}
           viewingFilePath={viewingFile?.relativePath ?? null}
+          backends={backends}
+          activeBackendIds={activeBackendIds}
+          onAddHost={(backendId) => {
+            workers.addHostGroup(backendId);
+            // Refresh backends after adding a host
+            window.vibeMeet.backendAuth.list().then(setBackends).catch(() => setBackends([]));
+          }}
+          forceParticipantsTab={openParticipantsTab}
         />
       </main>
 

@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Send, Paperclip, X, FileText, FileType, Image as ImageIcon, FileWarning, FolderOpen } from 'lucide-react';
+import { Send, Paperclip, X, FileText, FileType, Image as ImageIcon, FileWarning, FolderOpen, Users } from 'lucide-react';
 import type {
   ActivityEntry,
   AttachmentKind,
+  BackendInfo,
   PendingPermission,
   StagedAttachment,
   TranscriptEntry,
@@ -27,6 +28,10 @@ interface SideDrawerProps {
   sessionId?: string | null;
   onViewFile?: (relativePath: string) => void;
   viewingFilePath?: string | null;
+  backends?: BackendInfo[];
+  activeBackendIds?: Set<string>;
+  onAddHost?: (backendId: string) => void;
+  forceParticipantsTab?: boolean;
 }
 
 const TIME_TICK_MS = 30_000;
@@ -49,7 +54,7 @@ const ACCEPT_ATTR = [
   'image/png', 'image/jpeg', 'image/webp',
 ].join(',');
 
-type Tab = 'chat' | 'activity' | 'files';
+type Tab = 'chat' | 'participants' | 'activity' | 'files';
 
 const dotColor: Record<ActivityEntry['kind'], string> = {
   'tool-call': '#7cc6ff',
@@ -146,6 +151,10 @@ export function SideDrawer({
   sessionId,
   onViewFile,
   viewingFilePath,
+  backends = [],
+  activeBackendIds = new Set(),
+  onAddHost,
+  forceParticipantsTab,
 }: SideDrawerProps) {
   const [tab, setTab] = useState<Tab>('chat');
   const [text, setText] = useState('');
@@ -162,6 +171,10 @@ export function SideDrawer({
   useEffect(() => {
     if (viewingFilePath) setTab('files');
   }, [viewingFilePath]);
+
+  useEffect(() => {
+    if (forceParticipantsTab) setTab('participants');
+  }, [forceParticipantsTab]);
 
   useEffect(() => {
     if (tab !== 'chat') return;
@@ -292,6 +305,13 @@ export function SideDrawer({
   return (
     <aside className={`drawer ${open ? 'drawer-open' : ''}`}>
       <div className="drawer-tabs">
+        <button className={`drawer-tab ${tab === 'participants' ? 'active' : ''}`} onClick={() => setTab('participants')}>
+          <Users size={14} aria-hidden="true" style={{ marginRight: 4, verticalAlign: -2 }} />
+          参会人
+          {backends.filter((b) => activeBackendIds.has(b.id)).length > 0 && (
+            <span className="drawer-badge">{backends.filter((b) => activeBackendIds.has(b.id)).length}</span>
+          )}
+        </button>
         <button className={`drawer-tab ${tab === 'chat' ? 'active' : ''}`} onClick={() => setTab('chat')}>
           Chat
           {transcript.length > 0 && <span className="drawer-badge">{transcript.length}</span>}
@@ -305,6 +325,47 @@ export function SideDrawer({
           Files
         </button>
       </div>
+
+      {tab === 'participants' && (
+        <div className="drawer-participants">
+          <div className="drawer-participants-header">
+            <span className="drawer-participants-title">已配置的 CLI 参会人</span>
+            <span className="drawer-participants-count">{backends.length} 个可用</span>
+          </div>
+          <div className="drawer-participants-list">
+            {backends.length === 0 && (
+              <div className="drawer-empty">暂无已配置的 CLI 后端。请在设置中添加。</div>
+            )}
+            {backends.map((b) => {
+              const isActive = activeBackendIds.has(b.id);
+              return (
+                <div key={b.id} className={`drawer-participant-row ${isActive ? 'active' : ''}`}>
+                  <div className="drawer-participant-info">
+                    <span className="drawer-participant-name">{b.displayName}</span>
+                    <span className="drawer-participant-status">
+                      {b.available ? '✓ 已安装' : '✗ 未安装'}
+                      {b.hasApiKey && ' · 🔑'}
+                      {b.isDefault && ' · 默认'}
+                    </span>
+                  </div>
+                  {isActive ? (
+                    <span className="drawer-participant-badge">已加入</span>
+                  ) : (
+                    <button
+                      className="drawer-participant-invite"
+                      onClick={() => onAddHost?.(b.id)}
+                      disabled={!b.available || disabled}
+                      title={!b.available ? 'CLI 未安装，无法邀请' : disabled ? '会议未开始' : `邀请 ${b.displayName}`}
+                    >
+                      邀请
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {tab === 'chat' && (
         <div className="drawer-chat">

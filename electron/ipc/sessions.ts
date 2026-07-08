@@ -112,7 +112,9 @@ export function registerSessionsIpc(ctx: IpcContext): void {
       // it's effectively instant.
       const shadow = await ctx.awaitClaudeShadowHome();
       const mergedEnv = mergedSubprocessEnv();
-      const workerEnv = shadow ? { ...mergedEnv, HOME: shadow } : undefined;
+      const workerEnv = shadow
+        ? { ...mergedEnv, HOME: shadow, USERPROFILE: shadow }
+        : undefined;
       // The talker normally runs Haiku for latency; when the user points at a
       // custom gateway/model via ANTHROPIC_MODEL we honor it so the talker
       // doesn't request a model the gateway can't serve.
@@ -205,7 +207,7 @@ export function registerSessionsIpc(ctx: IpcContext): void {
     const id = typeof payload?.id === 'string' ? payload.id : '';
     const slot = ctx.registry.get(id);
     if (!slot) return { ok: false, error: 'not-found' };
-    try { slot.orchestrator.end(); } catch { /* ignore */ }
+    try { await slot.orchestrator.end(); } catch { /* ignore */ }
     clearApprovedExternalDirs(id);
     ctx.registry.close(id);
     // Close is the one path where "tab still on disk after close" would be a

@@ -1,40 +1,25 @@
-import { memo, useMemo, useState, useCallback } from 'react';
-import { ChevronDown, ChevronUp, UserPlus } from 'lucide-react';
+import { memo, useMemo, useState } from 'react';
+import { ChevronDown, ChevronUp, Plus } from 'lucide-react';
 import type { HostGroupState, WorkerState } from '../lib/meeting-store';
 import { WorkerCard } from './WorkerCard';
 
 interface ParticipantPanelProps {
   workers: WorkerState[];
   hostGroups: Map<string, HostGroupState>;
-  running: boolean;
   aiSpeaking: boolean;
   selfTile: React.ReactNode;
-  onAddHost?: (backendId: string) => void;
+  onResolvePermission: (id: string, decision: 'allow' | 'deny') => void;
+  onOpenParticipantsTab?: () => void;
 }
-
-const BACKEND_LABELS: Record<string, string> = {
-  'claude-code': 'Claude Code',
-  'codex': 'Codex CLI',
-  'kimi': 'Kimi CLI',
-  'qoder': 'Qoder CLI',
-};
-
-const BACKEND_OPTIONS = [
-  { id: 'claude-code', label: 'Claude Code' },
-  { id: 'codex', label: 'Codex CLI' },
-  { id: 'kimi', label: 'Kimi CLI' },
-  { id: 'qoder', label: 'Qoder CLI' },
-];
 
 export const ParticipantPanel = memo(function ParticipantPanel({
   workers,
   hostGroups,
-  running,
   aiSpeaking,
   selfTile,
-  onAddHost,
+  onResolvePermission,
+  onOpenParticipantsTab,
 }: ParticipantPanelProps) {
-  const [showInviteMenu, setShowInviteMenu] = useState(false);
   const [barCollapsed, setBarCollapsed] = useState(false);
 
   // Find the talker worker for each host group
@@ -57,85 +42,54 @@ export const ParticipantPanel = memo(function ParticipantPanel({
     return entries;
   }, [hostGroups]);
 
-  const handleAddHost = useCallback((backendId: string) => {
-    setShowInviteMenu(false);
-    onAddHost?.(backendId);
-  }, [onAddHost]);
-
   return (
-    <aside className="tiles tiles--stack">
-      <div className={`tiles-bar ${barCollapsed ? 'tiles-bar-collapsed' : ''}`}>
-        <div className="tiles-bar-scroll">
-          {/* Self tile */}
-          <div className="tiles-bar-self">{selfTile}</div>
+    <aside className="tiles-gallery">
+      <div className={`tiles-gallery-scroll ${barCollapsed ? 'tiles-gallery-collapsed' : ''}`}>
+        {/* Self tile */}
+        <div className="tiles-gallery-self">{selfTile}</div>
 
-          {/* Host talker tiles */}
-          {sortedHostGroups.map(([hostId, hg]) => {
-            const talker = hostTalkers.get(hostId);
-            if (!talker) return null;
+        {/* Host talker tiles */}
+        {sortedHostGroups.map(([hostId, hg]) => {
+          const talker = hostTalkers.get(hostId);
+          if (!talker) return null;
 
-            return (
-              <WorkerCard
-                key={hostId}
-                worker={talker}
-                depTitles={new Map()}
-                mode="gallery"
-                selected={false}
-                speaking={aiSpeaking && talker.role === 'talker'}
-                onSelect={() => {}}
-                onResolvePermission={() => {}}
-              />
-            );
-          })}
+          return (
+            <WorkerCard
+              key={hostId}
+              worker={talker}
+              depTitles={new Map()}
+              mode="gallery"
+              selected={false}
+              speaking={aiSpeaking && talker.role === 'talker'}
+              onSelect={() => {}}
+              onResolvePermission={onResolvePermission}
+            />
+          );
+        })}
 
-          {/* Invite button */}
-          {onAddHost && (
-            <div className="tiles-bar-invite-wrap">
-              {showInviteMenu && (
-                <div className="tiles-bar-invite-dropdown">
-                  <div className="tiles-bar-invite-title">邀请参会人</div>
-                  {BACKEND_OPTIONS.map((opt) => {
-                    const alreadyAdded = sortedHostGroups.some(
-                      ([, hg]) => hg.backendId === opt.id
-                    );
-                    return (
-                      <button
-                        key={opt.id}
-                        type="button"
-                        className={`tiles-bar-invite-item ${alreadyAdded ? 'disabled' : ''}`}
-                        onClick={() => !alreadyAdded && handleAddHost(opt.id)}
-                        disabled={alreadyAdded}
-                      >
-                        {opt.label}
-                        {alreadyAdded && <span className="tiles-bar-invite-added">已添加</span>}
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-              <button
-                type="button"
-                className="tiles-bar-invite-btn"
-                onClick={() => setShowInviteMenu((v) => !v)}
-                title="邀请参会人"
-              >
-                <UserPlus size={20} />
-              </button>
-            </div>
-          )}
-        </div>
-
-        {/* Collapse button */}
-        <button
-          type="button"
-          className="tiles-bar-collapse"
-          onClick={() => setBarCollapsed((v) => !v)}
-          aria-label={barCollapsed ? '展开参会人' : '收起参会人'}
-          title={barCollapsed ? '展开参会人' : '收起参会人'}
-        >
-          {barCollapsed ? <ChevronDown size={16} /> : <ChevronUp size={16} />}
-        </button>
+        {/* Invite button - opens participants tab */}
+        {onOpenParticipantsTab && (
+          <button
+            type="button"
+            className="tiles-gallery-invite-btn"
+            onClick={onOpenParticipantsTab}
+            title="邀请参会人"
+          >
+            <Plus size={20} />
+          </button>
+        )}
       </div>
+
+      {/* Collapse button - bottom center */}
+      <button
+        type="button"
+        className="tiles-gallery-collapse"
+        onClick={() => setBarCollapsed((v) => !v)}
+        aria-label={barCollapsed ? '展开参会人' : '收起参会人'}
+        title={barCollapsed ? '展开参会人' : '收起参会人'}
+      >
+        {barCollapsed ? <ChevronDown size={16} /> : <ChevronUp size={16} />}
+      </button>
     </aside>
   );
 });

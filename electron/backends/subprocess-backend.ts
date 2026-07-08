@@ -169,7 +169,11 @@ export abstract class SubprocessSession implements BackendSession {
       // Some CLIs wait for stdin EOF before flushing pending output.
       try { this.process.stdin?.end(); } catch { /* ignore */ }
       try {
-        this.process.kill('SIGTERM');
+        // On Windows, SIGTERM maps to TerminateProcess (immediate kill).
+        // Use SIGINT (Ctrl+C) first for graceful shutdown, then SIGTERM as
+        // fallback. On Unix, SIGTERM allows graceful cleanup.
+        const gracefulSignal = process.platform === 'win32' ? 'SIGINT' : 'SIGTERM';
+        this.process.kill(gracefulSignal);
         // Give it 2 seconds, then force kill
         const killTimer = setTimeout(() => {
           if (this.process) {

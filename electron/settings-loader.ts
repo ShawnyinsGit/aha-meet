@@ -110,10 +110,14 @@ export function mergedSubprocessEnv(): NodeJS.ProcessEnv {
   // 1. Inherit only allowlisted vars from the Electron main process env.
   for (const [k, v] of Object.entries(process.env)) {
     if (typeof v === 'string' && isEnvAllowed(k)) {
-      // Strip dangerous NODE_OPTIONS flags (--inspect, --require) to prevent
-      // debug port exposure and arbitrary code loading via subprocess env.
+      // Strip dangerous NODE_OPTIONS flags (--inspect*, --require, -r) to
+      // prevent debug port exposure and arbitrary code loading via subprocess.
       if (k === 'NODE_OPTIONS') {
-        const cleaned = v.replace(/--inspect[^\s]*|--require[^\s]*/g, '').trim();
+        const cleaned = v
+          .replace(/--inspect[^\s]*/g, '')
+          .replace(/--require[^\s]*/g, '')
+          .replace(/(?:^|\s)-r\s+[^\s]+/g, ' ')
+          .trim();
         if (cleaned) out[k] = cleaned;
         continue;
       }

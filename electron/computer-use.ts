@@ -28,13 +28,25 @@ export interface ScreenshotData {
 }
 
 // ---------------------------------------------------------------------------
+// Platform guard — Computer Use relies on macOS-only osascript (JXA).
+// On Windows/Linux, isAccessibilityGranted() returns false — Computer Use is
+// macOS-only — and every action returns an error before reaching osascript.
+
+function platformGuard(): ActionErr | null {
+  if (process.platform === 'darwin') return null;
+  return { ok: false, error: 'Computer Use is only available on macOS' };
+}
+
+// ---------------------------------------------------------------------------
 // Accessibility permission gate
 
 export function isAccessibilityGranted(): boolean {
+  if (process.platform !== 'darwin') return false;
   return systemPreferences.isTrustedAccessibilityClient(false);
 }
 
 export function requestAccessibility(): boolean {
+  if (process.platform !== 'darwin') return false;
   return systemPreferences.isTrustedAccessibilityClient(true);
 }
 
@@ -51,6 +63,8 @@ function requireAccessibility(): ActionErr | null {
 // Screenshot — uses Electron desktopCapturer, no accessibility needed
 
 export async function takeScreenshot(displayId?: number): Promise<ActionResult<ScreenshotData>> {
+  const pGuard = platformGuard();
+  if (pGuard) return pGuard;
   try {
     const displays = screen.getAllDisplays();
     const target = displayId != null
@@ -137,6 +151,8 @@ export async function mouseClick(
   button: MouseButton = 'left',
   clickCount: number = 1,
 ): Promise<ActionResult> {
+  const pGuard = platformGuard();
+  if (pGuard) return pGuard;
   const permErr = requireAccessibility();
   if (permErr) return permErr;
 
@@ -168,6 +184,8 @@ export async function mouseClick(
 }
 
 export async function mouseMove(x: number, y: number): Promise<ActionResult> {
+  const pGuard = platformGuard();
+  if (pGuard) return pGuard;
   const permErr = requireAccessibility();
   if (permErr) return permErr;
 
@@ -200,6 +218,8 @@ const KEY_MAP: Record<string, number> = {
 };
 
 export async function keyboardType(text: string): Promise<ActionResult> {
+  const pGuard = platformGuard();
+  if (pGuard) return pGuard;
   const permErr = requireAccessibility();
   if (permErr) return permErr;
 
@@ -226,6 +246,8 @@ export async function keyboardPress(
   key: string,
   modifiers: string[] = [],
 ): Promise<ActionResult> {
+  const pGuard = platformGuard();
+  if (pGuard) return pGuard;
   const permErr = requireAccessibility();
   if (permErr) return permErr;
 
@@ -281,6 +303,8 @@ export async function scroll(
   direction: ScrollDirection,
   amount: number = 3,
 ): Promise<ActionResult> {
+  const pGuard = platformGuard();
+  if (pGuard) return pGuard;
   const permErr = requireAccessibility();
   if (permErr) return permErr;
 

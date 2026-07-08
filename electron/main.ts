@@ -155,6 +155,7 @@ function createWindow() {
   // that reports whether whisper or browser ASR is live).
   const wc = mainWindow.webContents;
   wc.on('before-input-event', (_e, input) => {
+    if (!isDev && !process.env.VIBE_MEET_DEVTOOLS) return;
     if (input.type !== 'keyDown') return;
     if (input.key.toLowerCase() !== 'i') return;
     const combo = process.platform === 'darwin'
