@@ -100,6 +100,21 @@ export function App() {
     });
   }, []);
 
+  // Auto-open delivery stage window when a new delivery arrives
+  const lastDeliveryTaskId = useRef<string | null>(null);
+  useEffect(() => {
+    const delivery = workers.currentDelivery;
+    if (!delivery) return;
+    if (delivery.taskId === lastDeliveryTaskId.current) return;
+    lastDeliveryTaskId.current = delivery.taskId;
+    // Open delivery review in a stage tab
+    stageWindows.openDelivery();
+    // Also auto-open each delivery file in a file tab
+    for (const f of delivery.files) {
+      stageWindows.openFile(f.path);
+    }
+  }, [workers.currentDelivery, stageWindows]);
+
   const micEnabled = hasLiveTab || voiceLock.enrollmentActive;
 
   const onVoiceFinal = useCallback(async (text: string) => {

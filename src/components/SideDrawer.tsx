@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Send, Paperclip, X, FileText, FileType, Image as ImageIcon, FileWarning, FolderOpen, Users } from 'lucide-react';
+import { Send, Paperclip, X, FileText, FileType, Image as ImageIcon, FileWarning, FolderOpen, Users, MessageSquare } from 'lucide-react';
 import type {
   ActivityEntry,
   AttachmentKind,
@@ -54,7 +54,7 @@ const ACCEPT_ATTR = [
   'image/png', 'image/jpeg', 'image/webp',
 ].join(',');
 
-type Tab = 'chat' | 'participants' | 'activity' | 'files';
+type Tab = 'chat' | 'participants' | 'files';
 
 const dotColor: Record<ActivityEntry['kind'], string> = {
   'tool-call': '#7cc6ff',
@@ -307,18 +307,15 @@ export function SideDrawer({
       <div className="drawer-tabs">
         <button className={`drawer-tab ${tab === 'participants' ? 'active' : ''}`} onClick={() => setTab('participants')}>
           <Users size={14} aria-hidden="true" style={{ marginRight: 4, verticalAlign: -2 }} />
-          参会人
+          Participants
           {backends.filter((b) => activeBackendIds.has(b.id)).length > 0 && (
             <span className="drawer-badge">{backends.filter((b) => activeBackendIds.has(b.id)).length}</span>
           )}
         </button>
         <button className={`drawer-tab ${tab === 'chat' ? 'active' : ''}`} onClick={() => setTab('chat')}>
+          <MessageSquare size={14} aria-hidden="true" style={{ marginRight: 4, verticalAlign: -2 }} />
           Chat
           {transcript.length > 0 && <span className="drawer-badge">{transcript.length}</span>}
-        </button>
-        <button className={`drawer-tab ${tab === 'activity' ? 'active' : ''}`} onClick={() => setTab('activity')}>
-          Activity
-          {activity.length > 0 && <span className="drawer-badge">{activity.length}</span>}
         </button>
         <button className={`drawer-tab ${tab === 'files' ? 'active' : ''}`} onClick={() => setTab('files')}>
           <FolderOpen size={14} aria-hidden="true" style={{ marginRight: 4, verticalAlign: -2 }} />
@@ -329,8 +326,8 @@ export function SideDrawer({
       {tab === 'participants' && (
         <div className="drawer-participants">
           <div className="drawer-participants-header">
-            <span className="drawer-participants-title">已配置的 CLI 参会人</span>
-            <span className="drawer-participants-count">{backends.length} 个可用</span>
+            <span className="drawer-participants-title">Configured CLI Backends</span>
+            <span className="drawer-participants-count">{backends.length} available</span>
           </div>
           <div className="drawer-participants-list">
             {backends.length === 0 && (
@@ -511,68 +508,6 @@ export function SideDrawer({
               </button>
             </div>
           </div>
-        </div>
-      )}
-
-      {tab === 'activity' && (
-        <div className="drawer-activity">
-          {activity.length === 0 && <div className="drawer-empty">Tool calls and system events will appear here.</div>}
-          {activity.slice().reverse().map((e) => {
-            const hasDetail = Boolean(e.detail);
-            const isOpen = expanded.has(e.id);
-            const rowClass = `act-row${hasDetail ? ' has-detail' : ''}${isOpen ? ' expanded' : ''}`;
-            return (
-              <div
-                key={e.id}
-                className={rowClass}
-                role={hasDetail ? 'button' : undefined}
-                tabIndex={hasDetail ? 0 : undefined}
-                aria-expanded={hasDetail ? isOpen : undefined}
-                onClick={hasDetail ? () => toggleExpanded(e.id) : undefined}
-                onKeyDown={
-                  hasDetail
-                    ? (ev) => {
-                        if (ev.key === 'Enter' || ev.key === ' ') {
-                          ev.preventDefault();
-                          toggleExpanded(e.id);
-                        }
-                      }
-                    : undefined
-                }
-              >
-                <span className="act-dot" style={{ background: dotColor[e.kind] }} />
-                <div className="act-body">
-                  <div className="act-title">
-                    {e.source && (
-                      <span className={`agent-pill agent-pill-${e.source}`}>
-                        {e.source === 'talker' ? 'Host' : 'Worker'}
-                      </span>
-                    )}
-                    <span className="act-title-text">{e.title}</span>
-                    {hasDetail && (
-                      <span className="act-chevron" aria-hidden="true">
-                        {isOpen ? '▾' : '▸'}
-                      </span>
-                    )}
-                  </div>
-                  {hasDetail && <div className="act-detail">{e.detail}</div>}
-                  {e.actionPath && (
-                    <button
-                      type="button"
-                      className="act-action"
-                      onClick={(ev) => {
-                        ev.stopPropagation();
-                        const p = e.actionPath;
-                        if (p) void window.vibeMeet.decisions.open(p);
-                      }}
-                    >
-                      打开 md
-                    </button>
-                  )}
-                </div>
-              </div>
-            );
-          })}
         </div>
       )}
 

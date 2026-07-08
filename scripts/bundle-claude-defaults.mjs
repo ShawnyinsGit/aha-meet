@@ -90,5 +90,15 @@ for (const { from, to } of sources) {
   console.log(`[bundle-claude-defaults] ${from} → ${n} files`);
 }
 
+// Copy repo-local skills (src/skills/) — these ship with the app as bundled
+// skills. They take precedence over ~/.claude versions.
+const repoSkillsSrc = join(repoRoot, 'src', 'skills');
+const repoSkillsDst = join(stageRoot, 'skills');
+if (existsSync(repoSkillsSrc)) {
+  const n = copyTree(repoSkillsSrc, repoSkillsDst);
+  summary['src/skills'] = n;
+  console.log(`[bundle-claude-defaults] src/skills → ${n} files (repo-local)`);
+}
+
 console.log(`[bundle-claude-defaults] staged at ${stageRoot}`);
 console.log(`[bundle-claude-defaults] summary:`, summary);
