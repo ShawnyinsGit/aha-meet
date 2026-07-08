@@ -14,6 +14,7 @@ interface ActivityTabContentProps {
   onResolvePermission: (id: string, decision: 'allow' | 'deny') => void;
   onSelectUser: () => void;
   selectedUser: boolean;
+  onOpenInTerminal?: (workerId: string) => void;
 }
 
 export function ActivityTabContent({
@@ -24,6 +25,7 @@ export function ActivityTabContent({
   onResolvePermission,
   onSelectUser,
   selectedUser,
+  onOpenInTerminal,
 }: ActivityTabContentProps) {
   const sortedWorkers = useMemo(() => {
     const statusPriority = (w: WorkerState): number => {
@@ -107,6 +109,7 @@ export function ActivityTabContent({
           lastText={selectedWorker.lastText}
           startedAt={selectedWorker.startedAt}
           pendingPermissionTool={selectedWorker.pendingPermission?.toolName ?? null}
+          onOpenInTerminal={onOpenInTerminal ? () => onOpenInTerminal(selectedWorker.id) : undefined}
         />
       )}
     </div>

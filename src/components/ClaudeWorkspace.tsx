@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronDown, ChevronRight } from 'lucide-react';
+import { ChevronDown, ChevronRight, Terminal } from 'lucide-react';
 import type {
   ActivityEntry,
   TranscriptEntry,
@@ -43,6 +43,7 @@ interface ClaudeWorkspaceProps {
   pendingPermissionTool?: string | null;
   deliveryHistory?: DeliverySnapshot[];
   onAcceptDelivery?: () => void;
+  onOpenInTerminal?: () => void;
 }
 
 const dotColor: Record<ActivityEntry['kind'], string> = {
@@ -108,6 +109,7 @@ interface FeedRow {
   title: string;
   detail?: string;
   pill?: { label: string; tone: 'done' | 'failed' | 'running' | 'pending' };
+  activityId?: string;
 }
 
 export const ClaudeWorkspace = memo(function ClaudeWorkspace({
@@ -133,6 +135,7 @@ export const ClaudeWorkspace = memo(function ClaudeWorkspace({
   pendingPermissionTool,
   deliveryHistory,
   onAcceptDelivery,
+  onOpenInTerminal,
 }: ClaudeWorkspaceProps) {
   const lastAssistant = useMemo(() => [...transcript].reverse().find((t) => t.role === 'assistant'), [transcript]);
   const latestToolCall = useMemo(
@@ -228,6 +231,7 @@ export const ClaudeWorkspace = memo(function ClaudeWorkspace({
         ts: a.ts,
         title: a.title,
         detail: a.detail,
+        activityId: a.id,
       });
     }
     return rows.slice(0, 12);
@@ -443,6 +447,19 @@ export const ClaudeWorkspace = memo(function ClaudeWorkspace({
                       )}
                       {row.ts > 0 && (
                         <span className="workspace-feed-time">{formatHistoryTime(row.ts)}</span>
+                      )}
+                      {row.kind === 'tool-call' && row.title.toLowerCase().includes('bash') && onOpenInTerminal && (
+                        <button
+                          type="button"
+                          className="workspace-feed-terminal-btn"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onOpenInTerminal();
+                          }}
+                          title="Open in terminal tab"
+                        >
+                          <Terminal size={12} />
+                        </button>
                       )}
                       {clickable && (
                         <span className="workspace-feed-caret" aria-hidden>

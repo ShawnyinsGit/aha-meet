@@ -5056,6 +5056,20 @@ html.settings-view #root {
   color: var(--text-muted);
   flex-shrink: 0;
 }
+.workspace-feed-terminal-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 20px; height: 20px;
+  border: none; border-radius: 4px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.15s, color 0.15s;
+}
+.workspace-feed-terminal-btn:hover {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
 .workspace-feed-time {
   font-size: 10px; color: var(--text-muted);
   font-family: ui-monospace, "SF Mono", Menlo, monospace;

@@ -163,6 +163,7 @@ export function ScreenStage({
                 onResolvePermission={onResolvePermission}
                 onSelectUser={handleSelectUser}
                 selectedUser={selectedUserId === USER_SLOT}
+                onOpenInTerminal={(workerId) => onCreateWindow('terminal', { workerId })}
               />
             )}
 
