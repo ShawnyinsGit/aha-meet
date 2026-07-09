@@ -215,18 +215,6 @@ export function ScreenStage({
                 />
               </div>
             )}
-
-            {activeWindow?.type === 'delivery' && delivery && (
-              <div className="stage-delivery-content">
-                <DeliveryViewer
-                  delivery={delivery}
-                  sessionId={sessionId}
-                  aiSpeaking={aiSpeaking}
-                  onAccept={onAcceptDelivery}
-                  onRevise={onReviseDelivery}
-                />
-              </div>
-            )}
           </div>
         </>
       )}

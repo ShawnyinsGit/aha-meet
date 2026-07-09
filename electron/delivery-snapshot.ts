@@ -31,10 +31,7 @@ export function snapshotDeliveryFilesSync(
 
       const normalised = resolved + sep;
       const cwdNormalised = resolvedCwd + sep;
-      if (!normalised.startsWith(cwdNormalised) && resolved !== resolvedCwd) {
-        console.warn('[delivery-snapshot] skipping file outside cwd:', absPath);
-        continue;
-      }
+      const insideCwd = normalised.startsWith(cwdNormalised) || resolved === resolvedCwd;
 
       let stat;
       try {
@@ -48,7 +45,11 @@ export function snapshotDeliveryFilesSync(
         continue;
       }
 
-      const rel = relative(resolvedCwd, resolved);
+      // Preserve relative path structure for files inside cwd;
+      // for files outside cwd, just use the filename.
+      const rel = insideCwd
+        ? relative(resolvedCwd, resolved)
+        : basename(resolved);
       const snapshotRel = `deliveries/${sanitizeTitle(title)}/${rel}`;
       const dest = pathResolve(destDir, rel);
 

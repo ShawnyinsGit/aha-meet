@@ -108,10 +108,16 @@ export function App() {
     if (delivery.taskId === lastDeliveryTaskId.current) return;
     lastDeliveryTaskId.current = delivery.taskId;
     // Open each delivery file as its own independent top-level tab
+    // Use the snapshot path (inside deliveries/) when available so files
+    // are always read from the project directory, not external locations.
+    const cwd = state.cwd;
     for (const f of delivery.files) {
-      stageWindows.openFile(f.path);
+      const filePath = f.snapshotRelativePath && cwd
+        ? `${cwd}/${f.snapshotRelativePath}`
+        : f.path;
+      stageWindows.openFile(filePath);
     }
-  }, [workers.currentDelivery, stageWindows]);
+  }, [workers.currentDelivery, stageWindows, state.cwd]);
 
   const micEnabled = hasLiveTab || voiceLock.enrollmentActive;
 

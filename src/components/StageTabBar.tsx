@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { Activity, Globe, Terminal, FileText, CheckCircle, X, Plus } from 'lucide-react';
+import { Activity, Globe, Terminal, FileText, X, Plus } from 'lucide-react';
 import type { StageWindow, StageWindowType } from '../lib/stage-window-store';
 
 interface StageTabBarProps {
@@ -17,7 +17,6 @@ const ICON_MAP: Record<StageWindowType, typeof Globe> = {
   browser: Globe,
   terminal: Terminal,
   file: FileText,
-  delivery: CheckCircle,
 };
 
 export function StageTabBar({
