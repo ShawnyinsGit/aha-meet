@@ -13,6 +13,7 @@ export interface UseWorkersResult {
   lastError: string | null;
   currentDelivery: DeliverySnapshot | null;
   deliveryHistory: DeliverySnapshot[];
+  savedDocuments: string[];
   restartSession: () => Promise<void>;
   sendText: (text: string) => Promise<void>;
   sendImage: (dataUrl: string, caption: string) => Promise<void>;
@@ -92,6 +93,7 @@ export function useWorkers(): UseWorkersResult {
     lastError: state.lastError,
     currentDelivery: state.currentDelivery,
     deliveryHistory: state.deliveryHistory,
+    savedDocuments: state.savedDocuments,
     restartSession,
     sendText,
     sendImage,

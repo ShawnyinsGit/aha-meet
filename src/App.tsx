@@ -119,6 +119,19 @@ export function App() {
     }
   }, [workers.currentDelivery, stageWindows, state.cwd]);
 
+  // Auto-open saved documents (from save_document MCP tool) as file tabs
+  const lastSavedDocCount = useRef(0);
+  useEffect(() => {
+    const docs = workers.savedDocuments;
+    if (docs.length <= lastSavedDocCount.current) return;
+    // Only open new documents (the ones added since last check)
+    const newDocs = docs.slice(lastSavedDocCount.current);
+    lastSavedDocCount.current = docs.length;
+    for (const path of newDocs) {
+      stageWindows.openFile(path);
+    }
+  }, [workers.savedDocuments, stageWindows]);
+
   const micEnabled = hasLiveTab || voiceLock.enrollmentActive;
 
   const onVoiceFinal = useCallback(async (text: string) => {

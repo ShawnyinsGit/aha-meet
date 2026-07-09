@@ -1,5 +1,5 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
-import { ExternalLink, X } from 'lucide-react';
+import { X } from 'lucide-react';
 import type { DeliveryFileKind, DocumentReadResult } from '../types';
 
 interface FileViewerProps {
@@ -93,19 +93,6 @@ export const FileViewer = memo(function FileViewer({ relativePath, sessionId, on
           <span className="file-viewer-dir">{relativePath}</span>
         </div>
         <div className="file-viewer-actions">
-          <button
-            type="button"
-            className="file-viewer-action-btn"
-            onClick={() => {
-              if (sessionId) void window.vibeMeet.documents.openExternal(sessionId, relativePath).then((res) => {
-                if (res && !res.ok) console.warn('[FileViewer] open-external failed:', res.error);
-              });
-            }}
-            aria-label="用系统应用打开"
-            title="用系统应用打开"
-          >
-            <ExternalLink size={16} aria-hidden="true" />
-          </button>
           <button
             type="button"
             className="file-viewer-close"
@@ -350,19 +337,8 @@ export function FileContent({
     <div className="file-viewer-pane file-viewer-binary">
       <div className="file-viewer-meta">{sizeLine}</div>
       <div className="file-viewer-status">
-        无法在应用内预览此文件
+        无法在应用内预览此文件类型
         <div className="file-viewer-path-hint">{doc.path}</div>
-        <button
-          type="button"
-          className="file-viewer-open-btn"
-          onClick={() => {
-            if (sessionId) void window.vibeMeet.documents.openExternal(sessionId, doc.path).then((res) => {
-              if (res && !res.ok) console.warn('[FileViewer] open-external failed:', res.error);
-            });
-          }}
-        >
-          用系统应用打开
-        </button>
       </div>
     </div>
   );

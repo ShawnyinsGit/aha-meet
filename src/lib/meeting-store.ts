@@ -147,6 +147,9 @@ export interface MeetingState {
    *  freshest one. */
   currentDelivery: DeliverySnapshot | null;
   deliveryHistory: DeliverySnapshot[];
+  /** Paths of documents saved via the save_document MCP tool. The renderer
+   *  watches this array and auto-opens each new path as a file tab. */
+  savedDocuments: string[];
   /** Host groups in this meeting. Always has at least 'default'. Each group
    *  owns one host agent (the "talker" for that group) plus its workers. */
   hostGroups: Map<string, HostGroupState>;
@@ -298,6 +301,7 @@ function emptyState(defaultBackendId: string = 'claude-code'): MeetingState {
     lastError: null,
     currentDelivery: null,
     deliveryHistory: [],
+    savedDocuments: [],
     hostGroups,
   };
 }
@@ -1218,6 +1222,11 @@ class MeetingStore {
           MAX_ACTIVITY,
         ),
       }), e.hostId);
+      // Push the file path so the renderer can auto-open it as a tab
+      this.mutateSlot(slot.id, (s) => ({
+        ...s,
+        savedDocuments: [...s.savedDocuments, e.path],
+      }));
       if (slot.id === this.activeId) {
         this.announce(`文档已整理好：${e.title}`);
       }
