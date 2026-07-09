@@ -37,7 +37,7 @@ const QODER_CAPABILITIES: BackendCapabilities = {
   systemPrompt: true,
   skills: false,
   interrupt: true,
-  defaultModel: 'gemini-2.5-pro',
+  defaultModel: 'auto',
   npmPackage: '@qoder-ai/qodercli',
   installHint: 'npm install -g @qoder-ai/qodercli',
 };
@@ -195,7 +195,16 @@ function safeJsonParse(s: string): Record<string, unknown> {
 export class QoderBackend extends SubprocessBackend {
   readonly id = 'qoder';
   readonly capabilities = QODER_CAPABILITIES;
-  readonly binaryName = 'qoder';
+  readonly binaryName = 'qodercli';
+
+  resolveBinary(): string | null {
+    // Try qodercli first (the actual CLI agent binary)
+    const qodercli = resolveBinaryFromPath('qodercli');
+    if (qodercli) return qodercli;
+
+    // Fallback to qoder (but this might be the IDE launcher)
+    return resolveBinaryFromPath('qoder');
+  }
 
   createSession(
     config: BackendSessionConfig,
