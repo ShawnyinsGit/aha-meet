@@ -46,6 +46,9 @@ function denyByName(name) {
   if (DENY_BASENAMES.has(name)) return true;
   if (name.endsWith('.bak')) return true;
   if (name.endsWith('.save')) return true;
+  // Skip .git directories — they contain pack files with restricted permissions
+  // that cause EACCES on copy, and should never ship in the app bundle.
+  if (name === '.git') return true;
   return false;
 }
 

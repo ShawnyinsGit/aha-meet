@@ -131,3 +131,10 @@ export function registerSettingsWindowIpc(): void {
     return { ok: true };
   });
 }
+
+/** Close the settings window during app shutdown. Called from before-quit. */
+export function closeSettingsWindow(): void {
+  if (settingsWindow && !settingsWindow.isDestroyed()) {
+    settingsWindow.close();
+  }
+}

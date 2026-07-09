@@ -28,10 +28,6 @@ export function useStageWindows() {
     void stageWindowStore.openFile(filePath);
   }, []);
 
-  const openDelivery = useCallback(() => {
-    void stageWindowStore.openDelivery();
-  }, []);
-
   return {
     windows: state.windows,
     activeWindowId: state.activeWindowId,
@@ -40,6 +36,5 @@ export function useStageWindows() {
     setActiveWindow,
     renameWindow,
     openFile,
-    openDelivery,
   };
 }

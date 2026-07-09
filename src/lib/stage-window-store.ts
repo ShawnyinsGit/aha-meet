@@ -4,7 +4,7 @@
 
 import { browserStore } from './browser-store';
 
-export type StageWindowType = 'activity' | 'browser' | 'terminal' | 'file' | 'delivery';
+export type StageWindowType = 'activity' | 'browser' | 'terminal' | 'file';
 
 export interface StageWindow {
   id: string;
@@ -109,7 +109,7 @@ class StageWindowStore {
         activeWindowId: id,
       });
     } else {
-      const title = type === 'file' ? '文件' : '交付';
+      const title = '文件';
       const window: StageWindow = { id, type, title };
       this.update({
         windows: [...this.state.windows, window],
@@ -191,14 +191,11 @@ class StageWindowStore {
       return;
     }
 
+    // Dedup: if a file tab for this exact path is already open, just focus it.
     const existing = this.state.windows.find((w) => w.type === 'file' && w.filePath === filePath);
     if (existing) {
       await this.setActiveWindow(existing.id);
       return;
-    }
-    const fileWindows = this.state.windows.filter((w) => w.type === 'file');
-    for (const fw of fileWindows) {
-      await this.closeWindow(fw.id);
     }
 
     // Hide browser overlay if currently active
@@ -270,27 +267,6 @@ class StageWindowStore {
   private async openFileAsRegularFile(filePath: string, fileName: string): Promise<void> {
     const id = genId();
     const window: StageWindow = { id, type: 'file', title: fileName, filePath };
-    this.update({
-      windows: [...this.state.windows, window],
-      activeWindowId: id,
-    });
-  }
-
-  async openDelivery(): Promise<void> {
-    const existing = this.state.windows.find((w) => w.type === 'delivery');
-    if (existing) {
-      await this.setActiveWindow(existing.id);
-      return;
-    }
-
-    // Hide browser overlay if currently active
-    const prevWin = this.state.windows.find((w) => w.id === this.state.activeWindowId);
-    if (prevWin?.type === 'browser') {
-      await browserStore.setVisible(false);
-    }
-
-    const id = genId();
-    const window: StageWindow = { id, type: 'delivery', title: '交付验收' };
     this.update({
       windows: [...this.state.windows, window],
       activeWindowId: id,

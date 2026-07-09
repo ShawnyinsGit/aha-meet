@@ -280,13 +280,13 @@ function createTalkerState(): WorkerState {
   };
 }
 
-function emptyState(): MeetingState {
+function emptyState(defaultBackendId: string = 'claude-code'): MeetingState {
   const workers = new Map<AgentSource, WorkerState>();
   workers.set('talker', createTalkerState());
   const hostGroups = new Map<string, HostGroupState>();
   hostGroups.set('default', {
     id: 'default',
-    backendId: 'claude-code',
+    backendId: defaultBackendId,
     hostWorkerId: 'talker',
     workerIds: [],
     collapsed: true,
@@ -302,13 +302,13 @@ function emptyState(): MeetingState {
   };
 }
 
-function emptySlot(id: string, cwd: string): SlotInternal {
+function emptySlot(id: string, cwd: string, defaultBackendId: string = 'claude-code'): SlotInternal {
   return {
     id,
     cwd,
     placeholder: false,
     openedAt: Date.now(),
-    state: emptyState(),
+    state: emptyState(defaultBackendId),
     unreadCount: 0,
     status: 'starting',
     pendingInput: [],
@@ -739,7 +739,7 @@ class MeetingStore {
       }
       return { ok: false, error: res.error };
     }
-    const slot = emptySlot(res.sessionId, res.cwd);
+    const slot = emptySlot(res.sessionId, res.cwd, this.defaultBackendId ?? 'claude-code');
     slot.greeting = effectiveGreeting;
     slot.state = { ...slot.state, running: true };
     this.slots.set(res.sessionId, slot);
@@ -777,7 +777,7 @@ class MeetingStore {
     }
     // Promote placeholder → live slot. Preserve openedAt so tab position is
     // stable across the resume.
-    const promoted = emptySlot(res.sessionId, res.cwd);
+    const promoted = emptySlot(res.sessionId, res.cwd, this.defaultBackendId ?? 'claude-code');
     promoted.openedAt = ph.openedAt;
     promoted.greeting = effectiveGreeting;
     promoted.state = { ...promoted.state, running: true };
@@ -894,7 +894,25 @@ class MeetingStore {
     const source: AgentSource = e.source ?? 'talker';
     if (e.kind === 'session-ready') {
       slot.status = 'ready';
-      this.mutateSlot(slot.id, (s) => ({ ...s, running: true, lastError: null }));
+      // For non-default hosts, create a talker WorkerState so the participant
+      // panel shows the host as active instead of stuck at "Connecting…".
+      const hostId = e.hostId ?? 'default';
+      if (hostId !== 'default') {
+        const talkerKey = `talker:${hostId}`;
+        this.mutateSlot(slot.id, (s) => {
+          const workers = new Map(s.workers);
+          if (!workers.has(talkerKey)) {
+            workers.set(talkerKey, {
+              ...createTalkerState(),
+              id: 'talker',
+              hostId,
+            });
+          }
+          return { ...s, workers, running: true, lastError: null };
+        });
+      } else {
+        this.mutateSlot(slot.id, (s) => ({ ...s, running: true, lastError: null }));
+      }
       const pending = slot.pendingInput;
       slot.pendingInput = [];
       if (pending.length > 0) {

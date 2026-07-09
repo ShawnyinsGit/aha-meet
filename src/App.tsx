@@ -100,16 +100,14 @@ export function App() {
     });
   }, []);
 
-  // Auto-open delivery stage window when a new delivery arrives
+  // Auto-open delivery files as individual top-level tabs when a new delivery arrives
   const lastDeliveryTaskId = useRef<string | null>(null);
   useEffect(() => {
     const delivery = workers.currentDelivery;
     if (!delivery) return;
     if (delivery.taskId === lastDeliveryTaskId.current) return;
     lastDeliveryTaskId.current = delivery.taskId;
-    // Open delivery review in a stage tab
-    stageWindows.openDelivery();
-    // Also auto-open each delivery file in a file tab
+    // Open each delivery file as its own independent top-level tab
     for (const f of delivery.files) {
       stageWindows.openFile(f.path);
     }

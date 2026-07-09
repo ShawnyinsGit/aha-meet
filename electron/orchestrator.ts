@@ -279,7 +279,10 @@ export class Orchestrator implements OrchestratorBridge {
     // forever — the renderer shows "Connecting…" but no session ever starts.
     void (async () => {
       try {
-        await hg.start();
+        // Send a greeting so the new host's talker has something to respond to.
+        // Without this, the session starts but receives no input and sits idle.
+        const greeting = `你好！你已加入会议作为 ${backendId} 主持。请简要介绍自己并等待任务分配。`;
+        await hg.start(greeting);
         if (!this.closed) {
           this.safeEmit({
             source: 'system',

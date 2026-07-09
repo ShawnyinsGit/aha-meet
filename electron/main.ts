@@ -504,6 +504,11 @@ app.on('before-quit', (event) => {
   event.preventDefault();
 
   void (async () => {
+    // Close settings window early so it doesn't linger during teardown
+    import('./ipc/settings-window.js')
+      .then(({ closeSettingsWindow }) => closeSettingsWindow())
+      .catch(() => { /* ignore — settings window may not exist */ });
+
     try {
       await Promise.race([shutdownAllSlots(), sleepMs(5000)]);
     } finally {
