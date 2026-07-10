@@ -32,6 +32,7 @@ export interface UseWorkersResult {
   toggleHostGroupCollapsed: (hostId: string) => void;
   addHostGroup: (backendId: string) => Promise<{ ok: boolean; hostId?: string; error?: string }>;
   removeHostGroup: (hostId: string) => Promise<{ ok: boolean; error?: string }>;
+  syncDefaultBackend: (backendId: string) => void;
 }
 
 export function useWorkers(): UseWorkersResult {
@@ -82,6 +83,10 @@ export function useWorkers(): UseWorkersResult {
     (hostId: string) => meetingStore.removeHostGroup(hostId),
     [],
   );
+  const syncDefaultBackend = useCallback(
+    (backendId: string) => meetingStore.syncDefaultBackend(backendId),
+    [],
+  );
 
   return {
     workers: state.workers,
@@ -109,5 +114,6 @@ export function useWorkers(): UseWorkersResult {
     toggleHostGroupCollapsed,
     addHostGroup,
     removeHostGroup,
+    syncDefaultBackend,
   };
 }

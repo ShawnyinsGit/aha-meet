@@ -6,7 +6,7 @@
 // selector, default toggle, and an install button for unavailable backends.
 // Includes a "+" button to add custom CLI backends.
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { BackendInfo, CustomBackendInfo } from '../types';
 
 interface CustomBackendFormData {
@@ -120,6 +120,22 @@ export function BackendSettings() {
       const r = await window.vibeMeet.backendAuth.setModel(backendId, model);
       if (!r.ok) {
         setError(r.error ?? 'Failed to save model');
+      } else {
+        await reload();
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSaving((s) => ({ ...s, [backendId]: false }));
+    }
+  }, [reload]);
+
+  const handleSetAvatar = useCallback(async (backendId: string, dataUrl: string | null) => {
+    setSaving((s) => ({ ...s, [backendId]: true }));
+    try {
+      const r = await window.vibeMeet.backendAuth.setAvatar(backendId, dataUrl);
+      if (!r.ok) {
+        setError(r.error ?? 'Failed to save avatar');
       } else {
         await reload();
       }
@@ -476,6 +492,7 @@ export function BackendSettings() {
           onSetDefault={() => handleSetDefault(activeBackend.id)}
           onInstall={() => handleInstall(activeBackend.id)}
           onLoginOAuth={() => handleLoginOAuth(activeBackend.id)}
+          onAvatarChange={(dataUrl) => handleSetAvatar(activeBackend.id, dataUrl)}
           onKeyDown={(e) => handleKeyDown(e, activeBackend.id)}
         />
       )}
@@ -498,6 +515,7 @@ interface BackendCardProps {
   onSetDefault: () => void;
   onInstall: () => void;
   onLoginOAuth: () => void;
+  onAvatarChange: (dataUrl: string | null) => void;
   onKeyDown: (e: React.KeyboardEvent) => void;
 }
 
@@ -516,15 +534,60 @@ function BackendCard({
   onSetDefault,
   onInstall,
   onLoginOAuth,
+  onAvatarChange,
   onKeyDown,
 }: BackendCardProps) {
   const hasAuth = b.hasApiKey || b.authMode !== 'none';
+  const avatarInputRef = useRef<HTMLInputElement>(null);
+
+  const handleAvatarFile = useCallback((file: File) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === 'string') {
+        onAvatarChange(reader.result);
+      }
+    };
+    reader.readAsDataURL(file);
+  }, [onAvatarChange]);
 
   return (
     <div className={`backend-card ${b.isDefault ? 'backend-card-default' : ''} ${!b.available ? 'backend-card-unavailable' : ''}`}>
       <div className="backend-card-header">
-        <div className="backend-card-icon">
-          <BackendIcon iconId={b.iconId} />
+        <div className="backend-card-icon" title="点击更换头像">
+          {b.customAvatar ? (
+            <img src={b.customAvatar} alt={b.displayName} className="backend-card-avatar-custom" />
+          ) : (
+            <BackendIcon iconId={b.iconId} />
+          )}
+          <input
+            ref={avatarInputRef}
+            type="file"
+            accept="image/*"
+            hidden
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) handleAvatarFile(file);
+              e.target.value = '';
+            }}
+          />
+          <button
+            type="button"
+            className="backend-card-avatar-btn"
+            onClick={() => avatarInputRef.current?.click()}
+            title="更换头像"
+          >
+            ✎
+          </button>
+          {b.customAvatar && (
+            <button
+              type="button"
+              className="backend-card-avatar-remove-btn"
+              onClick={() => onAvatarChange(null)}
+              title="移除自定义头像"
+            >
+              ✕
+            </button>
+          )}
         </div>
         <div className="backend-card-info">
           <div className="backend-card-name">{b.displayName}</div>

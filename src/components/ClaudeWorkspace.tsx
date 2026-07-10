@@ -8,7 +8,7 @@ import type {
   WorkerTaskHistoryEntry,
 } from '../types';
 import type { DeliverySnapshot } from '../lib/meeting-store';
-import { ClaudeAvatar } from './ClaudeAvatar';
+import { BackendAvatar } from './BackendAvatar';
 
 type CurrentTaskStatus = 'idle' | WorkerStatus | 'speaking';
 
@@ -24,6 +24,10 @@ interface ClaudeWorkspaceProps {
   subtitle?: string;
   avatar?: 'claude' | 'worker';
   initial?: string;
+  /** Backend icon identifier for per-backend avatar rendering. Overrides avatar prop for talkers. */
+  iconId?: string;
+  /** Custom avatar image URL (overrides iconId). */
+  customAvatar?: string | null;
   // Gallery view shows identity in the top tile row, so the workspace's own
   // avatar/name/status header is redundant. Pass true to skip rendering it.
   hideHero?: boolean;
@@ -44,6 +48,8 @@ interface ClaudeWorkspaceProps {
   deliveryHistory?: DeliverySnapshot[];
   onAcceptDelivery?: () => void;
   onOpenInTerminal?: () => void;
+  /** Whether this workspace represents a talker (shows terminal button in hero). */
+  isTalker?: boolean;
 }
 
 const dotColor: Record<ActivityEntry['kind'], string> = {
@@ -122,6 +128,8 @@ export const ClaudeWorkspace = memo(function ClaudeWorkspace({
   subtitle,
   avatar = 'claude',
   initial,
+  iconId,
+  customAvatar,
   hideHero = false,
   task,
   taskStatus,
@@ -136,6 +144,7 @@ export const ClaudeWorkspace = memo(function ClaudeWorkspace({
   deliveryHistory,
   onAcceptDelivery,
   onOpenInTerminal,
+  isTalker,
 }: ClaudeWorkspaceProps) {
   const lastAssistant = useMemo(() => [...transcript].reverse().find((t) => t.role === 'assistant'), [transcript]);
   const latestToolCall = useMemo(
@@ -245,7 +254,7 @@ export const ClaudeWorkspace = memo(function ClaudeWorkspace({
         <header className="workspace-hero">
           <div className="workspace-avatar">
             {avatar === 'claude' ? (
-              <ClaudeAvatar size={104} speaking={speaking} />
+              <BackendAvatar iconId={iconId ?? 'claude'} size={104} speaking={speaking} customAvatar={customAvatar} />
             ) : (
               <div className="workspace-avatar-worker">
                 <span className="workspace-avatar-worker-initial">
@@ -264,6 +273,21 @@ export const ClaudeWorkspace = memo(function ClaudeWorkspace({
             </div>
           </div>
         </header>
+      )}
+
+      {isTalker && onOpenInTerminal && (
+        <div className={`workspace-terminal-btn-row${hideHero ? ' workspace-terminal-btn-row--compact' : ''}`}>
+          <button
+            type="button"
+            className="workspace-hero-terminal-btn"
+            onClick={onOpenInTerminal}
+            title="Open terminal"
+            aria-label="Open terminal"
+          >
+            <Terminal size={14} />
+            <span className="workspace-terminal-btn-label">Terminal</span>
+          </button>
+        </div>
       )}
 
       {showCurrentTask && (

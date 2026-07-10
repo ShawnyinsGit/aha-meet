@@ -408,9 +408,21 @@ export class CodexBackend implements CliBackend {
   }
 
   async checkAuthStatus(): Promise<{ loggedIn: boolean }> {
-    // Codex is "logged in" if the binary is available OR an API key is set
+    // Codex is logged in if:
+    // 1. An API key is set, OR
+    // 2. The ~/.codex directory exists with config (OAuth login completed)
     const binary = this.resolveBinary();
-    return { loggedIn: binary !== null };
+    if (!binary) return { loggedIn: false };
+
+    // Check for OAuth login — codex stores config in ~/.codex/
+    const { existsSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    const { homedir } = await import('node:os');
+    const codexDir = join(homedir(), '.codex');
+    if (existsSync(join(codexDir, 'config.toml'))) return { loggedIn: true };
+    if (existsSync(join(codexDir, 'auth.json'))) return { loggedIn: true };
+    // Having the directory itself suggests installation
+    return { loggedIn: false };
   }
 
   async loginOAuth(): Promise<{ ok: boolean; error?: string }> {
@@ -418,13 +430,18 @@ export class CodexBackend implements CliBackend {
     if (!binary) {
       return { ok: false, error: 'Codex CLI not found. Install it first.' };
     }
+    // OAuth login needs an interactive terminal — launch in Terminal.app on macOS
+    if (process.platform === 'darwin') {
+      return this.loginInTerminal(binary, ['auth', 'login']);
+    }
     return new Promise<{ ok: boolean; error?: string }>((resolve) => {
       const env = mergedSubprocessEnv();
       const proc = spawn(binary, ['auth', 'login'], {
         env,
-        stdio: 'ignore',
-        detached: false,
+        stdio: 'inherit',
+        detached: true,
       });
+      proc.unref();
       proc.on('error', (err: Error) => {
         resolve({ ok: false, error: err.message });
       });
@@ -433,6 +450,30 @@ export class CodexBackend implements CliBackend {
           resolve({ ok: true });
         } else {
           resolve({ ok: false, error: `codex auth login exited with code ${code}` });
+        }
+      });
+    });
+  }
+
+  private loginInTerminal(binary: string, args: string[]): Promise<{ ok: boolean; error?: string }> {
+    // Just run the binary directly in Terminal — it inherits the user's shell env.
+    const cmd = `${binary} ${args.join(' ')}`;
+    const script = `tell application "Terminal"
+activate
+do script "${cmd.replace(/"/g, '\\\\"')}"
+end tell`;
+    return new Promise<{ ok: boolean; error?: string }>((resolve) => {
+      const proc = spawn('osascript', ['-e', script], {
+        stdio: 'ignore',
+      });
+      proc.on('error', (err: Error) => {
+        resolve({ ok: false, error: err.message });
+      });
+      proc.on('close', (code: number | null) => {
+        if (code === 0) {
+          resolve({ ok: true });
+        } else {
+          resolve({ ok: false, error: `Failed to open Terminal (exit ${code}). Try running "codex auth login" manually.` });
         }
       });
     });

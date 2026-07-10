@@ -93,6 +93,7 @@ export function registerBackendAuthIpc(): void {
         binaryPath,
         authMode: auth?.authMode ?? 'none',
         hasApiKey: Boolean(auth?.apiKey),
+        hasAuthEntry: Boolean(auth),
         baseUrl: auth?.baseUrl ?? null,
         model: auth?.model ?? null,
         defaultModel: backend.capabilities.defaultModel ?? null,
@@ -101,6 +102,7 @@ export function registerBackendAuthIpc(): void {
         installHint: backend.capabilities.installHint ?? null,
         supportsMcp: backend.capabilities.mcp,
         supportsPermissions: backend.capabilities.permissions,
+        customAvatar: auth?.customAvatar ?? null,
       };
     });
 
@@ -231,6 +233,28 @@ export function registerBackendAuthIpc(): void {
     }
     try {
       await setBackendAuth(backendId, { authMode: mode });
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  });
+
+  /** Set custom avatar for a specific backend (base64 data URL, or null to remove). */
+  ipcMain.handle('backend-auth:set-avatar', async (_e, payload: unknown) => {
+    if (typeof payload !== 'object' || payload === null) {
+      return { ok: false, error: 'payload must be an object' };
+    }
+    const { backendId, dataUrl } = payload as { backendId?: string; dataUrl?: string | null };
+    if (typeof backendId !== 'string') {
+      return { ok: false, error: 'backendId must be a string' };
+    }
+    const vErr = validateBackendId(backendId);
+    if (vErr) return { ok: false, error: vErr };
+    if (dataUrl !== null && typeof dataUrl !== 'string') {
+      return { ok: false, error: 'dataUrl must be a string or null' };
+    }
+    try {
+      await setBackendAuth(backendId, { customAvatar: dataUrl ?? undefined });
       return { ok: true };
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err.message : String(err) };

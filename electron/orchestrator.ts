@@ -171,7 +171,7 @@ export class Orchestrator implements OrchestratorBridge {
     this.browserTabManager = opts.browserTabManager;
     this.projectId = computeProjectId(this.cwd);
     this.meetingId = randomUUID();
-    this.sessionFactory = opts.sessionFactory ?? ((o) => new ClaudeSession(o) as unknown as import('./backends/cli-backend.js').BackendSession);
+    this.sessionFactory = opts.sessionFactory ?? Orchestrator.defaultClaudeFactory;
 
     // Create the default HostGroup. Use the user's preferred backend if specified.
     const defaultBackend = opts.defaultBackendId ?? DEFAULT_BACKEND_ID;

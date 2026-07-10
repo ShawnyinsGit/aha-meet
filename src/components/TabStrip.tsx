@@ -1,5 +1,5 @@
 import { useCallback } from 'react';
-import { Plus, RotateCw, X } from 'lucide-react';
+import { Plus, RotateCw, X, SquareArrowOutUpRight } from 'lucide-react';
 import { meetingStore, type TabMeta } from '../lib/meeting-store';
 
 interface TabStripProps {
@@ -34,6 +34,13 @@ export function TabStrip({ tabs }: TabStripProps) {
   const handleRetry = useCallback(async (e: React.MouseEvent, tab: TabMeta) => {
     e.stopPropagation();
     await meetingStore.retryFailedTab(tab.id);
+  }, []);
+
+  const handlePopout = useCallback((e: React.MouseEvent, tab: TabMeta) => {
+    e.stopPropagation();
+    if (window.vibeMeet?.popoutSession) {
+      void window.vibeMeet.popoutSession(tab.id);
+    }
   }, []);
 
   return (
@@ -72,6 +79,16 @@ export function TabStrip({ tabs }: TabStripProps) {
                   <RotateCw size={12} aria-hidden="true" />
                 </span>
               )}
+              <span
+                className="tab-strip-popout"
+                role="button"
+                aria-label="Open in new window"
+                tabIndex={-1}
+                onClick={(e) => handlePopout(e, tab)}
+                title="在新窗口中打开"
+              >
+                <SquareArrowOutUpRight size={11} aria-hidden="true" />
+              </span>
               <span
                 className="tab-strip-close"
                 role="button"

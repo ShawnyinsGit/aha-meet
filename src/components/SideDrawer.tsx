@@ -1,13 +1,15 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { Send, Paperclip, X, FileText, FileType, Image as ImageIcon, FileWarning, FolderOpen, Users, MessageSquare } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
+import { Send, Paperclip, X, FileText, FileType, Image as ImageIcon, FileWarning, FolderOpen, Users, MessageSquare, Settings, Zap } from 'lucide-react';
 import type {
   ActivityEntry,
   AttachmentKind,
   BackendInfo,
   PendingPermission,
+  SkillInfo,
   StagedAttachment,
   TranscriptEntry,
 } from '../types';
+import type { HostGroupState } from '../lib/meeting-store';
 import { PermissionCard } from './PermissionCard';
 import { FileTree } from './FileTree';
 
@@ -32,6 +34,8 @@ interface SideDrawerProps {
   activeBackendIds?: Set<string>;
   onAddHost?: (backendId: string) => void;
   forceParticipantsTab?: boolean;
+  /** Host group map for resolving default host's backend name. */
+  hostGroups?: Map<string, HostGroupState>;
 }
 
 const TIME_TICK_MS = 30_000;
@@ -155,6 +159,7 @@ export function SideDrawer({
   activeBackendIds = new Set(),
   onAddHost,
   forceParticipantsTab,
+  hostGroups,
 }: SideDrawerProps) {
   const [tab, setTab] = useState<Tab>('chat');
   const [text, setText] = useState('');
@@ -167,6 +172,116 @@ export function SideDrawer({
   const endRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+
+  // ── Slash command picker ───────────────────────────────────────────────
+  const [skills, setSkills] = useState<SkillInfo[]>([]);
+  const [slashPickerOpen, setSlashPickerOpen] = useState(false);
+  const [slashFilter, setSlashFilter] = useState('');
+  const [slashSelectedIdx, setSlashSelectedIdx] = useState(0);
+  const slashStartRef = useRef<number>(-1); // position of '/' in text
+
+  // ── @mention picker for backends ───────────────────────────────────────
+  const [mentionPickerOpen, setMentionPickerOpen] = useState(false);
+  const [mentionFilter, setMentionFilter] = useState('');
+  const [mentionSelectedIdx, setMentionSelectedIdx] = useState(0);
+  const mentionStartRef = useRef<number>(-1); // position of '@' in text
+
+  // Load skills list on mount
+  useEffect(() => {
+    window.vibeMeet.skills.list().then((res) => {
+      if (res.ok) setSkills(res.skills);
+    }).catch(() => {});
+  }, []);
+
+  const filteredSkills = useMemo(() => {
+    if (!slashFilter) return skills;
+    const lower = slashFilter.toLowerCase();
+    return skills.filter((s) =>
+      s.name.toLowerCase().includes(lower) ||
+      s.description.toLowerCase().includes(lower)
+    );
+  }, [skills, slashFilter]);
+
+  const filteredBackends = useMemo(() => {
+    if (!mentionFilter) return backends;
+    const lower = mentionFilter.toLowerCase();
+    return backends.filter((b) =>
+      b.displayName.toLowerCase().includes(lower)
+    );
+  }, [backends, mentionFilter]);
+
+  const handleSlashSelect = useCallback((skill: SkillInfo) => {
+    const before = text.slice(0, slashStartRef.current);
+    const after = text.slice(slashStartRef.current + 1 + slashFilter.length);
+    const newText = `${before}/${skill.name} ${after}`;
+    setText(newText);
+    setSlashPickerOpen(false);
+    setSlashFilter('');
+    slashStartRef.current = -1;
+    // Focus textarea after selection
+    setTimeout(() => textareaRef.current?.focus(), 0);
+  }, [text, slashFilter]);
+
+  const handleMentionSelect = useCallback((backend: BackendInfo) => {
+    const before = text.slice(0, mentionStartRef.current);
+    const after = text.slice(mentionStartRef.current + 1 + mentionFilter.length);
+    const newText = `${before}@${backend.id} ${after}`;
+    setText(newText);
+    setMentionPickerOpen(false);
+    setMentionFilter('');
+    mentionStartRef.current = -1;
+    // Focus textarea after selection
+    setTimeout(() => textareaRef.current?.focus(), 0);
+  }, [text, mentionFilter]);
+
+  const handleTextChange = useCallback((newText: string) => {
+    setText(newText);
+    const cursorPos = textareaRef.current?.selectionStart ?? newText.length;
+    const beforeCursor = newText.slice(0, cursorPos);
+
+    // Detect slash command: '/' at start or after whitespace
+    const lastSlash = beforeCursor.lastIndexOf('/');
+    if (lastSlash >= 0) {
+      const charBefore = lastSlash > 0 ? beforeCursor[lastSlash - 1] : ' ';
+      // Slash must be at start or after whitespace
+      if (lastSlash === 0 || /\s/.test(charBefore)) {
+        const afterSlash = beforeCursor.slice(lastSlash + 1);
+        // No space between slash and cursor = still typing the command
+        if (!/\s/.test(afterSlash)) {
+          slashStartRef.current = lastSlash;
+          setSlashFilter(afterSlash);
+          setSlashPickerOpen(true);
+          setSlashSelectedIdx(0);
+          // Close mention picker if open
+          setMentionPickerOpen(false);
+          mentionStartRef.current = -1;
+          return;
+        }
+      }
+    }
+    setSlashPickerOpen(false);
+    slashStartRef.current = -1;
+
+    // Detect @mention: '@' at start or after whitespace
+    const lastMention = beforeCursor.lastIndexOf('@');
+    if (lastMention >= 0) {
+      const charBefore = lastMention > 0 ? beforeCursor[lastMention - 1] : ' ';
+      // @ must be at start or after whitespace
+      if (lastMention === 0 || /\s/.test(charBefore)) {
+        const afterMention = beforeCursor.slice(lastMention + 1);
+        // No space between @ and cursor = still typing the mention
+        if (!/\s/.test(afterMention)) {
+          mentionStartRef.current = lastMention;
+          setMentionFilter(afterMention);
+          setMentionPickerOpen(true);
+          setMentionSelectedIdx(0);
+          return;
+        }
+      }
+    }
+    setMentionPickerOpen(false);
+    mentionStartRef.current = -1;
+  }, []);
 
   useEffect(() => {
     if (viewingFilePath) setTab('files');
@@ -181,6 +296,48 @@ export function SideDrawer({
     const id = window.setInterval(() => setNow(Date.now()), TIME_TICK_MS);
     return () => window.clearInterval(id);
   }, [tab]);
+
+  // Resolve hostId → display name from backends list
+  const backendNameForHost = useCallback((hostId: string | undefined): string => {
+    // For default/undefined hostId, look up the actual backendId from hostGroups
+    if (!hostId || hostId === 'default') {
+      const defaultHg = hostGroups?.get('default');
+      if (defaultHg) {
+        const backend = backends.find((b) => b.id === defaultHg.backendId);
+        return backend?.displayName ?? defaultHg.backendId;
+      }
+      return 'Claude';
+    }
+    // For added hosts, try direct backend match first, then hostGroup lookup
+    const backend = backends.find((b) => b.id === hostId);
+    if (backend) return backend.displayName;
+    const hg = hostGroups?.get(hostId);
+    if (hg) {
+      const fallback = backends.find((b) => b.id === hg.backendId);
+      return fallback?.displayName ?? hg.backendId;
+    }
+    return 'Claude';
+  }, [backends, hostGroups]);
+
+  // Resolve hostId → iconId from backends list
+  const backendIconIdForHost = useCallback((hostId: string | undefined): string => {
+    if (!hostId || hostId === 'default') {
+      const defaultHg = hostGroups?.get('default');
+      if (defaultHg) {
+        const backend = backends.find((b) => b.id === defaultHg.backendId);
+        return backend?.iconId ?? defaultHg.backendId;
+      }
+      return 'claude';
+    }
+    const backend = backends.find((b) => b.id === hostId);
+    if (backend) return backend.iconId;
+    const hg = hostGroups?.get(hostId);
+    if (hg) {
+      const fallback = backends.find((b) => b.id === hg.backendId);
+      return fallback?.iconId ?? hg.backendId;
+    }
+    return 'claude';
+  }, [backends, hostGroups]);
 
   const toggleExpanded = (id: string) => {
     setExpanded((prev) => {
@@ -335,14 +492,20 @@ export function SideDrawer({
             )}
             {backends.map((b) => {
               const isActive = activeBackendIds.has(b.id);
+              // A backend is "configured" if:
+              // - It's the default (bundled, no extra setup needed), OR
+              // - It has an auth entry with valid credentials (apiKey or oauth)
+              const isConfigured = b.isDefault || (
+                b.hasAuthEntry && (b.authMode === 'none' || b.hasApiKey || b.authMode === 'oauth')
+              );
               return (
                 <div key={b.id} className={`drawer-participant-row ${isActive ? 'active' : ''}`}>
                   <div className="drawer-participant-info">
                     <span className="drawer-participant-name">{b.displayName}</span>
                     <span className="drawer-participant-status">
                       {b.available ? '✓ 已安装' : '✗ 未安装'}
-                      {b.hasApiKey && ' · 🔑'}
-                      {b.isDefault && ' · 默认'}
+                      {' · '}
+                      {isConfigured ? '✓ 已配置' : '✗ 未配置'}
                     </span>
                   </div>
                   {isActive ? (
@@ -351,10 +514,27 @@ export function SideDrawer({
                     <button
                       className="drawer-participant-invite"
                       onClick={() => onAddHost?.(b.id)}
-                      disabled={!b.available || disabled}
-                      title={!b.available ? 'CLI 未安装，无法邀请' : disabled ? '会议未开始' : `邀请 ${b.displayName}`}
+                      disabled={!b.available || !isConfigured || disabled}
+                      title={
+                        !b.available
+                          ? 'CLI 未安装，无法邀请'
+                          : !isConfigured
+                            ? '未配置 API Key，请先去设置'
+                            : disabled
+                              ? '会议未开始'
+                              : `邀请 ${b.displayName}`
+                      }
                     >
                       邀请
+                    </button>
+                  )}
+                  {!isConfigured && (
+                    <button
+                      className="drawer-participant-configure"
+                      onClick={() => void window.vibeMeet.settingsWindow.open()}
+                      title="去设置中配置"
+                    >
+                      去配置
                     </button>
                   )}
                 </div>
@@ -373,11 +553,14 @@ export function SideDrawer({
             {transcript.map((e) => {
               const timeLabel = formatMessageTime(e.ts, now);
               const isoTitle = e.ts ? new Date(e.ts).toISOString() : undefined;
+              const authorName = e.role === 'assistant'
+                ? backendNameForHost(e.hostId)
+                : e.role === 'user' ? 'You' : 'System';
               return (
                 <div key={e.id} className={`msg msg-${e.role}`}>
                   <div className="msg-meta">
                     <span className="msg-author">
-                      {e.role === 'assistant' ? 'Claude' : e.role === 'user' ? 'You' : 'System'}
+                      {authorName}
                     </span>
                     {timeLabel && (
                       <span className="msg-time" title={isoTitle}>{timeLabel}</span>
@@ -455,6 +638,54 @@ export function SideDrawer({
               </div>
             )}
             <div className="drawer-input-wrap">
+              {slashPickerOpen && filteredSkills.length > 0 && (
+                <div className="slash-picker">
+                  {filteredSkills.map((skill, idx) => (
+                    <button
+                      key={skill.name}
+                      type="button"
+                      className={`slash-picker-item ${idx === slashSelectedIdx ? 'slash-picker-item-active' : ''}`}
+                      onClick={() => handleSlashSelect(skill)}
+                      onMouseEnter={() => setSlashSelectedIdx(idx)}
+                    >
+                      <Zap size={12} className="slash-picker-icon" />
+                      <div className="slash-picker-text">
+                        <span className="slash-picker-name">/{skill.name}</span>
+                        <span className="slash-picker-desc">{skill.description}</span>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+              {slashPickerOpen && filteredSkills.length === 0 && (
+                <div className="slash-picker slash-picker-empty">
+                  <span>没有找到匹配的 skill</span>
+                </div>
+              )}
+              {mentionPickerOpen && filteredBackends.length > 0 && (
+                <div className="slash-picker">
+                  {filteredBackends.map((backend, idx) => (
+                    <button
+                      key={backend.id}
+                      type="button"
+                      className={`slash-picker-item ${idx === mentionSelectedIdx ? 'slash-picker-item-active' : ''}`}
+                      onClick={() => handleMentionSelect(backend)}
+                      onMouseEnter={() => setMentionSelectedIdx(idx)}
+                    >
+                      <Users size={12} className="slash-picker-icon" />
+                      <div className="slash-picker-text">
+                        <span className="slash-picker-name">@{backend.displayName}</span>
+                        <span className="slash-picker-desc">{backend.authMode === 'oauth' ? 'OAuth' : backend.authMode === 'apikey' ? 'API Key' : 'None'}</span>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+              {mentionPickerOpen && filteredBackends.length === 0 && (
+                <div className="slash-picker slash-picker-empty">
+                  <span>没有找到匹配的 backend</span>
+                </div>
+              )}
               <input
                 ref={fileInputRef}
                 type="file"
@@ -486,9 +717,55 @@ export function SideDrawer({
                 value={text}
                 disabled={disabled}
                 placeholder={placeholder}
-                onChange={(e) => setText(e.target.value)}
+                onChange={(e) => handleTextChange(e.target.value)}
                 onPaste={onPaste}
                 onKeyDown={(e) => {
+                  // Handle slash command picker navigation
+                  if (slashPickerOpen && filteredSkills.length > 0) {
+                    if (e.key === 'ArrowDown') {
+                      e.preventDefault();
+                      setSlashSelectedIdx((i) => (i + 1) % filteredSkills.length);
+                      return;
+                    }
+                    if (e.key === 'ArrowUp') {
+                      e.preventDefault();
+                      setSlashSelectedIdx((i) => (i - 1 + filteredSkills.length) % filteredSkills.length);
+                      return;
+                    }
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault();
+                      handleSlashSelect(filteredSkills[slashSelectedIdx]);
+                      return;
+                    }
+                    if (e.key === 'Escape') {
+                      e.preventDefault();
+                      setSlashPickerOpen(false);
+                      return;
+                    }
+                  }
+                  // Handle @mention picker navigation
+                  if (mentionPickerOpen && filteredBackends.length > 0) {
+                    if (e.key === 'ArrowDown') {
+                      e.preventDefault();
+                      setMentionSelectedIdx((i) => (i + 1) % filteredBackends.length);
+                      return;
+                    }
+                    if (e.key === 'ArrowUp') {
+                      e.preventDefault();
+                      setMentionSelectedIdx((i) => (i - 1 + filteredBackends.length) % filteredBackends.length);
+                      return;
+                    }
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault();
+                      handleMentionSelect(filteredBackends[mentionSelectedIdx]);
+                      return;
+                    }
+                    if (e.key === 'Escape') {
+                      e.preventDefault();
+                      setMentionPickerOpen(false);
+                      return;
+                    }
+                  }
                   if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
                     e.preventDefault();
                     void submit();

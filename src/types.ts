@@ -134,6 +134,8 @@ export interface BackendInfo {
   binaryPath: string | null;
   authMode: 'apikey' | 'oauth' | 'none';
   hasApiKey: boolean;
+  /** Whether an auth entry exists for this backend at all. */
+  hasAuthEntry: boolean;
   baseUrl: string | null;
   model: string | null;
   defaultModel: string | null;
@@ -142,6 +144,8 @@ export interface BackendInfo {
   installHint: string | null;
   supportsMcp: boolean;
   supportsPermissions: boolean;
+  /** Custom avatar image as base64 data URL. */
+  customAvatar: string | null;
 }
 
 export interface BackendAuthApi {
@@ -161,6 +165,7 @@ export interface BackendAuthApi {
   setBaseUrl: (backendId: string, url: string) => Promise<{ ok: boolean; error?: string }>;
   setModel: (backendId: string, model: string) => Promise<{ ok: boolean; error?: string }>;
   setMode: (backendId: string, mode: 'apikey' | 'oauth' | 'none') => Promise<{ ok: boolean; error?: string }>;
+  setAvatar: (backendId: string, dataUrl: string | null) => Promise<{ ok: boolean; error?: string }>;
   setDefault: (backendId: string) => Promise<{ ok: boolean; error?: string }>;
   checkStatus: (backendId: string) => Promise<{ ok: boolean; loggedIn: boolean; error?: string }>;
   loginOAuth: (backendId: string) => Promise<{ ok: boolean; error?: string }>;
@@ -376,6 +381,8 @@ export interface VibeMeetApi {
     open: () => Promise<{ ok: boolean }>;
     close: () => Promise<{ ok: boolean }>;
   };
+  popoutSession: (tabId: string) => Promise<{ ok: boolean }>;
+  popoutStage: (windowId: string, type: string) => Promise<{ ok: boolean }>;
   browser: BrowserApi;
   steerWorker: (
     sessionId: string | null,
@@ -463,6 +470,8 @@ export interface TranscriptEntry {
   ts: number;
   imageUrl?: string;
   attachments?: AttachmentMeta[];
+  /** Host group ID for assistant messages — identifies which backend produced this. */
+  hostId?: string;
 }
 
 export interface ActivityEntry {

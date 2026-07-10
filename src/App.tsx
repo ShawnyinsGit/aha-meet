@@ -25,7 +25,7 @@ import { SideDrawer } from './components/SideDrawer';
 import { SettingsMenu } from './components/SettingsMenu';
 import { VoiceGuideModal } from './components/VoiceGuideModal';
 import { ParticipantPanel } from './components/ParticipantPanel';
-import type { AutoApproveScope, BackendInfo, DesktopSource } from './types';
+import type { AutoApproveScope, BackendInfo, DesktopSource, SkillInfo } from './types';
 
 export function App() {
   const { state, restartSession, sendText, sendImage, sendAttachments, publishDroppedFiles, onDroppedFiles, resolvePermission, interrupt, setSpeakCallback } = useClaude();
@@ -50,11 +50,25 @@ export function App() {
   const [viewingFile, setViewingFile] = useState<{ relativePath: string } | null>(null);
   const [openParticipantsTab, setOpenParticipantsTab] = useState(false);
   const [backends, setBackends] = useState<BackendInfo[]>([]);
+  const [mutedHostIds, setMutedHostIds] = useState<Set<string>>(new Set());
+  const [skills, setSkills] = useState<SkillInfo[]>([]);
   const elapsed = useElapsedSeconds(activeOpenedAt);
 
   // Load available backends for the participants tab
   useEffect(() => {
     window.vibeMeet.backendAuth.list().then(setBackends).catch(() => setBackends([]));
+    window.vibeMeet.skills.list().then((res) => {
+      if (res.ok) setSkills(res.skills);
+    }).catch(() => {});
+  }, []);
+
+  // Reload backends when main window regains focus (e.g. settings window closed)
+  useEffect(() => {
+    const onFocus = () => {
+      window.vibeMeet.backendAuth.list().then(setBackends).catch(() => {});
+    };
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
   }, []);
 
   const activeBackendIds = useMemo(() => {
@@ -62,6 +76,23 @@ export function App() {
     for (const [, hg] of workers.hostGroups) ids.add(hg.backendId);
     return ids;
   }, [workers.hostGroups]);
+
+  // Sync the meeting store's default host group with the actual default backend
+  useEffect(() => {
+    const defaultBackend = backends.find((b) => b.isDefault);
+    if (defaultBackend) {
+      workers.syncDefaultBackend(defaultBackend.id);
+    }
+  }, [backends, workers]);
+
+  // Map backendId → custom avatar data URL for participant panel rendering
+  const customAvatars = useMemo(() => {
+    const map = new Map<string, string | null>();
+    for (const b of backends) {
+      if (b.customAvatar) map.set(b.iconId, b.customAvatar);
+    }
+    return map;
+  }, [backends]);
 
   const speakingRef = useRef(false);
   const sendWithModeRef = useRef<(text: string) => void>(sendText);
@@ -149,8 +180,86 @@ export function App() {
         console.warn('[voice] polishAsrText IPC failed:', err);
       }
     }
+    // Fuzzy match skill names from voice input — if spoken text contains a
+    // skill name, prepend "/" to invoke it as a slash command.
+    if (skills.length > 0 && !finalText.startsWith('/')) {
+      const lower = finalText.toLowerCase();
+      let bestMatch: SkillInfo | null = null;
+      let bestScore = 0;
+      for (const skill of skills) {
+        const nameLower = skill.name.toLowerCase();
+        // Check for exact substring match
+        if (lower.includes(nameLower)) {
+          const score = nameLower.length;
+          if (score > bestScore) {
+            bestScore = score;
+            bestMatch = skill;
+          }
+        }
+        // Check for fuzzy match: remove spaces and dashes for comparison
+        const normalized = lower.replace(/[\s_-]/g, '');
+        const nameNormalized = nameLower.replace(/[\s_-]/g, '');
+        if (normalized.includes(nameNormalized)) {
+          const score = nameNormalized.length;
+          if (score > bestScore) {
+            bestScore = score;
+            bestMatch = skill;
+          }
+        }
+      }
+      if (bestMatch) {
+        // Remove the matched skill name from the text and prepend the slash command
+        const nameLower = bestMatch.name.toLowerCase();
+        const idx = lower.indexOf(nameLower);
+        if (idx >= 0) {
+          const before = finalText.slice(0, idx).trim();
+          const after = finalText.slice(idx + bestMatch.name.length).trim();
+          const remaining = [before, after].filter(Boolean).join(' ');
+          finalText = remaining ? `/${bestMatch.name} ${remaining}` : `/${bestMatch.name}`;
+        }
+      }
+    }
+    // Fuzzy match backend names from voice input — if spoken text contains a
+    // backend display name, prepend "@" to invoke it as a mention.
+    if (backends.length > 0 && !finalText.includes('@')) {
+      const lower = finalText.toLowerCase();
+      let bestBackend: BackendInfo | null = null;
+      let bestBackendScore = 0;
+      for (const backend of backends) {
+        const nameLower = backend.displayName.toLowerCase();
+        // Check for exact substring match
+        if (lower.includes(nameLower)) {
+          const score = nameLower.length;
+          if (score > bestBackendScore) {
+            bestBackendScore = score;
+            bestBackend = backend;
+          }
+        }
+        // Check for fuzzy match: remove spaces and dashes for comparison
+        const normalized = lower.replace(/[\s_-]/g, '');
+        const nameNormalized = nameLower.replace(/[\s_-]/g, '');
+        if (normalized.includes(nameNormalized)) {
+          const score = nameNormalized.length;
+          if (score > bestBackendScore) {
+            bestBackendScore = score;
+            bestBackend = backend;
+          }
+        }
+      }
+      if (bestBackend) {
+        // Remove the matched backend name from the text and prepend the @mention
+        const nameLower = bestBackend.displayName.toLowerCase();
+        const idx = lower.indexOf(nameLower);
+        if (idx >= 0) {
+          const before = finalText.slice(0, idx).trim();
+          const after = finalText.slice(idx + bestBackend.displayName.length).trim();
+          const remaining = [before, after].filter(Boolean).join(' ');
+          finalText = remaining ? `@${bestBackend.id} ${remaining}` : `@${bestBackend.id}`;
+        }
+      }
+    }
     sendWithModeRef.current(finalText);
-  }, [voicePrefs.voicePolishEnabled]);
+  }, [voicePrefs.voicePolishEnabled, skills, backends]);
 
   const onBargeIn = useCallback(() => {
     if (speakingRef.current) {
@@ -236,6 +345,20 @@ export function App() {
     await sendImage(dataUrl, caption);
   }, [captureFrame, sendImage, share.sourceName]);
 
+  const handleToggleMuteHost = useCallback((hostId: string) => {
+    setMutedHostIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(hostId)) next.delete(hostId);
+      else next.add(hostId);
+      return next;
+    });
+  }, []);
+
+  const handleRemoveHost = useCallback(async (hostId: string) => {
+    if (hostId === 'default') return;
+    await workers.removeHostGroup(hostId);
+  }, [workers]);
+
   const sendWithMode = useCallback(async (raw: string) => {
     const trimmed = raw.trim();
     if (!trimmed) return;
@@ -305,6 +428,7 @@ ${trimmed}`
             onPickSource={() => setPickerOpen(true)}
             onStopShare={stopShare}
             workers={workers.workerList}
+            hostGroups={workers.hostGroups}
             plan={workers.plan}
             running={state.running}
             aiSpeaking={aiSpeaking}
@@ -312,8 +436,12 @@ ${trimmed}`
               <ParticipantPanel
                 workers={workers.workerList}
                 hostGroups={workers.hostGroups}
+                customAvatars={customAvatars}
+                mutedHostIds={mutedHostIds}
                 aiSpeaking={aiSpeaking}
                 onResolvePermission={resolvePermission}
+                onToggleMuteHost={handleToggleMuteHost}
+                onRemoveHost={handleRemoveHost}
                 onOpenParticipantsTab={() => {
                   setDrawerOpen(true);
                   setOpenParticipantsTab(true);
@@ -343,6 +471,12 @@ ${trimmed}`
             onSelectWindow={stageWindows.setActiveWindow}
             onCloseWindow={stageWindows.closeWindow}
             onCreateWindow={stageWindows.createWindow}
+            onPopOutWindow={(id: string) => {
+              if (window.vibeMeet?.popoutStage) {
+                const win = stageWindows.windows.find((w) => w.id === id);
+                void window.vibeMeet.popoutStage(id, win?.type ?? 'activity');
+              }
+            }}
             onResolvePermission={resolvePermission}
             browserTabs={browser.state.tabs}
             browserActiveTabId={browser.state.activeTabId}
@@ -354,6 +488,7 @@ ${trimmed}`
             onBrowserBack={browser.goBack}
             onBrowserForward={browser.goForward}
             onBrowserReload={browser.reload}
+            customAvatars={customAvatars}
           />
         </section>
 
@@ -376,6 +511,7 @@ ${trimmed}`
           viewingFilePath={viewingFile?.relativePath ?? null}
           backends={backends}
           activeBackendIds={activeBackendIds}
+          hostGroups={workers.hostGroups}
           onAddHost={(backendId) => {
             workers.addHostGroup(backendId);
             // Refresh backends after adding a host

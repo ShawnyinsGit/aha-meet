@@ -1,24 +1,38 @@
 import { memo, useMemo, useState } from 'react';
-import { ChevronDown, ChevronUp, Plus, Wifi } from 'lucide-react';
+import { ChevronDown, ChevronUp, MicOff, Plus, UserX } from 'lucide-react';
 import type { HostGroupState, WorkerState } from '../lib/meeting-store';
+import { BackendAvatar } from './BackendAvatar';
 import { WorkerCard } from './WorkerCard';
 
 interface ParticipantPanelProps {
   workers: WorkerState[];
   hostGroups: Map<string, HostGroupState>;
+  /** Map of iconId → custom avatar data URL */
+  customAvatars?: Map<string, string | null>;
+  /** Set of muted host group IDs */
+  mutedHostIds?: Set<string>;
   aiSpeaking: boolean;
   selfTile: React.ReactNode;
   onResolvePermission: (id: string, decision: 'allow' | 'deny') => void;
   onOpenParticipantsTab?: () => void;
+  onToggleMuteHost?: (hostId: string) => void;
+  onRemoveHost?: (hostId: string) => void;
+  /** Called when a gallery tile is clicked. 'user' for self tile, hostId for host tiles. */
+  onSelectParticipant?: (id: string) => void;
 }
 
 export const ParticipantPanel = memo(function ParticipantPanel({
   workers,
   hostGroups,
+  customAvatars,
+  mutedHostIds,
   aiSpeaking,
   selfTile,
   onResolvePermission,
   onOpenParticipantsTab,
+  onToggleMuteHost,
+  onRemoveHost,
+  onSelectParticipant,
 }: ParticipantPanelProps) {
   const [barCollapsed, setBarCollapsed] = useState(false);
 
@@ -58,49 +72,108 @@ export const ParticipantPanel = memo(function ParticipantPanel({
     <aside className="tiles-gallery">
       <div className={`tiles-gallery-scroll ${barCollapsed ? 'tiles-gallery-collapsed' : ''}`}>
         {/* Self tile */}
-        <div className="tiles-gallery-self">{selfTile}</div>
+        <div
+          className="tiles-gallery-self"
+          onClick={() => onSelectParticipant?.('user')}
+          role={onSelectParticipant ? 'button' : undefined}
+          tabIndex={onSelectParticipant ? 0 : undefined}
+          onKeyDown={(e) => {
+            if (onSelectParticipant && (e.key === 'Enter' || e.key === ' ')) {
+              e.preventDefault();
+              onSelectParticipant('user');
+            }
+          }}
+        >
+          {selfTile}
+        </div>
 
         {/* Host group tiles — show talker, or first worker, or a placeholder */}
         {sortedHostGroups.map(([hostId, hg]) => {
           const talker = hostTalkers.get(hostId);
+          const avatar = customAvatars?.get(hg.iconId) ?? null;
+          const isMuted = mutedHostIds?.has(hostId) ?? false;
+          const isDefault = hostId === 'default';
+          const actions = (
+            <div className="tiles-gallery-actions">
+              {onToggleMuteHost && (
+                <button
+                  type="button"
+                  className={`tiles-gallery-action-btn ${isMuted ? 'tiles-gallery-action-btn-active' : ''}`}
+                  onClick={(e) => { e.stopPropagation(); onToggleMuteHost(hostId); }}
+                  title={isMuted ? '取消静音' : '静音'}
+                  aria-label={isMuted ? 'Unmute host' : 'Mute host'}
+                >
+                  <MicOff size={12} />
+                </button>
+              )}
+              {onRemoveHost && !isDefault && (
+                <button
+                  type="button"
+                  className="tiles-gallery-action-btn tiles-gallery-action-btn-danger"
+                  onClick={(e) => { e.stopPropagation(); onRemoveHost(hostId); }}
+                  title="踢出"
+                  aria-label="Remove host"
+                >
+                  <UserX size={12} />
+                </button>
+              )}
+            </div>
+          );
           if (talker) {
             return (
-              <WorkerCard
-                key={hostId}
-                worker={talker}
-                depTitles={new Map()}
-                mode="gallery"
-                selected={false}
-                speaking={aiSpeaking}
-                onSelect={() => {}}
-                onResolvePermission={onResolvePermission}
-              />
+              <div key={hostId} className="tiles-gallery-tile-wrap">
+                <WorkerCard
+                  worker={talker}
+                  depTitles={new Map()}
+                  mode="gallery"
+                  selected={false}
+                  speaking={aiSpeaking && !isMuted}
+                  onSelect={onSelectParticipant ? () => onSelectParticipant(hostId) : undefined}
+                  onResolvePermission={onResolvePermission}
+                  iconId={hg.iconId}
+                  customAvatar={avatar}
+                />
+                {actions}
+              </div>
             );
           }
           // No talker — fall back to first worker of this host group
           const hw = hostWorkers.get(hostId);
           if (hw && hw.length > 0) {
             return (
-              <WorkerCard
-                key={hostId}
-                worker={hw[0]}
-                depTitles={new Map()}
-                mode="gallery"
-                selected={false}
-                speaking={false}
-                onSelect={() => {}}
-                onResolvePermission={onResolvePermission}
-              />
+              <div key={hostId} className="tiles-gallery-tile-wrap">
+                <WorkerCard
+                  worker={hw[0]}
+                  depTitles={new Map()}
+                  mode="gallery"
+                  selected={false}
+                  speaking={false}
+                  onSelect={onSelectParticipant ? () => onSelectParticipant(hostId) : undefined}
+                  onResolvePermission={onResolvePermission}
+                  iconId={hg.iconId}
+                  customAvatar={avatar}
+                />
+                {actions}
+              </div>
             );
           }
           // No workers yet — render placeholder "connecting" tile
           return (
-            <div key={hostId} className="tiles-gallery-placeholder" title={hg.backendId}>
-              <div className="tiles-gallery-placeholder-avatar">
-                <Wifi size={20} />
+            <div key={hostId} className="tiles-gallery-tile-wrap">
+              <div
+                className="tiles-gallery-placeholder"
+                title={hg.backendId}
+                onClick={() => onSelectParticipant?.(hostId)}
+                role={onSelectParticipant ? 'button' : undefined}
+                tabIndex={onSelectParticipant ? 0 : undefined}
+              >
+                <div className="tiles-gallery-placeholder-avatar">
+                  <BackendAvatar iconId={hg.iconId} size={40} customAvatar={avatar} />
+                </div>
+                <div className="tiles-gallery-placeholder-label">{hg.backendId}</div>
+                <div className="tiles-gallery-placeholder-status">Connecting…</div>
               </div>
-              <div className="tiles-gallery-placeholder-label">{hg.backendId}</div>
-              <div className="tiles-gallery-placeholder-status">Connecting…</div>
+              {actions}
             </div>
           );
         })}

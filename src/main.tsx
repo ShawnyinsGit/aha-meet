@@ -2,20 +2,33 @@ import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './App';
 import { SettingsWindow } from './components/SettingsWindow';
+import { PopoutPlaceholder } from './components/PopoutPlaceholder';
 import { AppErrorBoundary } from './components/AppErrorBoundary';
 import './styles.css';
 
 const params = new URLSearchParams(window.location.search);
-const isSettingsView = params.get('view') === 'settings';
+const viewParam = params.get('view');
+const isSettingsView = viewParam === 'settings';
+const isPopoutView = viewParam === 'popout';
 
 if (isSettingsView) {
   document.documentElement.classList.add('settings-view');
   document.title = '设置';
 }
 
+if (isPopoutView) {
+  document.documentElement.classList.add('popout-view');
+  const type = params.get('type') ?? 'window';
+  document.title = `独立窗口 — ${type}`;
+}
+
 const root = createRoot(document.getElementById('root')!);
 root.render(
   <AppErrorBoundary>
-    {isSettingsView ? <SettingsWindow /> : <App />}
+    {isSettingsView
+      ? <SettingsWindow />
+      : isPopoutView
+        ? <PopoutPlaceholder />
+        : <App />}
   </AppErrorBoundary>,
 );

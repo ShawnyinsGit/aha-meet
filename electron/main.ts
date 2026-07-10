@@ -334,6 +334,7 @@ async function registerAllIpc(ctx: IpcContext): Promise<void> {
     { registerSkillsIpc },
     { registerBrowserIpc },
     { registerBackendAuthIpc },
+    { registerPopoutWindowIpc },
   ] = await Promise.all([
     import('./ipc/session.js'),
     import('./ipc/sessions.js'),
@@ -352,6 +353,7 @@ async function registerAllIpc(ctx: IpcContext): Promise<void> {
     import('./ipc/skills.js'),
     import('./ipc/browser.js'),
     import('./ipc/backend-auth.js'),
+    import('./ipc/popout-window.js'),
   ]);
   _flushOpenTabsNow = flushOpenTabsNow;
   registerSessionIpc(ctx);
@@ -371,6 +373,7 @@ async function registerAllIpc(ctx: IpcContext): Promise<void> {
   registerSkillsIpc();
   registerBrowserIpc(browserTabManager);
   registerBackendAuthIpc();
+  registerPopoutWindowIpc();
   // Register custom backends from settings so they appear in the backend list
   registerCustomBackends();
 }
@@ -508,6 +511,9 @@ app.on('before-quit', (event) => {
     import('./ipc/settings-window.js')
       .then(({ closeSettingsWindow }) => closeSettingsWindow())
       .catch(() => { /* ignore — settings window may not exist */ });
+    import('./ipc/popout-window.js')
+      .then(({ closeAllPopoutWindows }) => closeAllPopoutWindows())
+      .catch(() => { /* ignore */ });
 
     try {
       await Promise.race([shutdownAllSlots(), sleepMs(5000)]);

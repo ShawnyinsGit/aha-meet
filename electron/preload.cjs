@@ -63,6 +63,7 @@ const api = {
     setBaseUrl: (backendId, url) => ipcRenderer.invoke('backend-auth:set-base-url', { backendId, url }),
     setModel: (backendId, model) => ipcRenderer.invoke('backend-auth:set-model', { backendId, model }),
     setMode: (backendId, mode) => ipcRenderer.invoke('backend-auth:set-mode', { backendId, mode }),
+    setAvatar: (backendId, dataUrl) => ipcRenderer.invoke('backend-auth:set-avatar', { backendId, dataUrl }),
     setDefault: (backendId) => ipcRenderer.invoke('backend-auth:set-default', backendId),
     checkStatus: (backendId) => ipcRenderer.invoke('backend-auth:check-status', backendId),
     loginOAuth: (backendId) => ipcRenderer.invoke('backend-auth:login-oauth', backendId),
@@ -119,6 +120,8 @@ const api = {
     open: () => ipcRenderer.invoke('settings:open-window'),
     close: () => ipcRenderer.invoke('settings:close-window'),
   },
+  popoutSession: (tabId) => ipcRenderer.invoke('popout:open-session', { tabId }),
+  popoutStage: (windowId, type) => ipcRenderer.invoke('popout:open-stage', { windowId, type }),
   browser: {
     openTab: (url) => ipcRenderer.invoke('browser:open-tab', { url }),
     closeTab: (tabId) => ipcRenderer.invoke('browser:close-tab', { tabId }),

@@ -1,9 +1,8 @@
-import { ReactNode, RefObject, useState, useCallback, useMemo } from 'react';
+import { ReactNode, RefObject, useState, useCallback, useMemo, cloneElement, isValidElement } from 'react';
 import type { ScreenShareState } from '../hooks/useScreenShare';
-import type { DeliverySnapshot, WorkerState } from '../lib/meeting-store';
+import type { DeliverySnapshot, HostGroupState, WorkerState } from '../lib/meeting-store';
 import type { ActivityEntry, BrowserTabInfo, MeetingPlan } from '../types';
 import type { StageWindow, StageWindowType } from '../lib/stage-window-store';
-import { DeliveryViewer } from './DeliveryViewer';
 import { FileViewer } from './FileViewer';
 import { BrowserStage } from './BrowserStage';
 import { StageTabBar } from './StageTabBar';
@@ -16,6 +15,7 @@ interface ScreenStageProps {
   onPickSource: () => void;
   onStopShare: () => void;
   workers: WorkerState[];
+  hostGroups: Map<string, HostGroupState>;
   plan: MeetingPlan | null;
   running: boolean;
   aiSpeaking: boolean;
@@ -34,6 +34,7 @@ interface ScreenStageProps {
   onSelectWindow: (id: string) => void;
   onCloseWindow: (id: string) => void;
   onCreateWindow: (type: StageWindowType, opts?: { workerId?: string; title?: string }) => void;
+  onPopOutWindow?: (id: string) => void;
   onResolvePermission: (id: string, decision: 'allow' | 'deny') => void;
   browserTabs?: BrowserTabInfo[];
   browserActiveTabId?: string | null;
@@ -45,10 +46,11 @@ interface ScreenStageProps {
   onBrowserBack?: (tabId: string) => void;
   onBrowserForward?: (tabId: string) => void;
   onBrowserReload?: (tabId: string) => void;
+  /** Map of iconId → custom avatar data URL */
+  customAvatars?: Map<string, string | null>;
 }
 
 const ACTIVITY_TAB_ID = 'activity-default';
-const USER_SLOT = 'user';
 
 export function ScreenStage({
   share,
@@ -56,6 +58,7 @@ export function ScreenStage({
   onPickSource: _onPickSource,
   onStopShare,
   workers,
+  hostGroups,
   plan,
   running,
   aiSpeaking = false,
@@ -71,6 +74,7 @@ export function ScreenStage({
   onSelectWindow,
   onCloseWindow,
   onCreateWindow,
+  onPopOutWindow,
   onResolvePermission,
   browserTabs = [],
   browserActiveTabId = null,
@@ -82,16 +86,17 @@ export function ScreenStage({
   onBrowserBack,
   onBrowserForward,
   onBrowserReload,
+  customAvatars,
 }: ScreenStageProps) {
-  const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
+  const [selectedParticipantId, setSelectedParticipantId] = useState<string | null>(null);
 
-  const handleSelectUser = useCallback(() => {
-    setSelectedUserId(USER_SLOT);
-  }, []);
-
-  const handleSelectWorker = useCallback((id: string) => {
-    setSelectedUserId(id);
-  }, []);
+  const handleSelectParticipant = useCallback((id: string) => {
+    setSelectedParticipantId(id);
+    // Auto-switch to activity tab so the selection is visible
+    if (activeWindowId !== ACTIVITY_TAB_ID) {
+      onSelectWindow(ACTIVITY_TAB_ID);
+    }
+  }, [activeWindowId, onSelectWindow]);
 
   const activeWindow = stageWindows.find((w) => w.id === activeWindowId) ?? null;
   const isActivityTab = activeWindow?.type === 'activity' || activeWindowId === ACTIVITY_TAB_ID;
@@ -103,7 +108,10 @@ export function ScreenStage({
   const terminalActivity = useMemo(() => {
     if (activeWindow?.type !== 'terminal') return [];
     if (activeWindow.workerId) {
-      const target = workers.find((w) => w.id === activeWindow.workerId);
+      // Match by worker id OR by hostId (gallery passes hostId when opening terminal)
+      const target = workers.find(
+        (w) => w.id === activeWindow.workerId || w.hostId === activeWindow.workerId,
+      );
       return target?.activity ?? [];
     }
     // Aggregate all workers' Bash-related activity chronologically
@@ -155,7 +163,9 @@ export function ScreenStage({
       {!share.active && (
         <>
           <div className="stage-gallery">
-            {galleryContent}
+            {isValidElement(galleryContent)
+              ? cloneElement(galleryContent, { onSelectParticipant: handleSelectParticipant } as any)
+              : galleryContent}
           </div>
 
           <StageTabBar
@@ -164,19 +174,21 @@ export function ScreenStage({
             onSelect={onSelectWindow}
             onClose={onCloseWindow}
             onCreate={onCreateWindow}
+            onPopOut={onPopOutWindow}
           />
 
           <div className="stage-content">
             {isActivityTab && (
               <ActivityTabContent
                 workers={workers}
+                hostGroups={hostGroups}
                 plan={plan}
                 running={running}
                 aiSpeaking={aiSpeaking}
                 onResolvePermission={onResolvePermission}
-                onSelectUser={handleSelectUser}
-                selectedUser={selectedUserId === USER_SLOT}
+                selectedId={selectedParticipantId}
                 onOpenInTerminal={(workerId) => onCreateWindow('terminal', { workerId })}
+                customAvatars={customAvatars}
               />
             )}
 

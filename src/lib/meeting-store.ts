@@ -160,12 +160,26 @@ export interface MeetingState {
 export interface HostGroupState {
   id: string;
   backendId: string;
+  /** Icon identifier for the backend (e.g. 'claude', 'codex', 'kimi', 'qoder').
+   *  Used by the participant panel to render per-backend avatars. */
+  iconId: string;
   /** The host agent (talker) for this group. */
   hostWorkerId: AgentSource;
   /** Worker ids belonging to this host. */
   workerIds: AgentSource[];
   /** Whether the worker list is collapsed in the UI. Default true. */
   collapsed: boolean;
+}
+
+/** Map a backendId to its canonical iconId. Falls back to the backendId itself. */
+function iconIdForBackend(backendId: string): string {
+  switch (backendId) {
+    case 'claude-code': return 'claude';
+    case 'codex':       return 'codex';
+    case 'kimi':        return 'kimi';
+    case 'qoder':       return 'qoder';
+    default:            return backendId;
+  }
 }
 
 /** Tab metadata projected from each slot. Drives the TabStrip rendering. */
@@ -290,6 +304,7 @@ function emptyState(defaultBackendId: string = 'claude-code'): MeetingState {
   hostGroups.set('default', {
     id: 'default',
     backendId: defaultBackendId,
+    iconId: iconIdForBackend(defaultBackendId),
     hostWorkerId: 'talker',
     workerIds: [],
     collapsed: true,
@@ -370,6 +385,26 @@ class MeetingStore {
   private announceQueue: string[] = [];
   private announceTimer: number | null = null;
   private autoApproveScope: AutoApproveScope = 'off';
+
+  /** Update the default host group's backendId when the renderer learns which
+   *  backend is the user's default. Called from App after backends are loaded. */
+  syncDefaultBackend(backendId: string) {
+    this.defaultBackendId = backendId;
+    if (!this.activeId) return;
+    const slot = this.slots.get(this.activeId);
+    if (!slot) return;
+    const hg = slot.state.hostGroups.get('default');
+    if (!hg || hg.backendId === backendId) return;
+    this.mutateSlot(this.activeId, (s) => {
+      const hostGroups = new Map(s.hostGroups);
+      hostGroups.set('default', {
+        ...hg,
+        backendId,
+        iconId: iconIdForBackend(backendId),
+      });
+      return { ...s, hostGroups };
+    });
+  }
 
   subscribe = (listener: Listener): (() => void) => {
     this.listeners.add(listener);
@@ -1030,6 +1065,7 @@ class MeetingStore {
           hostGroups.set(hostId, {
             id: hostId,
             backendId: hostId, // Will be updated when host info arrives
+            iconId: iconIdForBackend(hostId),
             hostWorkerId: `host-${hostId}`,
             workerIds: [e.workerId],
             collapsed: true,
@@ -1437,7 +1473,7 @@ class MeetingStore {
       // shows).
       const talkerEntry: TranscriptEntry | null =
         source === 'talker' && text.trim().length > 0
-          ? { id: uid(), role: 'assistant', text, ts: Date.now() }
+          ? { id: uid(), role: 'assistant', text, ts: Date.now(), hostId }
           : null;
       this.updateWorker(slot, source, (w) => {
         let next: WorkerState = w;
@@ -2033,6 +2069,7 @@ class MeetingStore {
         hostGroups.set(result.hostId, {
           id: result.hostId,
           backendId,
+          iconId: iconIdForBackend(backendId),
           hostWorkerId: `host-${result.hostId}`,
           workerIds: [],
           collapsed: true,

@@ -48,6 +48,8 @@ export interface BackendAuthEntry {
   baseUrl?: string;
   model?: string;
   lastValidatedAt?: number;  // timestamp of last successful auth check
+  /** Custom avatar image as base64 data URL (e.g. 'data:image/png;base64,...'). */
+  customAvatar?: string;
 }
 
 export interface CustomBackendEntry {

@@ -3,7 +3,7 @@ import type { KeyboardEvent } from 'react';
 import { Bell } from 'lucide-react';
 import type { WorkerState } from '../lib/meeting-store';
 import type { WorkerSpecialty } from '../types';
-import { ClaudeAvatar } from './ClaudeAvatar';
+import { BackendAvatar } from './BackendAvatar';
 
 interface WorkerCardProps {
   worker: WorkerState;
@@ -13,6 +13,10 @@ interface WorkerCardProps {
   speaking?: boolean;
   onSelect?: () => void;
   onResolvePermission: (id: string, decision: 'allow' | 'deny') => void;
+  /** Backend icon identifier for per-backend avatar rendering. */
+  iconId?: string;
+  /** Custom avatar image URL (overrides iconId). */
+  customAvatar?: string | null;
 }
 
 const statusTone: Record<WorkerState['status'], 'idle' | 'waiting' | 'working' | 'done' | 'failed'> = {
@@ -52,6 +56,8 @@ export function WorkerCard({
   speaking,
   onSelect,
   onResolvePermission,
+  iconId,
+  customAvatar,
 }: WorkerCardProps) {
   const isTalker = worker.role === 'talker';
   const tone = statusTone[worker.status];
@@ -65,8 +71,9 @@ export function WorkerCard({
     return () => clearTimeout(t);
   }, [lastTs]);
 
+  const avatarSize = mode === 'gallery' ? 56 : 32;
   const avatar = isTalker ? (
-    <ClaudeAvatar size={mode === 'gallery' ? 56 : 32} speaking={Boolean(speaking)} />
+    <BackendAvatar iconId={iconId ?? 'claude'} size={avatarSize} speaking={Boolean(speaking)} customAvatar={customAvatar} />
   ) : (
     <span className="worker-card-initial">{avatarInitial(worker.title)}</span>
   );

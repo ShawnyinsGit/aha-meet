@@ -202,10 +202,27 @@ export class KimiBackend extends SubprocessBackend {
   }
 
   async checkAuthStatus(): Promise<{ loggedIn: boolean }> {
-    // Kimi is "logged in" if the binary is available (may have OAuth configured)
-    // OR an API key is set
+    // Kimi is logged in if:
+    // 1. An API key is set in our config, OR
+    // 2. The ~/.kimi directory exists with auth data (OAuth login completed)
     const binary = this.resolveBinary();
-    return { loggedIn: binary !== null };
+    if (!binary) return { loggedIn: false };
+
+    // Check for OAuth login — kimi stores auth data in ~/.kimi/
+    const { existsSync, readdirSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    const { homedir } = await import('node:os');
+    const kimiDir = join(homedir(), '.kimi');
+    if (existsSync(kimiDir)) {
+      try {
+        const files = readdirSync(kimiDir);
+        // If the directory has any files, assume auth is configured
+        if (files.length > 0) return { loggedIn: true };
+      } catch {
+        // ignore
+      }
+    }
+    return { loggedIn: false };
   }
 
   async loginOAuth(): Promise<{ ok: boolean; error?: string }> {
@@ -213,12 +230,42 @@ export class KimiBackend extends SubprocessBackend {
     if (!binary) {
       return { ok: false, error: 'Kimi CLI not found. Install it first.' };
     }
+    // OAuth login needs an interactive terminal — launch in Terminal.app on macOS
+    if (process.platform === 'darwin') {
+      return this.loginInTerminal(binary, ['login']);
+    }
     return new Promise<{ ok: boolean; error?: string }>((resolve) => {
       const env = mergedSubprocessEnv();
-      const proc = spawn(binary, ['/login'], {
+      const proc = spawn(binary, ['login'], {
         env,
+        stdio: 'inherit',
+        detached: true,
+      });
+      proc.unref();
+      proc.on('error', (err: Error) => {
+        resolve({ ok: false, error: err.message });
+      });
+      proc.on('close', (code: number | null) => {
+        if (code === 0) {
+          resolve({ ok: true });
+        } else {
+          resolve({ ok: false, error: `kimi login exited with code ${code}` });
+        }
+      });
+    });
+  }
+
+  private loginInTerminal(binary: string, args: string[]): Promise<{ ok: boolean; error?: string }> {
+    // Just run the binary directly in Terminal — it inherits the user's shell env.
+    // No need to dump all env vars as a prefix (that clutters the terminal output).
+    const cmd = `${binary} ${args.join(' ')}`;
+    const script = `tell application "Terminal"
+activate
+do script "${cmd.replace(/"/g, '\\\\"')}"
+end tell`;
+    return new Promise<{ ok: boolean; error?: string }>((resolve) => {
+      const proc = spawn('osascript', ['-e', script], {
         stdio: 'ignore',
-        detached: false,
       });
       proc.on('error', (err: Error) => {
         resolve({ ok: false, error: err.message });
@@ -227,7 +274,7 @@ export class KimiBackend extends SubprocessBackend {
         if (code === 0) {
           resolve({ ok: true });
         } else {
-          resolve({ ok: false, error: `kimi /login exited with code ${code}` });
+          resolve({ ok: false, error: `Failed to open Terminal (exit ${code}). Try running "kimi login" manually.` });
         }
       });
     });

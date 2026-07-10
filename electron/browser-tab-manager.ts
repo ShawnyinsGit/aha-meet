@@ -118,11 +118,11 @@ export class BrowserTabManager {
     }
 
     const loadUrl = url || DEFAULT_URL;
-    try {
-      await view.webContents.loadURL(loadUrl);
-    } catch {
-      // Navigation may fail for unreachable URLs; title/URL are updated via events
-    }
+    // Fire-and-forget: wireEvents handlers update isLoading/title/url as the
+    // page loads. This lets openTab() return immediately so the UI shows the
+    // tab right away with a loading indicator, instead of blocking until the
+    // full page finishes downloading.
+    view.webContents.loadURL(loadUrl).catch(() => { /* unreachable URL */ });
 
     this.activeTabId = id;
     this.emit();

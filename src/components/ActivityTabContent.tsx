@@ -1,5 +1,5 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
-import type { WorkerState } from '../lib/meeting-store';
+import { useMemo, useCallback } from 'react';
+import type { HostGroupState, WorkerState } from '../lib/meeting-store';
 import type { MeetingPlan } from '../types';
 import { ClaudeWorkspace } from './ClaudeWorkspace';
 import { UserTasksPanel } from './UserTasksPanel';
@@ -8,24 +8,31 @@ const USER_SLOT = 'user';
 
 interface ActivityTabContentProps {
   workers: WorkerState[];
+  hostGroups: Map<string, HostGroupState>;
   plan: MeetingPlan | null;
   running: boolean;
   aiSpeaking: boolean;
   onResolvePermission: (id: string, decision: 'allow' | 'deny') => void;
-  onSelectUser: () => void;
-  selectedUser: boolean;
+  /** Currently selected participant: 'user', a worker id, or null (defaults to first talker). */
+  selectedId?: string | null;
+  /** Called when the workspace internally changes selection (unused for now). */
+  onSelectId?: (id: string | null) => void;
   onOpenInTerminal?: (workerId: string) => void;
+  /** Map of iconId → custom avatar data URL */
+  customAvatars?: Map<string, string | null>;
 }
 
 export function ActivityTabContent({
   workers,
+  hostGroups,
   plan,
   running,
   aiSpeaking,
   onResolvePermission,
-  onSelectUser,
-  selectedUser,
+  selectedId: externalSelectedId,
+  onSelectId: _onSelectId,
   onOpenInTerminal,
+  customAvatars,
 }: ActivityTabContentProps) {
   const sortedWorkers = useMemo(() => {
     const statusPriority = (w: WorkerState): number => {
@@ -50,33 +57,36 @@ export function ActivityTabContent({
     });
   }, [workers]);
 
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (selectedUser) {
-      setSelectedId(USER_SLOT);
+  // Controlled selection: use external prop, fall back to first talker
+  const selectedWorker = useMemo(() => {
+    if (externalSelectedId === USER_SLOT) return null;
+    if (externalSelectedId) {
+      // Match by worker id OR by hostId (gallery passes hostId)
+      return sortedWorkers.find((w) => w.id === externalSelectedId || w.hostId === externalSelectedId) ?? sortedWorkers[0] ?? null;
     }
-  }, [selectedUser]);
+    // Default: select first talker
+    return sortedWorkers.find((w) => w.role === 'talker') ?? sortedWorkers[0] ?? null;
+  }, [externalSelectedId, sortedWorkers]);
 
-  useEffect(() => {
-    if (selectedId && selectedId !== USER_SLOT && !workers.some((w) => w.id === selectedId)) {
-      setSelectedId(null);
+  const isUserSelected = externalSelectedId === USER_SLOT;
+
+  // Resolve iconId and customAvatar from the worker's host group
+  const { selectedIconId, selectedCustomAvatar } = useMemo(() => {
+    if (!selectedWorker) return { selectedIconId: 'claude', selectedCustomAvatar: null };
+    const hg = hostGroups.get(selectedWorker.hostId || 'default');
+    const iconId = hg?.iconId ?? 'claude';
+    return { selectedIconId: iconId, selectedCustomAvatar: customAvatars?.get(iconId) ?? null };
+  }, [selectedWorker, hostGroups, customAvatars]);
+
+  const handleOpenInTerminal = useCallback(() => {
+    if (selectedWorker && onOpenInTerminal) {
+      onOpenInTerminal(selectedWorker.id);
     }
-  }, [selectedId, workers]);
-
-  const effectiveSelected = selectedId ?? 'talker';
-  const selectedWorker =
-    effectiveSelected === USER_SLOT
-      ? null
-      : (sortedWorkers.find((w) => w.id === effectiveSelected) ?? sortedWorkers[0] ?? null);
-
-  const handleSelectWorker = useCallback((id: string) => {
-    setSelectedId(id);
-  }, []);
+  }, [selectedWorker, onOpenInTerminal]);
 
   return (
     <div className="activity-detail">
-      {effectiveSelected === USER_SLOT ? (
+      {isUserSelected ? (
         <UserTasksPanel workers={workers} />
       ) : selectedWorker && (
         <ClaudeWorkspace
@@ -90,6 +100,8 @@ export function ActivityTabContent({
           subtitle={selectedWorker.role === 'talker' ? 'Host · Talker' : 'Worker'}
           avatar={selectedWorker.role === 'talker' ? 'claude' : 'worker'}
           initial={selectedWorker.title.trim().slice(0, 1).toUpperCase()}
+          iconId={selectedIconId}
+          customAvatar={selectedCustomAvatar}
           hideHero
           task={
             selectedWorker.role === 'talker'
@@ -109,7 +121,8 @@ export function ActivityTabContent({
           lastText={selectedWorker.lastText}
           startedAt={selectedWorker.startedAt}
           pendingPermissionTool={selectedWorker.pendingPermission?.toolName ?? null}
-          onOpenInTerminal={onOpenInTerminal ? () => onOpenInTerminal(selectedWorker.id) : undefined}
+          onOpenInTerminal={onOpenInTerminal ? handleOpenInTerminal : undefined}
+          isTalker={selectedWorker.role === 'talker'}
         />
       )}
     </div>
