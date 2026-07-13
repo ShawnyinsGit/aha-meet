@@ -8,6 +8,8 @@
 
 import type { SessionEvent } from './claude-session.js';
 import type { BackendSession } from './backends/cli-backend.js';
+import type { PlanMeetingTask } from './meeting-tools.js';
+import type { TaskWorkspace } from './task-workspace.js';
 
 export type OrchestratorSource = 'talker' | string;
 
@@ -29,6 +31,8 @@ export interface MeetingPlanNode {
   title: string;
   status: WorkerStatusKind;
   deps: string[];
+  executorBackendId?: string;
+  writePaths?: string[];
 }
 
 export interface MeetingPlan {
@@ -54,11 +58,13 @@ export type OrchestratorOnlyEvent =
   | { kind: 'worker-stalled'; workerId: string; title: string; idleMs: number; currentTool: string | null }
   | { kind: 'worker-delivery'; workerId: string; title: string; summary: string; taskId: string; files: WorkerDeliveryFile[] }
   | { kind: 'plan-updated'; plan: MeetingPlan }
+  | { kind: 'plan-proposed'; tasks: PlanMeetingTask[] }
   | { kind: 'decision-pending'; decisionId: string; question: string; path: string; recommendedTitle: string; calendarOk: boolean; remindersOk: boolean }
   | { kind: 'decision-resolved'; decisionId: string; question: string; path: string; conclusion: string }
   | { kind: 'document-saved'; title: string; filename: string; path: string }
   | { kind: 'session-ready' }
-  | { kind: 'session-start-failed'; error: string };
+  | { kind: 'session-start-failed'; error: string }
+  | { kind: 'coordinator-failed'; hostId: string; candidateHostId: string | null; error?: string };
 
 export type EmittedEvent = SessionEvent | OrchestratorOnlyEvent;
 
@@ -98,6 +104,8 @@ export interface WorkerHandle {
   title: string;
   prompt: string;
   deps: string[];
+  executorBackendId?: string;
+  writePaths?: string[];
   status: WorkerStatusKind;
   session: BackendSession | null;
   summary: string;
@@ -120,6 +128,7 @@ export interface WorkerHandle {
    *  final artifacts (documents, code) rather than letting the system include
    *  intermediate scripts and temp files. */
   explicitDeliveries: string[];
+  workspace: TaskWorkspace | null;
   /** B1 stall watchdog: set true once a `worker-stalled` event has fired for
    *  the current idle stretch, cleared on the next activity (lastUpdateTs bump)
    *  so each distinct stall is announced exactly once, not every sweep tick. */

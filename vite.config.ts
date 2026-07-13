@@ -16,7 +16,7 @@ export default defineConfig({
           'react-vendor': ['react', 'react-dom'],
           'ort': ['onnxruntime-web'],
           'vad': ['@ricky0123/vad-web'],
-          'doc-preview': ['docx-preview', 'pptx-preview'],
+          'doc-preview': ['docx-preview'],
         },
       },
     },

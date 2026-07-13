@@ -25,10 +25,30 @@ function pickSessionId(payload: unknown): string | undefined {
 }
 
 export function registerSessionIpc(ctx: IpcContext): void {
+  ipcMain.handle('session:set-orchestration-mode', async (_e, payload: unknown) => {
+    if (!payload || typeof payload !== 'object') return { ok: false, error: 'invalid payload' };
+    const enabled = (payload as { enabled?: unknown }).enabled;
+    if (typeof enabled !== 'boolean') return { ok: false, error: 'enabled must be boolean' };
+    const slot = ctx.registry.resolve(pickSessionId(payload));
+    if (!slot) return { ok: false, error: 'No active session' };
+    slot.orchestrator.setAutoOrchestration(enabled);
+    return { ok: true };
+  });
+
+  ipcMain.handle('session:approve-plan', async (_e, payload: unknown) => {
+    if (!payload || typeof payload !== 'object') return { ok: false, error: 'invalid payload' };
+    const approved = (payload as { approved?: unknown }).approved;
+    if (typeof approved !== 'boolean') return { ok: false, error: 'approved must be boolean' };
+    const slot = ctx.registry.resolve(pickSessionId(payload));
+    if (!slot) return { ok: false, error: 'No active session' };
+    return slot.orchestrator.approvePendingPlan(approved);
+  });
   ipcMain.handle('session:user-text', async (_e, payload: { sessionId?: string; text: string }) => {
     const slot = ctx.registry.resolve(pickSessionId(payload));
     if (!slot) return { ok: false, error: 'No active session' };
     const text = typeof payload?.text === 'string' ? payload.text : '';
+    if (!text.trim()) return { ok: false, error: 'Text is required' };
+    if (text.length > 100_000) return { ok: false, error: 'Text is too large' };
     slot.orchestrator.sendUserText(text);
     ctx.registry.touch(slot.id);
     return { ok: true };

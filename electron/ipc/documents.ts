@@ -179,15 +179,6 @@ function detectKind(name: string): DeliveryFileKind {
   return 'binary';
 }
 
-function escapeHtml(str: string): string {
-  return str
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
-}
-
 export function registerDocumentsIpc(ctx: IpcContext): void {
   ipcMain.handle('documents:read', async (_e, payload: RawReadPayload): Promise<DocumentReadResult | DocumentReadError> => {
     const slot = ctx.registry.resolve(pickSessionId(payload));
@@ -349,43 +340,12 @@ export function registerDocumentsIpc(ctx: IpcContext): void {
         };
       }
 
-      if (kind === 'pptx') {
-        const buffer = await fs.readFile(realPath);
-        return {
-          ok: true,
-          path: resolvedRawPath,
-          name,
-          sizeBytes,
-          kind: 'pptx',
-          data: new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength),
-          mediaType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-        };
-      }
-
-      if (kind === 'xlsx') {
-        const buffer = await fs.readFile(realPath);
-        try {
-          const XLSX = await import('xlsx');
-          const workbook = XLSX.read(buffer, { type: 'buffer' });
-          const htmlParts: string[] = [];
-          for (const sheetName of workbook.SheetNames) {
-            const sheet = workbook.Sheets[sheetName];
-            if (!sheet) continue;
-            const html = XLSX.utils.sheet_to_html(sheet);
-            htmlParts.push(`<h3>${escapeHtml(sheetName)}</h3>${html}`);
-          }
-          return {
-            ok: true,
-            path: resolvedRawPath,
-            name,
-            sizeBytes,
-            kind: 'xlsx',
-            text: htmlParts.join('\n'),
-          };
-        } catch (err) {
-          console.warn('[documents:read] XLSX parse failed:', basename(resolvedRawPath), err);
-          return { ok: true, path: resolvedRawPath, name, sizeBytes, kind: 'binary' };
-        }
+      // PPTX/XLSX are intentionally not parsed in-process. The previously used
+      // preview packages pull vulnerable HTML/rendering dependencies and parse
+      // attacker-controlled archives in the privileged main process. Users can
+      // still open these files through documents:open-external.
+      if (kind === 'pptx' || kind === 'xlsx') {
+        return { ok: true, path: resolvedRawPath, name, sizeBytes, kind: 'binary' };
       }
 
       return {

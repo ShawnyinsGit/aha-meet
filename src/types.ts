@@ -55,6 +55,8 @@ export type RendererEvent =
   | { kind: 'worker-stalled'; workerId: string; title: string; idleMs: number; currentTool: string | null; source?: AgentSource; sessionId?: string; hostId?: string }
   | { kind: 'worker-delivery'; workerId: string; title: string; summary: string; taskId: string; files: WorkerDeliveryFile[]; source?: AgentSource; sessionId?: string; hostId?: string }
   | { kind: 'plan-updated'; plan: MeetingPlan; source?: AgentSource; sessionId?: string; hostId?: string }
+  | { kind: 'plan-proposed'; tasks: PlanMeetingTaskInput[]; source?: AgentSource; sessionId?: string; hostId?: string }
+  | { kind: 'coordinator-failed'; hostId: string; candidateHostId: string | null; error?: string; source?: AgentSource; sessionId?: string }
   | { kind: 'decision-pending'; decisionId: string; question: string; path: string; recommendedTitle: string; calendarOk: boolean; remindersOk: boolean; source?: AgentSource; sessionId?: string; hostId?: string }
   | { kind: 'decision-resolved'; decisionId: string; question: string; path: string; conclusion: string; source?: AgentSource; sessionId?: string; hostId?: string }
   | { kind: 'document-saved'; title: string; filename: string; path: string; source?: AgentSource; sessionId?: string; hostId?: string }
@@ -247,6 +249,7 @@ export interface OpenTabMeta {
 export interface HostMeta {
   id: string;
   backendId: string;
+  role: 'coordinator' | 'expert';
 }
 
 export interface SessionsApi {
@@ -268,6 +271,7 @@ export interface SessionsApi {
     recentCwds: RecentCwdMeta[];
     lastActiveCwd: string | null;
   }>;
+  listRecoverable: () => Promise<{ ok: true; meetings: Array<{ meetingId: string; state: Record<string, unknown> }> }>;
   addHost: (
     sessionId: string | null,
     backendId: string,
@@ -280,6 +284,14 @@ export interface SessionsApi {
   listHosts: (
     sessionId: string | null,
   ) => Promise<{ ok: true; hosts: HostMeta[] } | { ok: false; error: string }>;
+  setCoordinator: (
+    sessionId: string | null,
+    hostId: string,
+  ) => Promise<{ ok: true; coordinatorHostId: string } | { ok: false; error: string }>;
+  restartHost: (
+    sessionId: string | null,
+    hostId: string,
+  ) => Promise<{ ok: true } | { ok: false; error: string }>;
 }
 
 export interface SkillInfo {
@@ -338,6 +350,8 @@ export interface VibeMeetApi {
   interrupt: (sessionId: string | null) => Promise<{ ok: boolean }>;
   setPermissionMode: (sessionId: string | null, mode: string) => Promise<{ ok: boolean }>;
   setAutoApprove: (scope: AutoApproveScope) => Promise<{ ok: boolean; autoApproveScope?: AutoApproveScope }>;
+  setOrchestrationMode: (sessionId: string | null, enabled: boolean) => Promise<{ ok: boolean; error?: string }>;
+  approvePlan: (sessionId: string | null, approved: boolean) => Promise<{ ok: boolean; error?: string }>;
   endSession: (sessionId: string | null) => Promise<{ ok: boolean }>;
   pickCwd: () => Promise<string | null>;
   getVoiceConfig: () => Promise<{ enabled: boolean; voicePrint: VoicePrint | null }>;
@@ -483,6 +497,16 @@ export interface ActivityEntry {
   source?: AgentSource;
   /** Absolute path to a decision markdown doc; renderer shows an "Open" button when set. */
   actionPath?: string;
+}
+
+/** Renderer-side input for the manual Plan Meeting flow. The main process
+ * validates the same shape before installing it into the scheduler. */
+export interface PlanMeetingTaskInput {
+  id: string;
+  title: string;
+  prompt: string;
+  deps: string[];
+  executorBackendId?: string;
 }
 
 export interface PendingPermission {

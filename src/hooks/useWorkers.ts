@@ -7,6 +7,7 @@ export interface UseWorkersResult {
   workers: Map<string, WorkerState>;
   workerList: WorkerState[];
   hostGroups: Map<string, HostGroupState>;
+  coordinatorHostId: string;
   plan: MeetingPlan | null;
   running: boolean;
   cwd: string | null;
@@ -32,6 +33,8 @@ export interface UseWorkersResult {
   toggleHostGroupCollapsed: (hostId: string) => void;
   addHostGroup: (backendId: string) => Promise<{ ok: boolean; hostId?: string; error?: string }>;
   removeHostGroup: (hostId: string) => Promise<{ ok: boolean; error?: string }>;
+  setCoordinator: (hostId: string) => Promise<{ ok: boolean; error?: string }>;
+  restartHost: (hostId: string) => Promise<{ ok: boolean; error?: string }>;
   syncDefaultBackend: (backendId: string) => void;
 }
 
@@ -83,6 +86,8 @@ export function useWorkers(): UseWorkersResult {
     (hostId: string) => meetingStore.removeHostGroup(hostId),
     [],
   );
+  const setCoordinator = useCallback((hostId: string) => meetingStore.setCoordinator(hostId), []);
+  const restartHost = useCallback((hostId: string) => meetingStore.restartHost(hostId), []);
   const syncDefaultBackend = useCallback(
     (backendId: string) => meetingStore.syncDefaultBackend(backendId),
     [],
@@ -92,6 +97,7 @@ export function useWorkers(): UseWorkersResult {
     workers: state.workers,
     workerList,
     hostGroups: state.hostGroups,
+    coordinatorHostId: state.coordinatorHostId,
     plan: state.plan,
     running: state.running,
     cwd,
@@ -114,6 +120,8 @@ export function useWorkers(): UseWorkersResult {
     toggleHostGroupCollapsed,
     addHostGroup,
     removeHostGroup,
+    setCoordinator,
+    restartHost,
     syncDefaultBackend,
   };
 }

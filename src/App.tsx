@@ -54,6 +54,11 @@ export function App() {
   const [skills, setSkills] = useState<SkillInfo[]>([]);
   const elapsed = useElapsedSeconds(activeOpenedAt);
 
+  useEffect(() => {
+    if (!activeTab || activeTab.placeholder) return;
+    void window.vibeMeet.setOrchestrationMode(activeTab.id, multiAgent);
+  }, [activeTab?.id, activeTab?.placeholder, multiAgent]);
+
   // Load available backends for the participants tab
   useEffect(() => {
     window.vibeMeet.backendAuth.list().then(setBackends).catch(() => setBackends([]));
@@ -359,6 +364,16 @@ export function App() {
     await workers.removeHostGroup(hostId);
   }, [workers]);
 
+  const handleSetCoordinator = useCallback(async (hostId: string) => {
+    const result = await workers.setCoordinator(hostId);
+    if (!result.ok) console.warn('[coordinator] transfer failed:', result.error);
+  }, [workers]);
+
+  const handleRestartHost = useCallback(async (hostId: string) => {
+    const result = await workers.restartHost(hostId);
+    if (!result.ok) console.warn('[host] reconnect failed:', result.error);
+  }, [workers]);
+
   const sendWithMode = useCallback(async (raw: string) => {
     const trimmed = raw.trim();
     if (!trimmed) return;
@@ -442,6 +457,9 @@ ${trimmed}`
                 onResolvePermission={resolvePermission}
                 onToggleMuteHost={handleToggleMuteHost}
                 onRemoveHost={handleRemoveHost}
+                coordinatorHostId={workers.coordinatorHostId}
+                onSetCoordinator={handleSetCoordinator}
+                onRestartHost={handleRestartHost}
                 onOpenParticipantsTab={() => {
                   setDrawerOpen(true);
                   setOpenParticipantsTab(true);

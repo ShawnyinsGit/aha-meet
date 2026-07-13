@@ -152,7 +152,7 @@ function tryEncryptKey(plain: string): string | null {
     if (!safeStorageAvailable()) return null;
     return safeStorage.encryptString(plain).toString('base64');
   } catch (err) {
-    console.warn('[store] safeStorage encrypt failed; falling back to plaintext:', err);
+    console.warn('[store] safeStorage encrypt failed; key will remain memory-only:', err);
     return null;
   }
 }
@@ -172,15 +172,24 @@ function tryDecryptKey(b64: string): string | null {
 // is available.
 function toDiskForm(s: Settings): Settings {
   const { anthropicApiKey, anthropicApiKeyEnc, ...rest } = s;
+  const backendAuth = rest.backendAuth?.map((entry) => {
+    const { apiKey, apiKeyEnc, ...safe } = entry;
+    if (apiKey) {
+      const encrypted = tryEncryptKey(apiKey);
+      return encrypted ? { ...safe, apiKeyEnc: encrypted } : safe;
+    }
+    return apiKeyEnc ? { ...safe, apiKeyEnc } : safe;
+  });
+  const safeRest: Settings = backendAuth ? { ...rest, backendAuth } : rest;
   if (anthropicApiKey) {
     const enc = tryEncryptKey(anthropicApiKey);
-    // safeStorage down → keep plaintext so a transient keychain hiccup can't
-    // silently discard the user's key.
-    return enc ? { ...rest, anthropicApiKeyEnc: enc } : { ...rest, anthropicApiKey };
+    // safeStorage down → keep the key in memory only. Persisting plaintext is
+    // never an acceptable silent fallback.
+    return enc ? { ...safeRest, anthropicApiKeyEnc: enc } : safeRest;
   }
   // No plaintext in memory — preserve any pre-existing ciphertext (e.g. a blob
   // we couldn't decrypt this session) so a routine write doesn't erase it.
-  return anthropicApiKeyEnc ? { ...rest, anthropicApiKeyEnc } : rest;
+  return anthropicApiKeyEnc ? { ...safeRest, anthropicApiKeyEnc } : safeRest;
 }
 
 // Single tail-promise chain; mirrors the pattern in memory.ts. Errors are
@@ -320,7 +329,7 @@ async function persist(next: Settings): Promise<void> {
   // plaintext convention so readers don't have to decrypt.
   const onDisk = toDiskForm(next);
   const tmp = `${p}.tmp`;
-  await fsp.writeFile(tmp, JSON.stringify(onDisk, null, 2), 'utf8');
+  await fsp.writeFile(tmp, JSON.stringify(onDisk, null, 2), { encoding: 'utf8', mode: 0o600 });
   await fsp.rename(tmp, p);
   // Cache flips only after the rename succeeds — if write/rename throws we
   // keep the prior cache so the rest of the app sees a coherent value.
@@ -538,5 +547,4 @@ export function removeCustomBackend(
     return { ok: true };
   });
 }
-
 

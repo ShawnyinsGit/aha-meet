@@ -167,21 +167,6 @@ export function FileContent({
     return () => { URL.revokeObjectURL(pdfBlobUrl); };
   }, [pdfBlobUrl]);
 
-  const xlsxBlobUrl = useMemo(() => {
-    if (state.phase !== 'ready') return null;
-    const { doc } = state;
-    if (doc.kind === 'xlsx' && doc.text) {
-      const wrapped = wrapXlsxHtml(doc.text);
-      return URL.createObjectURL(new Blob([wrapped], { type: 'text/html' }));
-    }
-    return null;
-  }, [state]);
-
-  useEffect(() => {
-    if (!xlsxBlobUrl) return;
-    return () => { URL.revokeObjectURL(xlsxBlobUrl); };
-  }, [xlsxBlobUrl]);
-
   const svgBlobUrl = useMemo(() => {
     if (state.phase !== 'ready') return null;
     const { doc } = state;
@@ -288,29 +273,6 @@ export function FileContent({
     );
   }
 
-  if (doc.kind === 'pptx' && doc.data) {
-    return (
-      <div className="file-viewer-pane">
-        <div className="file-viewer-meta">{sizeLine}</div>
-        <PptxRenderer data={doc.data} />
-      </div>
-    );
-  }
-
-  if (doc.kind === 'xlsx' && xlsxBlobUrl) {
-    return (
-      <div className="file-viewer-pane">
-        <div className="file-viewer-meta">{sizeLine}</div>
-        <iframe
-          className="file-viewer-iframe"
-          src={xlsxBlobUrl}
-          sandbox=""
-          title={doc.name}
-        />
-      </div>
-    );
-  }
-
   if (doc.kind === 'image' && mediaUrl) {
     return (
       <div className="file-viewer-pane">
@@ -371,44 +333,6 @@ function DocxRenderer({ data }: { data: Uint8Array }) {
 
   if (error) return <div className="file-viewer-status file-viewer-error">{error}</div>;
   return <div ref={containerRef} className="file-viewer-docx" />;
-}
-
-function PptxRenderer({ data }: { data: Uint8Array }) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
-    let cancelled = false;
-    el.innerHTML = '';
-    import('pptx-preview').then((mod) => {
-      if (cancelled) return;
-      const pptx = mod.default || mod;
-      const width = el.clientWidth - 48;
-      const height = Math.round(width * 9 / 16);
-      pptx.init(el, width, height);
-      const buffer = data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength) as ArrayBuffer;
-      return pptx.preview(buffer);
-    }).catch((err: unknown) => {
-      if (!cancelled) setError(err instanceof Error ? err.message : 'PPTX 渲染失败');
-    });
-    return () => { cancelled = true; };
-  }, [data]);
-
-  if (error) return <div className="file-viewer-status file-viewer-error">{error}</div>;
-  return <div ref={containerRef} className="file-viewer-pptx" />;
-}
-
-function wrapXlsxHtml(tableHtml: string): string {
-  return `<!DOCTYPE html><html><head><meta charset="utf-8"><style>
-body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding: 16px; margin: 0; background: #fff; color: #222; }
-table { border-collapse: collapse; width: 100%; margin-bottom: 24px; font-size: 13px; }
-td, th { border: 1px solid #d0d0d0; padding: 6px 10px; text-align: left; white-space: nowrap; }
-th { background: #f5f5f5; font-weight: 600; position: sticky; top: 0; }
-tr:nth-child(even) { background: #fafafa; }
-h3 { margin: 20px 0 8px; font-size: 15px; color: #555; border-bottom: 1px solid #e0e0e0; padding-bottom: 4px; }
-</style></head><body>${tableHtml}</body></html>`;
 }
 
 function MarkdownRenderer({ text }: { text: string }) {

@@ -12,12 +12,3 @@ declare module 'docx-preview' {
     options?: Options,
   ): Promise<void>;
 }
-
-declare module 'pptx-preview' {
-  interface PptxPreview {
-    init(container: HTMLElement, width: number, height: number): void;
-    preview(data: ArrayBuffer): Promise<void>;
-  }
-  const pptx: PptxPreview;
-  export default pptx;
-}

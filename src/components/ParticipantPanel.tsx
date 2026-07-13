@@ -1,5 +1,5 @@
 import { memo, useMemo, useState } from 'react';
-import { ChevronDown, ChevronUp, MicOff, Plus, UserX } from 'lucide-react';
+import { ChevronDown, ChevronUp, Crown, MicOff, Plus, RotateCcw, UserX } from 'lucide-react';
 import type { HostGroupState, WorkerState } from '../lib/meeting-store';
 import { BackendAvatar } from './BackendAvatar';
 import { WorkerCard } from './WorkerCard';
@@ -17,6 +17,9 @@ interface ParticipantPanelProps {
   onOpenParticipantsTab?: () => void;
   onToggleMuteHost?: (hostId: string) => void;
   onRemoveHost?: (hostId: string) => void;
+  coordinatorHostId?: string;
+  onSetCoordinator?: (hostId: string) => void;
+  onRestartHost?: (hostId: string) => void;
   /** Called when a gallery tile is clicked. 'user' for self tile, hostId for host tiles. */
   onSelectParticipant?: (id: string) => void;
 }
@@ -32,6 +35,9 @@ export const ParticipantPanel = memo(function ParticipantPanel({
   onOpenParticipantsTab,
   onToggleMuteHost,
   onRemoveHost,
+  coordinatorHostId = 'default',
+  onSetCoordinator,
+  onRestartHost,
   onSelectParticipant,
 }: ParticipantPanelProps) {
   const [barCollapsed, setBarCollapsed] = useState(false);
@@ -93,8 +99,36 @@ export const ParticipantPanel = memo(function ParticipantPanel({
           const avatar = customAvatars?.get(hg.iconId) ?? null;
           const isMuted = mutedHostIds?.has(hostId) ?? false;
           const isDefault = hostId === 'default';
+          const isCoordinator = hostId === coordinatorHostId;
           const actions = (
             <div className="tiles-gallery-actions">
+              {isCoordinator && (
+                <span className="tiles-gallery-action-btn tiles-gallery-action-btn-active" title="当前主持人" aria-label="Current coordinator">
+                  <Crown size={12} />
+                </span>
+              )}
+              {!isCoordinator && onSetCoordinator && (hg.backendId === 'claude-code' || hg.backendId === 'codex') && (
+                <button
+                  type="button"
+                  className="tiles-gallery-action-btn"
+                  onClick={(e) => { e.stopPropagation(); onSetCoordinator(hostId); }}
+                  title="设为主持人"
+                  aria-label="Set as coordinator"
+                >
+                  <Crown size={12} />
+                </button>
+              )}
+              {talker?.status === 'idle' && onRestartHost && (
+                <button
+                  type="button"
+                  className="tiles-gallery-action-btn"
+                  onClick={(e) => { e.stopPropagation(); onRestartHost(hostId); }}
+                  title="重新连接"
+                  aria-label="Reconnect host"
+                >
+                  <RotateCcw size={12} />
+                </button>
+              )}
               {onToggleMuteHost && (
                 <button
                   type="button"

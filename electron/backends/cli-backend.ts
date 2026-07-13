@@ -177,7 +177,7 @@ export interface BackendCapabilities {
 
 export interface BackendSession {
   /** Start the session. Begins streaming events via the emit callback. */
-  start(): void;
+  start(): void | Promise<void>;
   /** End the session. Releases all resources. Idempotent. */
   end(): void;
   /** Send a text message from the user. */

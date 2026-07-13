@@ -14,6 +14,7 @@ import {
   taskDoneArgsSchema,
   submitDeliveryArgsSchema,
   requestDecisionArgsSchema,
+  askHostArgsSchema,
   type PlanMeetingTask,
 } from './meeting-tools.js';
 import type { CreateDecisionPayload } from './decisions.js';
@@ -49,6 +50,7 @@ export interface OrchestratorBridge {
   // Talker tools
   delegateSingleTask(description: string): { workerId: string; specialty: WorkerSpecialtyKind; reused: boolean };
   installPlan(tasks: PlanMeetingTask[]): Promise<{ ok: true } | { ok: false; error: string }>;
+  proposePlan(tasks: PlanMeetingTask[]): Promise<{ ok: true } | { ok: false; error: string }>;
   steerWorker(workerId: string, addendum: string): SteerResult;
   hasWorker(workerId: string): boolean;
   activeWorkerIds(): string[];
@@ -61,22 +63,49 @@ export interface OrchestratorBridge {
 
   // Document tool (report mode — saves full response as a reviewable document)
   saveDocument(input: { title: string; content: string; spokenSummary: string }): Promise<{ ok: boolean; filename?: string; error?: string }>;
+  sendHostMessage(fromHostId: string, toHostId: string, text: string): { ok: boolean; error?: string };
+  getCoordinatorHostId(): string;
 
   // Worker tools
   markWorkerTaskDone(workerId: string, summary: string): void;
   submitWorkerDelivery(workerId: string, files: string[]): void;
 }
 
-export function buildTalkerMcp(bridge: OrchestratorBridge) {
+export function buildTalkerMcp(
+  bridge: OrchestratorBridge,
+  canCoordinate: () => boolean = () => true,
+  hostId = 'default',
+) {
+  const denied = () => ({ content: [{ type: 'text' as const, text: 'error: this host is an expert; only the active coordinator may schedule or speak for the meeting' }] });
   return createSdkMcpServer({
     name: 'meeting',
     version: '0.2.0',
     tools: [
       tool(
+        MEETING_TOOLS.ASK_HOST,
+        'Ask one expert host for an internal opinion. The expert reply is routed back to the coordinator and is not spoken directly to the user.',
+        askHostArgsSchema,
+        async ({ hostId: targetHostId, question }) => {
+          if (!canCoordinate()) return denied();
+          const result = bridge.sendHostMessage(hostId, targetHostId, `[expert request] ${question}`);
+          return { content: [{ type: 'text', text: result.ok ? `question sent to ${targetHostId}` : `error: ${result.error}` }] };
+        },
+      ),
+      tool(
+        MEETING_TOOLS.REPLY_COORDINATOR,
+        'Reply internally to the active coordinator. Use this after receiving an expert request; do not address the user directly.',
+        { text: z.string().min(1).max(20_000) },
+        async ({ text }) => {
+          const result = bridge.sendHostMessage(hostId, bridge.getCoordinatorHostId(), `[expert reply from ${hostId}] ${text}`);
+          return { content: [{ type: 'text', text: result.ok ? 'reply sent to coordinator' : `error: ${result.error}` }] };
+        },
+      ),
+      tool(
         MEETING_TOOLS.DELEGATE,
         'Delegate a single task to a new worker agent. Use this whenever the user describes one thing they want built, fixed, refactored, or investigated. The worker spawns immediately and streams progress back to you.',
         { description: z.string().describe('Plain-language description of what the worker should do, in the user\'s words.') },
         async ({ description }) => {
+          if (!canCoordinate()) return denied();
           const r = bridge.delegateSingleTask(description);
           const note = r.reused
             ? `delegated as ${r.workerId} (reused ${r.specialty} worker)`
@@ -89,7 +118,8 @@ export function buildTalkerMcp(bridge: OrchestratorBridge) {
         'Decompose the user request into multiple independent (or dependency-ordered) tasks and spawn a worker for each. Use this whenever the user mentions more than one piece of work. Independent tasks run in parallel; tasks listing deps wait until their deps complete.',
         planMeetingArgsSchema,
         async ({ tasks }) => {
-          const result = await bridge.installPlan(tasks as PlanMeetingTask[]);
+          if (!canCoordinate()) return denied();
+          const result = await bridge.proposePlan(tasks as PlanMeetingTask[]);
           if (!result.ok) {
             return { content: [{ type: 'text', text: `error: ${result.error}` }] };
           }
@@ -108,6 +138,7 @@ export function buildTalkerMcp(bridge: OrchestratorBridge) {
         'Interrupt all running workers and broadcast a course-correction. Use when the user changes their mind about the whole engagement or adds a constraint that applies to every active worker.',
         { addendum: z.string().describe('Additional or revised instructions for every active worker.') },
         async ({ addendum }) => {
+          if (!canCoordinate()) return denied();
           const ids = bridge.activeWorkerIds();
           let sent = 0;
           let queued = 0;
@@ -130,6 +161,7 @@ export function buildTalkerMcp(bridge: OrchestratorBridge) {
         'Steer ONE specific worker with a mid-flight addendum. Use when the user wants to refine just one of the running workers, not all of them. If the addendum is dropped (worker already done/failed), call delegate_task to spawn a new worker for the follow-up.',
         delegateToArgsSchema,
         async ({ workerId, addendum }) => {
+          if (!canCoordinate()) return denied();
           const r = bridge.steerWorker(workerId, addendum);
           if (r.ok) {
             const where = r.queued ? `queued for ${workerId} (worker still acknowledging)` : `addendum sent to ${workerId}`;
@@ -174,6 +206,7 @@ export function buildTalkerMcp(bridge: OrchestratorBridge) {
         'Speak directly to the user with a short conversational line. Use sparingly — only for unprompted progress updates ("改好了，要看看吗？"). The user already hears your normal assistant replies; this is for proactive nudges.',
         { text: z.string().describe('One or two sentences to say to the user.') },
         async ({ text }) => {
+          if (!canCoordinate()) return denied();
           bridge.narrateAssistantLine(text);
           return { content: [{ type: 'text', text: 'spoken' }] };
         },
@@ -183,6 +216,7 @@ export function buildTalkerMcp(bridge: OrchestratorBridge) {
         'Ask the user to weigh in on a decision while you keep working. Use this when there is a non-trivial fork (e.g. multiple valid approaches, ambiguous requirements, irreversible tradeoffs) and you do NOT want to block on the user. Behavior: writes a markdown doc to ~/Documents/AhaMeet/decisions, schedules a Calendar event + Reminder at the deadline, and immediately returns the option you should proceed with. The user can later edit the doc; if they pick something different, you will receive a system message and should adjust course. Do NOT use for trivial yes/no — just ask in chat.',
         requestDecisionArgsSchema,
         async ({ question, context, options, deadlineMs }) => {
+          if (!canCoordinate()) return denied();
           try {
             const created = await bridge.createDecision({ question, context, options, deadline: deadlineMs });
             return {
