@@ -81,7 +81,18 @@ export function registerBrowserIpc(manager: BrowserTabManager): void {
 
   ipcMain.handle('browser:set-bounds', (_e, bounds: { x: number; y: number; width: number; height: number; dpr: number }) => {
     try {
-      manager.setBounds(bounds);
+      if (!bounds || typeof bounds !== 'object') return { ok: false, error: 'invalid bounds' };
+      const values = [bounds.x, bounds.y, bounds.width, bounds.height, bounds.dpr];
+      if (!values.every((v) => typeof v === 'number' && Number.isFinite(v))) {
+        return { ok: false, error: 'bounds must contain finite numbers' };
+      }
+      manager.setBounds({
+        x: Math.max(0, Math.round(bounds.x)),
+        y: Math.max(0, Math.round(bounds.y)),
+        width: Math.max(0, Math.min(16_384, Math.round(bounds.width))),
+        height: Math.max(0, Math.min(16_384, Math.round(bounds.height))),
+        dpr: Math.max(0.5, Math.min(4, bounds.dpr)),
+      });
       return { ok: true };
     } catch (err: unknown) {
       return { ok: false, error: errorMessage(err) };

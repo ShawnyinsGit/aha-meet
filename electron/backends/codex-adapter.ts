@@ -20,7 +20,8 @@
 //       Also supports `codex auth login` for ChatGPT Plus/Pro OAuth.
 
 import { spawn } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { accessSync, constants as fsConstants, existsSync, realpathSync } from 'node:fs';
+import { join } from 'node:path';
 import type {
   BackendSession,
   BackendSessionConfig,
@@ -44,8 +45,8 @@ const CODEX_CAPABILITIES: BackendCapabilities = {
   systemPrompt: true,
   skills: false,
   interrupt: true,
-  defaultModel: 'o3-pro',
-  models: ['o3-pro', 'o3', 'o4-mini', 'gpt-4.1'],
+  defaultModel: 'gpt-5.4',
+  models: ['gpt-5.4', 'gpt-5.4-mini', 'gpt-5.2'],
   npmPackage: '@openai/codex',
   installHint: 'npm install -g @openai/codex',
 };
@@ -71,7 +72,7 @@ interface CodexSdk {
     env?: Record<string, string>;
     config?: Record<string, unknown>;
   }): {
-    startThread(): CodexSdkThread;
+    startThread(options?: Record<string, unknown>): CodexSdkThread;
   };
 }
 
@@ -123,28 +124,35 @@ class CodexSession implements BackendSession {
   private apiKey?: string;
   private baseUrl?: string;
   private turnQueue: Promise<void> = Promise.resolve();
+  private binaryPath: string | null;
+  private currentAbort: AbortController | null = null;
+  private meetingCommandHandler?: (command: unknown) => Promise<unknown> | unknown;
 
   constructor(
+    binaryPath: string | null,
     config: BackendSessionConfig,
     emit: (e: BackendSessionEvent) => void,
   ) {
+    this.binaryPath = binaryPath;
     this.config = config;
     this.emit = emit;
     // Read API key and base URL from config.env where buildEnv placed them
     this.apiKey = config.env?.OPENAI_API_KEY;
     this.baseUrl = config.env?.OPENAI_BASE_URL;
+    const handler = config.extra?.meetingCommandHandler;
+    if (typeof handler === 'function') {
+      this.meetingCommandHandler = handler as (command: unknown) => Promise<unknown> | unknown;
+    }
   }
 
-  start(): void {
-    void this.initAndRun();
+  start(): Promise<void> {
+    return this.initAndRun();
   }
 
   private async initAndRun(): Promise<void> {
     const Codex = await loadCodexSdk();
     if (!Codex) {
-      this.emit({ kind: 'error', error: '@openai/codex-sdk not installed. Run: npm install @openai/codex-sdk' });
-      this.emit({ kind: 'ended' });
-      return;
+      throw new Error('@openai/codex-sdk not installed. Run: npm install @openai/codex-sdk');
     }
 
     const envStrings: Record<string, string> = {};
@@ -156,15 +164,20 @@ class CodexSession implements BackendSession {
 
     try {
       const codex = new Codex({
+        codexPathOverride: this.binaryPath ?? undefined,
         apiKey: this.apiKey,
         baseUrl: this.baseUrl,
         env: Object.keys(envStrings).length > 0 ? envStrings : undefined,
       });
-      this.thread = codex.startThread();
+      this.thread = codex.startThread({
+        workingDirectory: this.config.cwd,
+        model: this.config.model,
+        approvalPolicy: 'untrusted',
+        sandboxMode: 'workspace-write',
+        skipGitRepoCheck: true,
+      });
     } catch (err: unknown) {
-      this.emit({ kind: 'error', error: `Codex SDK init failed: ${String(err)}` });
-      this.emit({ kind: 'ended' });
-      return;
+      throw new Error(`Codex SDK init failed: ${String(err)}`);
     }
 
     // Initial prompt: system instructions + "ready" signal
@@ -174,12 +187,8 @@ class CodexSession implements BackendSession {
     const initialPrompt = systemPrefix + 'Ready. Awaiting instructions.';
 
     try {
-      const { events } = await this.thread.runStreamed(initialPrompt, {
-        workingDirectory: this.config.cwd,
-        model: this.config.model,
-        approvalPolicy: 'untrusted',
-        sandboxMode: 'workspace-write',
-      });
+      this.currentAbort = new AbortController();
+      const { events } = await this.thread.runStreamed(initialPrompt, { signal: this.currentAbort.signal });
 
       for await (const event of events) {
         if (this.closed) break;
@@ -192,11 +201,9 @@ class CodexSession implements BackendSession {
       if (!this.closed) {
         this.emit({ kind: 'error', error: `Codex stream error: ${String(err)}` });
       }
+      if (!this.closed) throw err;
     } finally {
-      if (!this.closed) {
-        this.emit({ kind: 'ended' });
-        this.emit = () => {};
-      }
+      this.currentAbort = null;
     }
   }
 
@@ -229,6 +236,7 @@ class CodexSession implements BackendSession {
 
     switch (item.type) {
       case 'agent_message':
+        this.dispatchMeetingCommands(item.text ?? '');
         return {
           type: 'assistant',
           message: {
@@ -310,10 +318,26 @@ class CodexSession implements BackendSession {
     }
   }
 
+  private dispatchMeetingCommands(text: string): void {
+    if (!this.meetingCommandHandler) return;
+    const fenced = /```meeting-command\s*([\s\S]*?)```/gi;
+    for (const match of text.matchAll(fenced)) {
+      try {
+        const command = JSON.parse(match[1]);
+        void Promise.resolve(this.meetingCommandHandler(command)).catch((err) => {
+          this.emit({ kind: 'error', error: `Meeting command failed: ${String(err)}` });
+        });
+      } catch (err) {
+        this.emit({ kind: 'error', error: `Invalid meeting-command JSON: ${String(err)}` });
+      }
+    }
+  }
+
   end(): void {
     this.closed = true;
-    // The Codex SDK doesn't expose a direct kill method on threads.
-    // The async iteration will end when the process exits.
+    this.currentAbort?.abort();
+    this.emit({ kind: 'ended' });
+    this.emit = () => {};
   }
 
   sendUserText(text: string, _priority?: InputPriority): void {
@@ -322,14 +346,17 @@ class CodexSession implements BackendSession {
     // Serialize turns to prevent concurrent runStreamed calls on the same thread
     this.turnQueue = this.turnQueue.then(async () => {
       try {
-        const { events } = await thread.runStreamed(text);
+        const abort = new AbortController();
+        this.currentAbort = abort;
+        const { events } = await thread.runStreamed(text, { signal: abort.signal });
         for await (const event of events) {
           if (this.closed) break;
           const msg = this.normalizeEvent(event);
           if (msg) this.emit({ kind: 'message', message: msg });
         }
+        if (this.currentAbort === abort) this.currentAbort = null;
       } catch (err: unknown) {
-        if (!this.closed) {
+        if (!this.closed && !(err instanceof Error && err.name === 'AbortError')) {
           this.emit({ kind: 'error', error: `Codex error: ${String(err)}` });
         }
       }
@@ -359,8 +386,7 @@ class CodexSession implements BackendSession {
   }
 
   async interrupt(): Promise<void> {
-    // No direct interrupt API in the SDK. End the session.
-    this.end();
+    this.currentAbort?.abort();
   }
 }
 
@@ -382,11 +408,11 @@ export class CodexBackend implements CliBackend {
     config: BackendSessionConfig,
     emit: (e: BackendSessionEvent) => void,
   ): BackendSession {
-    return new CodexSession(config, emit);
+    return new CodexSession(this.resolveBinary(), config, emit);
   }
 
   resolveBinary(): string | null {
-    return resolveBinaryFromPath('codex');
+    return resolveCodexRuntime();
   }
 
   buildEnv(auth: BackendAuthConfig, extra?: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
@@ -478,4 +504,50 @@ end tell`;
       });
     });
   }
+}
+
+/** Resolve an OS-executable Codex path. In a packaged Electron app the SDK is
+ * loaded from app.asar, but child_process.spawn cannot execute an ASAR virtual
+ * path. electron-builder unpacks the native platform package, so prefer that
+ * real path and pass it to the SDK via codexPathOverride. */
+export function resolveCodexRuntime(resourcesPath = process.resourcesPath): string | null {
+  const platformPackage = process.platform === 'darwin'
+    ? `codex-darwin-${process.arch === 'arm64' ? 'arm64' : 'x64'}`
+    : process.platform === 'linux'
+      ? `codex-linux-${process.arch === 'arm64' ? 'arm64' : 'x64'}`
+      : process.platform === 'win32'
+        ? `codex-win32-${process.arch === 'arm64' ? 'arm64' : 'x64'}`
+        : null;
+  const triple = process.platform === 'darwin'
+    ? `${process.arch === 'arm64' ? 'aarch64' : 'x86_64'}-apple-darwin`
+    : process.platform === 'linux'
+      ? `${process.arch === 'arm64' ? 'aarch64' : 'x86_64'}-unknown-linux-musl`
+      : process.platform === 'win32'
+        ? `${process.arch === 'arm64' ? 'aarch64' : 'x86_64'}-pc-windows-msvc`
+        : null;
+  const binaryName = process.platform === 'win32' ? 'codex.exe' : 'codex';
+  const candidates: string[] = [];
+  if (resourcesPath && platformPackage && triple) {
+    candidates.push(join(
+      resourcesPath,
+      'app.asar.unpacked',
+      'node_modules',
+      '@openai',
+      platformPackage,
+      'vendor',
+      triple,
+      'bin',
+      binaryName,
+    ));
+  }
+  const system = resolveBinaryFromPath('codex');
+  if (system) candidates.push(system);
+  for (const candidate of candidates) {
+    try {
+      if (!existsSync(candidate)) continue;
+      accessSync(candidate, process.platform === 'win32' ? fsConstants.F_OK : fsConstants.X_OK);
+      return realpathSync(candidate);
+    } catch { /* try the next runtime */ }
+  }
+  return null;
 }

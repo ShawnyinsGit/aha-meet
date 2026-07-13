@@ -38,6 +38,7 @@ import {
 } from './orchestrator-helpers.js';
 import type { SteerResult } from './meeting-mcp.js';
 import type { AutoApproveScope } from './auto-approve-policy.js';
+import type { TaskWorkspaceManager } from './task-workspace.js';
 import { snapshotDeliveryFilesSync } from './delivery-snapshot.js';
 import type {
   MeetingPlan,
@@ -70,6 +71,10 @@ export interface WorkerSchedulerOpts {
   /** ClaudeSession constructor (production = `new ClaudeSession(o)`; tests
    *  inject a stub so cleanup paths run without spawning the real CLI). */
   sessionFactory: SessionFactory;
+  /** Meeting-level backend routing. When present, a task can choose its
+   * executor independently from the Coordinator backend. */
+  resolveSessionFactory?: (backendId?: string) => SessionFactory;
+  workspaceManager?: TaskWorkspaceManager;
   /** Pre-bound `buildWorkerMcp(bridge, workerId)` from meeting-mcp.ts.
    *  Owned by the orchestrator because the MCP factory needs the bridge;
    *  the scheduler treats the returned object as opaque mcpServer config. */
@@ -138,10 +143,17 @@ export class WorkerScheduler {
   private autoApproveScope: AutoApproveScope;
   private stallTimer: NodeJS.Timeout | null = null;
   private readonly opts: WorkerSchedulerOpts;
+  private talkerProvider: () => BackendSession | null;
 
   constructor(opts: WorkerSchedulerOpts) {
     this.opts = opts;
+    this.talkerProvider = opts.getTalker;
     this.autoApproveScope = opts.autoApproveScope;
+  }
+
+  /** Rebind progress/result delivery when coordination moves to another Host. */
+  setTalkerProvider(provider: () => BackendSession | null): void {
+    this.talkerProvider = provider;
   }
 
   // ---------------------------------------------------------------------------
@@ -193,6 +205,26 @@ export class WorkerScheduler {
       lines.push(parts.join(' | '));
     }
     return lines.join('\n') || 'no workers';
+  }
+
+  snapshot(): Array<{
+    id: string;
+    title: string;
+    status: WorkerStatusKind | 'interrupted';
+    deps: string[];
+    executorBackendId?: string;
+    workspace?: { kind: string; cwd: string; branch?: string };
+  }> {
+    return Array.from(this.workers.values()).map((handle) => ({
+      id: handle.id,
+      title: handle.title,
+      status: handle.status,
+      deps: [...handle.deps],
+      executorBackendId: handle.executorBackendId,
+      workspace: handle.workspace
+        ? { kind: handle.workspace.kind, cwd: handle.workspace.cwd, branch: handle.workspace.branch }
+        : undefined,
+    }));
   }
 
   /** Snapshot every worker's un-flushed update buffer so the orchestrator
@@ -291,6 +323,8 @@ export class WorkerScheduler {
         prompt: task.prompt,
         deps: task.deps ?? [],
         specialty: inferSpecialty(`${task.title} ${task.prompt}`),
+        executorBackendId: task.executorBackendId,
+        writePaths: task.writePaths,
       });
     }
     this.emitPlanUpdate();
@@ -368,7 +402,7 @@ export class WorkerScheduler {
 
     // Inform the talker with a walkthrough prompt so it explains the delivery
     // conversationally rather than just announcing completion.
-    const talker = this.opts.getTalker();
+    const talker = this.talkerProvider();
     if (talker) {
       const condensed = summary.length > TASK_DONE_LINE_MAX
         ? `${summary.slice(0, TASK_DONE_LINE_MAX - 2)}…`
@@ -649,12 +683,16 @@ export class WorkerScheduler {
     prompt: string;
     deps: string[];
     specialty: WorkerSpecialtyKind;
+    executorBackendId?: string;
+    writePaths?: string[];
   }): void {
     const handle: WorkerHandle = {
       id: spec.id,
       title: spec.title,
       prompt: spec.prompt,
       deps: spec.deps,
+      executorBackendId: spec.executorBackendId,
+      writePaths: spec.writePaths,
       status: 'pending',
       session: null,
       summary: '',
@@ -676,6 +714,7 @@ export class WorkerScheduler {
       taskHistory: [],
       deliveries: new Set<string>(),
       explicitDeliveries: [],
+      workspace: null,
       stallNotified: false,
       stallNudged: false,
     };
@@ -755,6 +794,9 @@ export class WorkerScheduler {
       const allDepsDone = handle.deps.every((d) => this.workers.get(d)?.status === 'done');
       if (!allDepsDone) continue;
       if (this.countRunning() >= MAX_CONCURRENT_WORKERS) break;
+      if (this.opts.workspaceManager && !this.opts.workspaceManager.canPrepare(handle.id, handle.writePaths)) {
+        continue;
+      }
       this.spawnWorker(handle);
     }
   }
@@ -778,8 +820,12 @@ export class WorkerScheduler {
     }
 
     try {
-      handle.session = this.opts.sessionFactory({
-        cwd: this.opts.cwd,
+      handle.workspace = this.opts.workspaceManager?.prepare(handle.id, handle.writePaths) ?? null;
+      const workerCwd = handle.workspace?.cwd ?? this.opts.cwd;
+      const sessionFactory = this.opts.resolveSessionFactory?.(handle.executorBackendId)
+        ?? this.opts.sessionFactory;
+      handle.session = sessionFactory({
+        cwd: workerCwd,
         autoApproveScope: this.autoApproveScope,
         envOverride: this.opts.workerEnv,
         confirmDestructive: this.opts.confirmDestructive,
@@ -850,7 +896,7 @@ export class WorkerScheduler {
     if (handle.queuedAddenda.length === 0) return;
     const lost = handle.queuedAddenda.slice();
     handle.queuedAddenda = [];
-    const talker = this.opts.getTalker();
+    const talker = this.talkerProvider();
     if (!talker) return;
     const joined = lost.map((a, i) => `  ${i + 1}. ${a}`).join('\n');
     talker.sendUserText(
@@ -888,6 +934,7 @@ export class WorkerScheduler {
     handle.live.currentTool = null;
     handle.live.currentToolInput = null;
     handle.status = finalStatus;
+    this.opts.workspaceManager?.release(handle.id, finalStatus !== 'done');
     if (typeof summary === 'string') handle.summary = summary;
     // Drop any file-collision tracking pointing at this worker — without
     // this the recentEdits map keeps a stale workerId reference for up to
@@ -903,6 +950,7 @@ export class WorkerScheduler {
       title: h.title,
       status: h.status,
       deps: h.deps,
+      executorBackendId: h.executorBackendId,
     }));
     const plan: MeetingPlan = { nodes };
     this.opts.emit({ source: 'talker', event: { kind: 'plan-updated', plan } });
@@ -936,7 +984,7 @@ export class WorkerScheduler {
         }
       }
     }
-    const talker = this.opts.getTalker();
+    const talker = this.talkerProvider();
     if (talker) {
       talker.sendUserText(`(worker ${rootId} ended without task_done — downstream tasks marked failed)`, 'low');
     }
@@ -985,7 +1033,7 @@ export class WorkerScheduler {
       if (this.opts.isClosed()) return;
       const batch = handle.bufferedUpdates;
       handle.bufferedUpdates = [];
-      const talker = this.opts.getTalker();
+      const talker = this.talkerProvider();
       if (batch.length === 0 || !talker) return;
       // Re-check at flush time: if the user flipped on strict during the
       // 1.2s debounce, honour it instead of shipping a stale batch.
@@ -1003,7 +1051,7 @@ export class WorkerScheduler {
     }
     const prior = this.recentEdits.get(path);
     if (prior && prior.workerId !== workerId && (now - prior.ts) < FILE_COLLISION_WINDOW_MS) {
-      const talker = this.opts.getTalker();
+      const talker = this.talkerProvider();
       if (talker) {
         talker.sendUserText(
           `(file collision) worker ${workerId} and worker ${prior.workerId} both touched ${path} within ${Math.round((now - prior.ts) / 1000)}s. 提醒用户可能有冲突。`,

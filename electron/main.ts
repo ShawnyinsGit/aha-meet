@@ -380,7 +380,20 @@ async function registerAllIpc(ctx: IpcContext): Promise<void> {
 
 // ---- App lifecycle ----------------------------------------------------------
 
-app.whenReady().then(async () => {
+const hasSingleInstanceLock = app.requestSingleInstanceLock();
+if (!hasSingleInstanceLock) {
+  app.quit();
+} else {
+  app.on('second-instance', () => {
+    const win = liveWindow();
+    if (!win) return;
+    if (win.isMinimized()) win.restore();
+    win.show();
+    win.focus();
+  });
+}
+
+if (hasSingleInstanceLock) app.whenReady().then(async () => {
   // Dynamic-import IPC modules so their transitive deps (orchestrator,
   // claude-session, whisper, etc.) don't block the app-ready event.
   // IPC handlers must be registered before createWindow() so the renderer

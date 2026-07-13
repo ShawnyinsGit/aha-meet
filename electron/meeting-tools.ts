@@ -14,6 +14,8 @@ export const MEETING_TOOLS = {
   TASK_DONE: 'task_done',
   SUBMIT_DELIVERY: 'submit_delivery',
   REQUEST_DECISION: 'request_user_decision',
+  ASK_HOST: 'ask_host',
+  REPLY_COORDINATOR: 'reply_to_coordinator',
 } as const;
 
 export type MeetingToolName = (typeof MEETING_TOOLS)[keyof typeof MEETING_TOOLS];
@@ -27,6 +29,8 @@ export const planMeetingTaskSchema = z.object({
   title: z.string().min(1).describe('Short label shown on the worker tile.'),
   prompt: z.string().min(1).describe('The full prompt the worker will receive as its first message.'),
   deps: z.array(z.string()).optional().describe('IDs of tasks that must finish before this one starts.'),
+  executorBackendId: z.string().min(1).optional().describe('CLI backend that should execute this task. Defaults to the meeting coordinator backend.'),
+  writePaths: z.array(z.string().min(1)).max(100).optional().describe('Expected output paths, used for non-Git workspace locking.'),
 });
 
 export type PlanMeetingTask = z.infer<typeof planMeetingTaskSchema>;
@@ -38,6 +42,11 @@ export const planMeetingArgsSchema = {
 export const delegateToArgsSchema = {
   workerId: z.string().min(1).describe('The id of the worker to steer.'),
   addendum: z.string().min(1).describe('Additional instruction or context for that worker.'),
+};
+
+export const askHostArgsSchema = {
+  hostId: z.string().min(1).max(64),
+  question: z.string().min(1).max(20_000),
 };
 
 export const taskDoneArgsSchema = {

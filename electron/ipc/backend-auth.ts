@@ -253,6 +253,14 @@ export function registerBackendAuthIpc(): void {
     if (dataUrl !== null && typeof dataUrl !== 'string') {
       return { ok: false, error: 'dataUrl must be a string or null' };
     }
+    if (typeof dataUrl === 'string') {
+      if (!/^data:image\/(?:png|jpeg|webp);base64,[a-zA-Z0-9+/=]+$/.test(dataUrl)) {
+        return { ok: false, error: 'avatar must be a base64 PNG, JPEG, or WebP image' };
+      }
+      if (dataUrl.length > 2 * 1024 * 1024) {
+        return { ok: false, error: 'avatar must be smaller than 2 MB' };
+      }
+    }
     try {
       await setBackendAuth(backendId, { customAvatar: dataUrl ?? undefined });
       return { ok: true };
@@ -544,4 +552,3 @@ export function registerBackendAuthIpc(): void {
     return result;
   });
 }
-

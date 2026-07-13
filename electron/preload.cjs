@@ -11,12 +11,17 @@ const api = {
     setActive: (id) => ipcRenderer.invoke('sessions:set-active', { id }),
     list: () => ipcRenderer.invoke('sessions:list'),
     listRestore: () => ipcRenderer.invoke('sessions:list-restore'),
+    listRecoverable: () => ipcRenderer.invoke('sessions:list-recoverable'),
     addHost: (sessionId, backendId, hostId) =>
       ipcRenderer.invoke('sessions:add-host', { sessionId, backendId, hostId }),
     removeHost: (sessionId, hostId) =>
       ipcRenderer.invoke('sessions:remove-host', { sessionId, hostId }),
     listHosts: (sessionId) =>
       ipcRenderer.invoke('sessions:list-hosts', { sessionId }),
+    setCoordinator: (sessionId, hostId) =>
+      ipcRenderer.invoke('sessions:set-coordinator', { sessionId, hostId }),
+    restartHost: (sessionId, hostId) =>
+      ipcRenderer.invoke('sessions:restart-host', { sessionId, hostId }),
   },
   sendUserText: (sessionId, text) =>
     ipcRenderer.invoke('session:user-text', { sessionId, text }),
@@ -30,6 +35,8 @@ const api = {
   setPermissionMode: (sessionId, mode) =>
     ipcRenderer.invoke('session:set-permission-mode', { sessionId, mode }),
   setAutoApprove: (scope) => ipcRenderer.invoke('session:set-auto-approve', { scope }),
+  setOrchestrationMode: (sessionId, enabled) => ipcRenderer.invoke('session:set-orchestration-mode', { sessionId, enabled }),
+  approvePlan: (sessionId, approved) => ipcRenderer.invoke('session:approve-plan', { sessionId, approved }),
   endSession: (sessionId) => ipcRenderer.invoke('session:end', { sessionId }),
   pickCwd: () => ipcRenderer.invoke('dialog:pick-cwd'),
   getVoiceConfig: () => ipcRenderer.invoke('settings:get-voice-config'),

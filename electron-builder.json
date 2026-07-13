@@ -13,6 +13,9 @@
   ],
   "asarUnpack": [
     "**/node_modules/@anthropic-ai/**/*",
+    "**/node_modules/@openai/codex-darwin-*/**/*",
+    "**/node_modules/@openai/codex-linux-*/**/*",
+    "**/node_modules/@openai/codex-win32-*/**/*",
     "dist/vad/**/*",
     "dist/voice-id/**/*"
   ],

@@ -36,9 +36,11 @@ import {
   computeProjectId,
   type MemoryCategory,
 } from './memory.js';
-import { getSettings } from './store.js';
+import { getBackendAuth, getSettings } from './store.js';
+import { homedir } from 'node:os';
 import {
   SAVE_MEMORY_PER_SESSION_LIMIT,
+  extractText,
 } from './orchestrator-helpers.js';
 import {
   type DecisionCreationResult,
@@ -48,12 +50,16 @@ import {
 } from './meeting-mcp.js';
 import { BrowserTabManager } from './browser-tab-manager.js';
 import { startRecap, type RecapHandle } from './recap.js';
-import { type SessionFactory } from './worker-scheduler.js';
+import { type SessionFactory, type WorkerScheduler } from './worker-scheduler.js';
 import { ensureDir, maybeAppendGitignore } from './attachments/workspace.js';
 import { promises as fsp } from 'node:fs';
 import path from 'node:path';
 import { HostGroup } from './host-group.js';
 import { CrossHostBus } from './cross-host-bus.js';
+import { MeetingRepository } from './meeting-repository.js';
+import { authorizeMeetingCommand, type MeetingCommandResult } from './meeting-command.js';
+import { TaskWorkspaceManager } from './task-workspace.js';
+import { DiagnosticLogger } from './diagnostic-logger.js';
 import type {
   MeetingPlan,
   MeetingPlanNode,
@@ -104,6 +110,10 @@ interface OrchestratorOpts {
 export class Orchestrator implements OrchestratorBridge {
   /** All host groups in this meeting. Always has at least 'default'. */
   private hostGroups = new Map<string, HostGroup>();
+  /** The single host allowed to coordinate user input and plan mutations. */
+  private coordinatorHostId = DEFAULT_HOST_ID;
+  /** Single authoritative task graph and worker pool for the whole Meeting. */
+  private meetingScheduler!: WorkerScheduler;
   private emit: (e: OrchestratorEvent) => void;
   private cwd: string;
   private autoApproveScope: AutoApproveScope;
@@ -114,7 +124,12 @@ export class Orchestrator implements OrchestratorBridge {
   private closed = false;
   private projectId: string;
   private meetingId: string;
+  private repository: MeetingRepository;
+  private workspaceManager: TaskWorkspaceManager;
+  private diagnostics: DiagnosticLogger;
   private saveMemoryCallsThisSession = 0;
+  private autoOrchestration = false;
+  private pendingPlan: PlanMeetingTask[] | null = null;
   // Active end-of-meeting recap, if any. Tracked so `interrupt()` can reach
   // into a closed orchestrator and abort the recap pass (B4) — otherwise
   // the user pressing the interrupt button after `end()` was a no-op while
@@ -171,6 +186,10 @@ export class Orchestrator implements OrchestratorBridge {
     this.browserTabManager = opts.browserTabManager;
     this.projectId = computeProjectId(this.cwd);
     this.meetingId = randomUUID();
+    this.repository = new MeetingRepository(this.meetingId);
+    this.workspaceManager = new TaskWorkspaceManager(this.meetingId, this.cwd);
+    this.diagnostics = new DiagnosticLogger(this.meetingId);
+    void this.repository.append('meeting-created', { cwd: this.cwd });
     this.sessionFactory = opts.sessionFactory ?? Orchestrator.defaultClaudeFactory;
 
     // Create the default HostGroup. Use the user's preferred backend if specified.
@@ -186,7 +205,7 @@ export class Orchestrator implements OrchestratorBridge {
 
   /** Build a SessionFactory for a specific backend. Falls back to ClaudeSession
    *  when the backend is 'claude-code' or when the adapter is not found. */
-  private buildSessionFactory(backendId: string): SessionFactory {
+  private buildSessionFactory(backendId: string, actorHostId = DEFAULT_HOST_ID): SessionFactory {
     // If a test-injected factory is set, use it for all backends.
     if (this.sessionFactory !== Orchestrator.defaultClaudeFactory) {
       return this.sessionFactory;
@@ -209,15 +228,44 @@ export class Orchestrator implements OrchestratorBridge {
       } else if (so.systemPrompt && typeof so.systemPrompt === 'object' && 'append' in so.systemPrompt) {
         systemPrompt = (so.systemPrompt as { append?: string }).append;
       }
+      if (backendId === 'codex') {
+        systemPrompt = `${systemPrompt ?? ''}\n\n## AhaMeet command protocol\n`
+          + 'When you need to coordinate, emit exactly one fenced JSON block using ```meeting-command. '
+          + 'Supported kinds are propose-plan, ask-host, broadcast-hosts, steer-worker, and speak. '
+          + 'Do not claim a command succeeded until the application returns its result.';
+      }
+      const authEntry = getBackendAuth(backendId);
+      const auth = authEntry
+        ? {
+            authMode: authEntry.authMode,
+            apiKey: authEntry.apiKey,
+            baseUrl: authEntry.baseUrl,
+            model: authEntry.model,
+          }
+        : { authMode: 'none' as const };
+      // Claude's bundled-defaults feature redirects HOME to a shadow tree.
+      // Every other CLI must retain the real HOME so OAuth/config locations
+      // such as ~/.codex remain visible.
+      const backendBaseEnv = { ...(opts.envOverride ?? {}) };
+      backendBaseEnv.HOME = homedir();
+      backendBaseEnv.USERPROFILE = homedir();
+      const env = backend.buildEnv(auth, backendBaseEnv);
+      const requestedModel = typeof so.model === 'string' ? so.model : undefined;
+      const model = requestedModel?.startsWith('claude-')
+        ? (auth.model ?? backend.capabilities.defaultModel)
+        : (auth.model ?? requestedModel ?? backend.capabilities.defaultModel);
       return backend.createSession(
         {
           cwd: opts.cwd,
           systemPrompt,
-          model: so.model,
-          env: opts.envOverride,
+          model,
+          env,
           mcpServers: so.mcpServers as Record<string, unknown> | undefined,
           skills: Array.isArray(so.skills) ? so.skills : undefined,
           autoApproveScope: opts.autoApproveScope,
+          extra: {
+            meetingCommandHandler: (raw: unknown) => this.executeMeetingCommand(actorHostId, raw),
+          },
         },
         // BackendSessionEvent is structurally compatible with SessionEvent
         // (same kind discriminators, NormalizedMessage mirrors SDKMessage shape).
@@ -231,7 +279,7 @@ export class Orchestrator implements OrchestratorBridge {
     (o) => new ClaudeSession(o) as unknown as BackendSession;
 
   private createHostGroup(id: string, backendId: string): HostGroup {
-    const factory = this.buildSessionFactory(backendId);
+    const factory = this.buildSessionFactory(backendId, id);
     const hg = new HostGroup({
       id,
       backendId,
@@ -243,12 +291,24 @@ export class Orchestrator implements OrchestratorBridge {
       talkerModel: this.talkerModel,
       confirmDestructive: this.confirmDestructive,
       sessionFactory: factory,
+      resolveWorkerSessionFactory: (backendId) => this.buildSessionFactory(
+        backendId ?? this.defaultHost().backendId,
+        id,
+      ),
       browserTabManager: this.browserTabManager,
       bridge: this,
       isClosed: () => this.closed,
       getSpeechFilterMode: () => (getSettings().speechFilterMode === 'off' ? 'off' : 'strict'),
+      isCoordinator: () => this.coordinatorHostId === id,
+      workspaceManager: id === DEFAULT_HOST_ID && this.sessionFactory === Orchestrator.defaultClaudeFactory
+        ? this.workspaceManager
+        : undefined,
     });
     this.hostGroups.set(id, hg);
+    if (id === DEFAULT_HOST_ID) {
+      this.meetingScheduler = hg.getScheduler();
+      this.meetingScheduler.setTalkerProvider(() => this.defaultHost().getHost());
+    }
 
     // Subscribe to cross-host messages targeting this group
     this.crossHostBus.subscribe(id, (msg) => {
@@ -269,6 +329,16 @@ export class Orchestrator implements OrchestratorBridge {
     if (hostId && !/^[a-zA-Z0-9._-]{1,64}$/.test(hostId)) {
       return { ok: false, error: 'hostId must be alphanumeric with dots/hyphens/underscores, max 64 chars' };
     }
+    const backend = getBackendRegistry().get(backendId);
+    if (!backend) return { ok: false, error: `backend '${backendId}' not found` };
+    if (!backend.resolveBinary()) return { ok: false, error: `backend '${backendId}' runtime is not available` };
+    this.diagnostics.log('host-add-requested', {
+      hostId: hostId ?? null,
+      backendId,
+      runtimePath: backend.resolveBinary(),
+      cwd: this.cwd,
+      homeSource: backendId === 'claude-code' ? 'claude-shadow' : 'real-home',
+    });
     const id = hostId ?? `${backendId}-host-${this.hostGroups.size}`;
     if (this.hostGroups.has(id)) {
       return { ok: false, error: `host group '${id}' already exists` };
@@ -291,6 +361,11 @@ export class Orchestrator implements OrchestratorBridge {
           });
         }
       } catch (err: unknown) {
+        this.diagnostics.log('host-start-failed', {
+          hostId: id,
+          backendId,
+          error: err instanceof Error ? { name: err.name, message: err.message, cause: err.cause } : String(err),
+        });
         console.error(`[orchestrator] failed to start host '${id}':`, err);
         this.safeEmit({
           source: 'system',
@@ -311,6 +386,9 @@ export class Orchestrator implements OrchestratorBridge {
     if (hostId === DEFAULT_HOST_ID) {
       return { ok: false, error: 'cannot remove the default host group' };
     }
+    if (hostId === this.coordinatorHostId) {
+      return { ok: false, error: 'cannot remove the active coordinator; transfer coordination first' };
+    }
     const hg = this.hostGroups.get(hostId);
     if (!hg) {
       return { ok: false, error: `host group '${hostId}' not found` };
@@ -322,23 +400,149 @@ export class Orchestrator implements OrchestratorBridge {
   }
 
   /** List all host groups with their ids and backend ids. */
-  listHosts(): Array<{ id: string; backendId: string }> {
+  listHosts(): Array<{ id: string; backendId: string; role: 'coordinator' | 'expert' }> {
     return Array.from(this.hostGroups.entries()).map(([id, hg]) => ({
       id,
       backendId: hg.backendId,
+      role: id === this.coordinatorHostId ? 'coordinator' : 'expert',
     }));
+  }
+
+  setCoordinator(hostId: string): { ok: true; coordinatorHostId: string } | { ok: false; error: string } {
+    const hg = this.hostGroups.get(hostId);
+    if (!hg) return { ok: false, error: `host group '${hostId}' not found` };
+    if (!hg.getHost()) return { ok: false, error: `host group '${hostId}' is not ready` };
+    const backend = getBackendRegistry().get(hg.backendId);
+    if (!backend) return { ok: false, error: `backend '${hg.backendId}' not found` };
+    // Coordinator support is intentionally narrow for the first V2 release.
+    if (hg.backendId !== 'claude-code' && hg.backendId !== 'codex') {
+      return { ok: false, error: `backend '${hg.backendId}' cannot coordinate yet` };
+    }
+    const previous = this.coordinatorHostId;
+    this.coordinatorHostId = hostId;
+    void this.repository.append('coordinator-changed', { previous, current: hostId });
+    this.meetingScheduler.setTalkerProvider(() => this.defaultHost().getHost());
+    hg.getHost()?.sendUserText(
+      `[coordinator handoff] You are now the meeting coordinator. Previous coordinator: ${previous}. `
+      + `Current worker state:\n${this.describeWorkers()}`,
+      'high',
+    );
+    return { ok: true, coordinatorHostId: hostId };
+  }
+
+  getCoordinatorHostId(): string {
+    return this.coordinatorHostId;
+  }
+
+  sendHostMessage(fromHostId: string, toHostId: string, text: string): { ok: boolean; error?: string } {
+    if (!this.hostGroups.has(fromHostId)) return { ok: false, error: `source host '${fromHostId}' not found` };
+    if (!this.hostGroups.has(toHostId)) return { ok: false, error: `target host '${toHostId}' not found` };
+    if (text.length === 0 || text.length > 20_000) return { ok: false, error: 'message length is invalid' };
+    this.crossHostBus.publish({ from: fromHostId, to: toHostId, text });
+    void this.repository.append('host-message', { fromHostId, toHostId, chars: text.length });
+    return { ok: true };
+  }
+
+  async executeMeetingCommand(hostId: string, raw: unknown): Promise<MeetingCommandResult> {
+    const actor = this.hostGroups.get(hostId);
+    if (!actor) return { ok: false, code: 'forbidden', error: `host '${hostId}' not found` };
+    const authorized = authorizeMeetingCommand(raw, {
+      hostId,
+      role: hostId === this.coordinatorHostId ? 'coordinator' : 'expert',
+    });
+    if (!authorized.ok) return authorized;
+    const command = authorized.command;
+    try {
+      switch (command.kind) {
+        case 'propose-plan': {
+          const result = await this.proposePlan(command.tasks);
+          return result.ok
+            ? { ok: true, value: { tasks: command.tasks.length } }
+            : { ok: false, code: 'execution-failed', error: result.error };
+        }
+        case 'ask-host': {
+          const result = this.sendHostMessage(hostId, command.hostId, command.question);
+          return result.ok ? { ok: true } : { ok: false, code: 'execution-failed', error: result.error ?? 'send failed' };
+        }
+        case 'broadcast-hosts': {
+          for (const target of this.hostGroups.keys()) {
+            if (target !== hostId) this.sendHostMessage(hostId, target, command.question);
+          }
+          return { ok: true };
+        }
+        case 'steer-worker': {
+          const result = this.steerWorker(command.workerId, command.addendum);
+          return result.ok ? { ok: true, value: result } : { ok: false, code: 'execution-failed', error: result.reason };
+        }
+        case 'speak':
+          this.narrateAssistantLine(command.text);
+          return { ok: true };
+      }
+      return { ok: false, code: 'invalid-command', error: 'unsupported command' };
+    } catch (err) {
+      return { ok: false, code: 'execution-failed', error: err instanceof Error ? err.message : String(err) };
+    }
   }
 
   /** Get the default host group (always present). */
   private defaultHost(): HostGroup {
-    const hg = this.hostGroups.get(DEFAULT_HOST_ID);
-    if (!hg) throw new Error('default host group missing — this is a bug');
+    const hg = this.hostGroups.get(this.coordinatorHostId);
+    if (!hg) throw new Error('coordinator host group missing — this is a bug');
     return hg;
   }
 
   /** Handle events from a HostGroup, tagging with hostId before re-emitting. */
   private onHostGroupEvent(hostId: string, e: OrchestratorEvent) {
     this.safeEmit({ ...e, hostId });
+    if (
+      hostId !== this.coordinatorHostId
+      && e.source === 'talker'
+      && e.event.kind === 'message'
+    ) {
+      const text = extractText(e.event.message);
+      if (text) {
+        this.sendHostMessage(
+          hostId,
+          this.coordinatorHostId,
+          `[expert response from ${hostId}] ${text.slice(0, 20_000)}`,
+        );
+      }
+    }
+    if (
+      hostId === this.coordinatorHostId
+      && e.source === 'talker'
+      && e.event.kind === 'ended'
+      && !this.closed
+    ) {
+      const candidate = Array.from(this.hostGroups.entries()).find(([id, hg]) =>
+        id !== hostId
+        && hg.getHost() !== null
+        && (hg.backendId === 'claude-code' || hg.backendId === 'codex'),
+      )?.[0] ?? null;
+      this.safeEmit({
+        source: 'system',
+        event: { kind: 'coordinator-failed', hostId, candidateHostId: candidate },
+      });
+      void this.repository.append('coordinator-failed', { hostId, candidateHostId: candidate });
+    }
+  }
+
+  async restartHost(hostId: string): Promise<{ ok: true } | { ok: false; error: string }> {
+    const hg = this.hostGroups.get(hostId);
+    if (!hg) return { ok: false, error: `host '${hostId}' not found` };
+    if (hg.getHost()) return { ok: false, error: `host '${hostId}' is already running` };
+    try {
+      await hg.start(`[recovery] Rejoin the meeting as ${hostId}. Await coordinator instructions.`);
+      this.safeEmit({ source: 'system', hostId, event: { kind: 'session-ready' } });
+      return { ok: true };
+    } catch (err) {
+      this.diagnostics.log('host-restart-failed', {
+        hostId,
+        backendId: hg.backendId,
+        error: err instanceof Error ? { name: err.name, message: err.message, cause: err.cause } : String(err),
+      });
+      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -355,6 +559,22 @@ export class Orchestrator implements OrchestratorBridge {
     if (this.closed) return;
     // Ensure hostId is always present; default to 'default' when absent.
     if (!e.hostId) e = { ...e, hostId: DEFAULT_HOST_ID };
+    void this.repository.append(`event:${e.event.kind}`, e);
+    if (
+      e.event.kind === 'plan-updated'
+      || e.event.kind === 'worker-spawned'
+      || e.event.kind === 'worker-ended'
+      || e.event.kind === 'coordinator-failed'
+    ) {
+      void this.repository.snapshot({
+        status: 'active',
+        cwd: this.cwd,
+        coordinatorHostId: this.coordinatorHostId,
+        hosts: this.listHosts(),
+        tasks: this.meetingScheduler.snapshot(),
+        autoOrchestration: this.autoOrchestration,
+      });
+    }
     this.emit(e);
   }
 
@@ -436,7 +656,7 @@ export class Orchestrator implements OrchestratorBridge {
     const dh = this.defaultHost();
     const dhHost = dh.getHost();
     if (dhHost) {
-      const finalLines = dh.getScheduler().collectFinalBufferedLines();
+      const finalLines = this.meetingScheduler.collectFinalBufferedLines();
       if (finalLines.length > 0) {
         this.safeEmit({
           source: 'talker',
@@ -472,7 +692,14 @@ export class Orchestrator implements OrchestratorBridge {
 
     // Currently only recap.done is async. If host group teardown grows async
     // cleanup later, push those Promises into this array.
-    const cleanupPromises: Promise<void>[] = [];
+    const cleanupPromises: Promise<void>[] = [
+      this.repository.snapshot({
+        status: 'ended',
+        coordinatorHostId: this.coordinatorHostId,
+        hosts: this.listHosts(),
+        workers: this.meetingScheduler.describeWorkers(),
+      }).then(() => this.repository.flush()),
+    ];
     if (this.recapHandle) cleanupPromises.push(this.recapHandle.done);
 
     this.endPromise = Promise.all(cleanupPromises).then(() => undefined);
@@ -481,7 +708,30 @@ export class Orchestrator implements OrchestratorBridge {
 
   /** Manual entry point: renderer-side "Plan meeting" button. */
   async installPlan(tasks: PlanMeetingTask[]): Promise<{ ok: true } | { ok: false; error: string }> {
-    return this.defaultHost().getScheduler().installPlan(tasks);
+    return this.meetingScheduler.installPlan(tasks);
+  }
+
+  async proposePlan(tasks: PlanMeetingTask[]): Promise<{ ok: true } | { ok: false; error: string }> {
+    if (!this.autoOrchestration) {
+      this.pendingPlan = tasks.map((task) => ({ ...task, deps: [...(task.deps ?? [])] }));
+      this.safeEmit({ source: 'system', event: { kind: 'plan-proposed', tasks: this.pendingPlan } });
+      void this.repository.append('plan-proposed', { tasks: this.pendingPlan });
+      return { ok: true };
+    }
+    return this.meetingScheduler.installPlan(tasks);
+  }
+
+  setAutoOrchestration(enabled: boolean): void {
+    this.autoOrchestration = enabled;
+    void this.repository.append('orchestration-mode-changed', { enabled });
+  }
+
+  approvePendingPlan(approved: boolean): { ok: true } | { ok: false; error: string } {
+    const tasks = this.pendingPlan;
+    this.pendingPlan = null;
+    if (!tasks) return { ok: false, error: 'no pending plan' };
+    if (!approved) return { ok: true };
+    return this.meetingScheduler.installPlan(tasks);
   }
 
   // ===========================================================================
@@ -491,35 +741,24 @@ export class Orchestrator implements OrchestratorBridge {
   // host handles all MCP tool callbacks.
 
   delegateSingleTask(description: string): { workerId: string; specialty: WorkerSpecialtyKind; reused: boolean } {
-    return this.defaultHost().getScheduler().delegateSingleTask(description);
+    return this.meetingScheduler.delegateSingleTask(description);
   }
 
   steerWorker(workerId: string, addendum: string): SteerResult {
     // Search across all host groups — worker IDs are unique.
-    for (const hg of this.hostGroups.values()) {
-      const result = hg.getScheduler().steerWorker(workerId, addendum);
-      if (result.ok || result.reason !== 'unknown') return result;
-    }
-    return { ok: false, reason: 'unknown' };
+    return this.meetingScheduler.steerWorker(workerId, addendum);
   }
 
   hasWorker(workerId: string): boolean {
-    for (const hg of this.hostGroups.values()) {
-      if (hg.getScheduler().hasWorker(workerId)) return true;
-    }
-    return false;
+    return this.meetingScheduler.hasWorker(workerId);
   }
 
   activeWorkerIds(): string[] {
-    const ids: string[] = [];
-    for (const hg of this.hostGroups.values()) {
-      ids.push(...hg.getScheduler().activeWorkerIds());
-    }
-    return ids;
+    return this.meetingScheduler.activeWorkerIds();
   }
 
   describeWorkers(workerId?: string): string {
-    return this.defaultHost().getScheduler().describeWorkers(workerId);
+    return this.meetingScheduler.describeWorkers(workerId);
   }
 
   narrateAssistantLine(text: string): void {
@@ -628,26 +867,16 @@ export class Orchestrator implements OrchestratorBridge {
 
   markWorkerTaskDone(workerId: string, summary: string): void {
     // Search across all host groups.
-    for (const hg of this.hostGroups.values()) {
-      if (hg.getScheduler().hasWorker(workerId)) {
-        hg.getScheduler().markTaskDone(workerId, summary);
-        return;
-      }
-    }
+    this.meetingScheduler.markTaskDone(workerId, summary);
   }
 
   // Test-only proxy: forward session events to the scheduler for simulation.
   schedulerOnWorkerEvent(workerId: string, e: SessionEvent): void {
-    this.defaultHost().getScheduler().onWorkerEvent(workerId, e);
+    this.meetingScheduler.onWorkerEvent(workerId, e);
   }
 
   submitWorkerDelivery(workerId: string, files: string[]): void {
-    for (const hg of this.hostGroups.values()) {
-      if (hg.getScheduler().hasWorker(workerId)) {
-        hg.getScheduler().submitWorkerDelivery(workerId, files);
-        return;
-      }
-    }
+    this.meetingScheduler.submitWorkerDelivery(workerId, files);
   }
 
   // ===========================================================================

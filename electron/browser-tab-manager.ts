@@ -41,6 +41,7 @@ export class BrowserTabManager {
   private dpr = 1;
   private window: BrowserWindow | null = null;
   private listeners = new Set<StateListener>();
+  private browserSecurityConfigured = false;
 
   setWindow(win: BrowserWindow | null): void {
     this.window = win;
@@ -90,6 +91,13 @@ export class BrowserTabManager {
 
     const id = randomUUID();
     const browserSession = session.fromPartition(BROWSER_PARTITION);
+    // Embedded web content gets no native permissions by default. Individual
+    // capabilities can be added later through an explicit user-facing policy.
+    if (!this.browserSecurityConfigured) {
+      browserSession.setPermissionRequestHandler((_wc, _permission, callback) => callback(false));
+      browserSession.on('will-download', (event) => event.preventDefault());
+      this.browserSecurityConfigured = true;
+    }
 
     const view = new WebContentsView({
       webPreferences: {
@@ -458,6 +466,16 @@ export class BrowserTabManager {
       return { action: 'deny' };
     });
 
+    const guardNavigation = (event: Electron.Event, url: string) => {
+      try {
+        const parsed = new URL(url);
+        if (parsed.protocol === 'http:' || parsed.protocol === 'https:') return;
+      } catch { /* block malformed URLs */ }
+      event.preventDefault();
+    };
+    wc.on('will-navigate', guardNavigation);
+    wc.on('will-redirect', guardNavigation);
+
     // Return cleanup function that removes all registered listeners
     return () => {
       wc.removeListener('did-navigate', updateInfo);
@@ -466,6 +484,8 @@ export class BrowserTabManager {
       wc.removeListener('did-start-loading', updateInfo);
       wc.removeListener('did-stop-loading', updateInfo);
       wc.removeListener('did-fail-load', updateInfo);
+      wc.removeListener('will-navigate', guardNavigation);
+      wc.removeListener('will-redirect', guardNavigation);
     };
   }
 }

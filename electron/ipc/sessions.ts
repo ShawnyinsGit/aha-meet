@@ -26,6 +26,7 @@ import {
 } from '../store.js';
 import type { IpcContext } from './context.js';
 import { clearApprovedExternalDirs } from './documents.js';
+import { MeetingRepository } from '../meeting-repository.js';
 
 interface OpenPayload {
   cwd?: unknown;
@@ -243,6 +244,11 @@ export function registerSessionsIpc(ctx: IpcContext): void {
     };
   });
 
+  ipcMain.handle('sessions:list-recoverable', async () => ({
+    ok: true,
+    meetings: await MeetingRepository.listRecoverable(),
+  }));
+
   // ---- Multi-host management -----------------------------------------------
 
   /** Add a host group to an existing session. The session's Orchestrator
@@ -286,5 +292,23 @@ export function registerSessionsIpc(ctx: IpcContext): void {
     const orch = ctx.getOrchestrator(sessionId);
     if (!orch) return { ok: false, error: 'session not found' };
     return { ok: true, hosts: orch.listHosts() };
+  });
+
+  ipcMain.handle('sessions:set-coordinator', async (_e, payload: unknown) => {
+    if (!payload || typeof payload !== 'object') return { ok: false, error: 'payload must be an object' };
+    const { sessionId, hostId } = payload as { sessionId?: unknown; hostId?: unknown };
+    if (typeof hostId !== 'string' || hostId.length === 0) return { ok: false, error: 'hostId is required' };
+    const orch = ctx.getOrchestrator(typeof sessionId === 'string' ? sessionId : null);
+    if (!orch) return { ok: false, error: 'session not found' };
+    return orch.setCoordinator(hostId);
+  });
+
+  ipcMain.handle('sessions:restart-host', async (_e, payload: unknown) => {
+    if (!payload || typeof payload !== 'object') return { ok: false, error: 'payload must be an object' };
+    const { sessionId, hostId } = payload as { sessionId?: unknown; hostId?: unknown };
+    if (typeof hostId !== 'string' || !hostId) return { ok: false, error: 'hostId is required' };
+    const orch = ctx.getOrchestrator(typeof sessionId === 'string' ? sessionId : null);
+    if (!orch) return { ok: false, error: 'session not found' };
+    return orch.restartHost(hostId);
   });
 }

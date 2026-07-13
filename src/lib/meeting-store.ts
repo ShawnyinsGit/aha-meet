@@ -153,6 +153,7 @@ export interface MeetingState {
   /** Host groups in this meeting. Always has at least 'default'. Each group
    *  owns one host agent (the "talker" for that group) plus its workers. */
   hostGroups: Map<string, HostGroupState>;
+  coordinatorHostId: string;
 }
 
 /** One host group: a host agent + its worker pool. Collapsible in the
@@ -318,6 +319,7 @@ function emptyState(defaultBackendId: string = 'claude-code'): MeetingState {
     deliveryHistory: [],
     savedDocuments: [],
     hostGroups,
+    coordinatorHostId: 'default',
   };
 }
 
@@ -945,12 +947,18 @@ class MeetingStore {
               ...createTalkerState(),
               id: 'talker',
               hostId,
+              status: 'running',
             });
           }
           return { ...s, workers, running: true, lastError: null };
         });
       } else {
-        this.mutateSlot(slot.id, (s) => ({ ...s, running: true, lastError: null }));
+        this.mutateSlot(slot.id, (s) => {
+          const workers = new Map(s.workers);
+          const talker = workers.get('talker');
+          if (talker) workers.set('talker', { ...talker, status: 'running', endedAt: null });
+          return { ...s, workers, running: true, lastError: null };
+        });
       }
       const pending = slot.pendingInput;
       slot.pendingInput = [];
@@ -1128,6 +1136,18 @@ class MeetingStore {
       this.mutateSlot(slot.id, (s) => ({ ...s, plan: e.plan }));
       return;
     }
+    if (e.kind === 'plan-proposed') {
+      const summary = e.tasks
+        .map((task) => `• ${task.title} → ${task.executorBackendId ?? 'coordinator backend'}`)
+        .join('\n');
+      const approved = window.confirm(`Host 提议了 ${e.tasks.length} 个任务：\n\n${summary}\n\n是否启动这些 Worker？`);
+      void window.vibeMeet.approvePlan(slot.id, approved).then((result) => {
+        if (!result.ok) {
+          this.mutateSlot(slot.id, (s) => ({ ...s, lastError: result.error ?? 'Plan approval failed' }));
+        }
+      });
+      return;
+    }
     if (e.kind === 'error') {
       this.updateWorker(slot, source, (w) => ({
         ...w,
@@ -1153,13 +1173,18 @@ class MeetingStore {
           MAX_ACTIVITY,
         ),
       }), e.hostId);
-      if (source === 'talker') {
-        const intended = slot.intendedExit;
-        this.mutateSlot(slot.id, (s) => ({
-          ...s,
-          running: false,
-          lastError: intended ? s.lastError : (s.lastError ?? 'Session ended unexpectedly.'),
-        }));
+      return;
+    }
+    if (e.kind === 'coordinator-failed') {
+      if (!e.candidateHostId) {
+        this.mutateSlot(slot.id, (s) => ({ ...s, running: false, lastError: e.error ?? 'Coordinator exited and no replacement is ready.' }));
+        return;
+      }
+      const approved = window.confirm(`当前主持人 ${e.hostId} 已退出。是否由 ${e.candidateHostId} 接管？\n\n已有 Worker 会继续运行。`);
+      if (approved) {
+        void this.setCoordinator(e.candidateHostId);
+      } else {
+        this.mutateSlot(slot.id, (s) => ({ ...s, lastError: '新任务调度已暂停，等待选择主持人。' }));
       }
       return;
     }
@@ -1271,6 +1296,21 @@ class MeetingStore {
     if (e.kind === 'message') {
       this.handleMessage(slot, source, e.message, e.hostId);
     }
+  }
+
+  async setCoordinator(hostId: string): Promise<{ ok: boolean; error?: string }> {
+    const slot = this.activeLiveSlot();
+    if (!slot) return { ok: false, error: 'No active session' };
+    const result = await window.vibeMeet.sessions.setCoordinator(slot.id, hostId);
+    if (!result.ok) return result;
+    this.mutateSlot(slot.id, (s) => ({ ...s, coordinatorHostId: result.coordinatorHostId }));
+    return { ok: true };
+  }
+
+  async restartHost(hostId: string): Promise<{ ok: boolean; error?: string }> {
+    const slot = this.activeLiveSlot();
+    if (!slot) return { ok: false, error: 'No active session' };
+    return window.vibeMeet.sessions.restartHost(slot.id, hostId);
   }
 
   /** Human-friendly name for spoken status lines. */
@@ -1388,7 +1428,7 @@ class MeetingStore {
     // suppressed at the talker level). The flag `includePartialMessages` may
     // be off in current builds — in that case no stream_event will ever land
     // here and we fall back to the one-shot `assistant` path below.
-    if (type === 'stream_event' && source === 'talker') {
+    if (type === 'stream_event' && source === 'talker' && (hostId ?? 'default') === slot.state.coordinatorHostId) {
       this.handleTalkerStreamEvent(slot, msg);
       return;
     }
@@ -1411,9 +1451,10 @@ class MeetingStore {
       // the same message.id. Speak again here would say the whole thing twice
       // — so we let the transcript update but suppress speakCallback.
       const isTalkerText = source === 'talker' && text.trim().length > 0;
+      const isCoordinatorTalker = isTalkerText && (hostId ?? 'default') === slot.state.coordinatorHostId;
       const fullMessageId = typeof msg?.message?.id === 'string' ? msg.message.id : null;
       const alreadyStreamed =
-        isTalkerText &&
+        isCoordinatorTalker &&
         slot.streamBuffer.hasEmitted &&
         fullMessageId !== null &&
         fullMessageId === slot.streamBuffer.messageId;
@@ -1421,7 +1462,7 @@ class MeetingStore {
       // playback queue is already cancelled. The full message arrives
       // anyway — speak again would restart the speech we just killed.
       const bargedThisTurn =
-        isTalkerText &&
+        isCoordinatorTalker &&
         slot.streamBuffer.cancelledByBarge &&
         fullMessageId !== null &&
         fullMessageId === slot.streamBuffer.messageId;
@@ -1434,7 +1475,7 @@ class MeetingStore {
       // there is a live stream turn (messageId set) whose id does not match the
       // full message, it is the same reply — suppress the duplicate speak.
       const streamTurnActive =
-        isTalkerText &&
+        isCoordinatorTalker &&
         slot.streamBuffer.messageId !== null &&
         (slot.streamBuffer.hasEmitted || slot.streamBuffer.cancelledByBarge);
       const streamedIdDrift =
@@ -1449,7 +1490,7 @@ class MeetingStore {
         );
       }
       const shouldSpeak =
-        isTalkerText &&
+        isCoordinatorTalker &&
         text !== slot.lastSpoken &&
         slot.id === this.activeId &&
         !alreadyStreamed &&
@@ -1464,7 +1505,7 @@ class MeetingStore {
         slot.lastSpoken = text;
         slot.streamBuffer = { messageId: null, pendingTail: '', hasEmitted: false, cancelledByBarge: false };
       }
-      if (isTalkerText && slot.id !== this.activeId && text !== slot.lastSpoken) {
+      if (isCoordinatorTalker && slot.id !== this.activeId && text !== slot.lastSpoken) {
         slot.pendingSpeak = { text, ts: Date.now() };
       }
       // Stamp the talker transcript entry once outside updateWorker so the

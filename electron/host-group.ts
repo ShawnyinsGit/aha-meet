@@ -40,6 +40,7 @@ import type {
   TalkerTurn,
 } from './orchestrator-types.js';
 import type { SDKMessage, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
+import type { TaskWorkspaceManager } from './task-workspace.js';
 
 export interface HostGroupOpts {
   /** Unique identifier for this host group. Default = 'default'. */
@@ -57,6 +58,7 @@ export interface HostGroupOpts {
   talkerModel?: string;
   confirmDestructive?: (toolName: string, input: Record<string, unknown>) => Promise<boolean>;
   sessionFactory: SessionFactory;
+  resolveWorkerSessionFactory?: (backendId?: string) => SessionFactory;
   browserTabManager?: BrowserTabManager;
   /** Bridge to the orchestrator for MCP tool callbacks. */
   bridge: OrchestratorBridge;
@@ -64,6 +66,8 @@ export interface HostGroupOpts {
   isClosed: () => boolean;
   /** Live read of speech filter mode. */
   getSpeechFilterMode: () => 'strict' | 'off';
+  isCoordinator: () => boolean;
+  workspaceManager?: TaskWorkspaceManager;
 }
 
 export class HostGroup {
@@ -84,6 +88,7 @@ export class HostGroup {
   private bridge: OrchestratorBridge;
   private isClosed: () => boolean;
   private getSpeechFilterMode: () => 'strict' | 'off';
+  private isCoordinator: () => boolean;
 
   /** Talker transcript for recap. Accumulates user+assistant text turns. */
   private talkerTranscript: TalkerTurn[] = [];
@@ -103,6 +108,7 @@ export class HostGroup {
     this.bridge = opts.bridge;
     this.isClosed = opts.isClosed;
     this.getSpeechFilterMode = opts.getSpeechFilterMode;
+    this.isCoordinator = opts.isCoordinator;
 
     const cuBridge: ComputerUseBridge = {
       injectScreenshot: (workerId, data) => {
@@ -122,6 +128,8 @@ export class HostGroup {
       workerEnv: this.workerEnv,
       confirmDestructive: this.confirmDestructive,
       sessionFactory: this.sessionFactory,
+      resolveSessionFactory: opts.resolveWorkerSessionFactory,
+      workspaceManager: opts.workspaceManager,
       buildWorkerMcp: (workerId) => buildWorkerMcp(this.bridge, workerId, this.cwd),
       buildComputerUseMcp: process.platform === 'darwin'
         ? (workerId) => buildComputerUseMcp(cuBridge, workerId)
@@ -161,7 +169,7 @@ export class HostGroup {
   }
 
   async start(greeting?: string) {
-    const meetingMcp = buildTalkerMcp(this.bridge);
+    const meetingMcp = buildTalkerMcp(this.bridge, this.isCoordinator, this.id);
 
     let systemPrompt: string = TALKER_PROMPT;
     try {
@@ -201,7 +209,7 @@ export class HostGroup {
       },
     });
 
-    this.host.start();
+    await this.host.start();
 
     if (greeting) {
       this.host.sendUserText(greeting, 'normal');
@@ -255,6 +263,7 @@ export class HostGroup {
   }
 
   private onHostEvent(e: SessionEvent) {
+    if (e.kind === 'ended') this.host = null;
     this.taggedEmit({ source: 'talker', event: e });
 
     if (e.kind === 'ended' && !this.isClosed()) {
