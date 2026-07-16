@@ -112,3 +112,24 @@ test('a connecting host cannot take over coordination before readiness', async (
     await orchestrator.end();
   }
 });
+
+test('host listings include the native backend session reference for recovery', async () => {
+  const orchestrator = new Orchestrator({
+    emit() {},
+    cwd: process.cwd(),
+    sessionFactory: () => ({
+      async start() {}, end() {}, sendUserText() {}, sendUserContent() {},
+      resolvePermission() {}, async interrupt() {},
+      snapshot() { return { protocol: 'codex-sdk', sessionId: 'thread-persisted' }; },
+    }),
+  });
+  try {
+    await orchestrator.start();
+    assert.deepEqual(orchestrator.listHosts()[0].backendSession, {
+      protocol: 'codex-sdk',
+      sessionId: 'thread-persisted',
+    });
+  } finally {
+    await orchestrator.end();
+  }
+});

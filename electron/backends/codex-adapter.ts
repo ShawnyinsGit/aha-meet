@@ -21,6 +21,8 @@
 
 import { execFileSync, spawn } from 'node:child_process';
 import { accessSync, constants as fsConstants, existsSync, realpathSync } from 'node:fs';
+import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type {
   BackendSession,
@@ -37,6 +39,7 @@ import type {
 import { resolveBinaryFromPath } from './subprocess-backend.js';
 import { runTerminalLogin } from './terminal-login.js';
 import { isolatedSubprocessEnv } from './backend-environment.js';
+import type { Input as CodexInput, Thread as CodexThread, ThreadEvent, ThreadItem } from '@openai/codex-sdk';
 
 const CODEX_CAPABILITIES: BackendCapabilities = {
   coordinate: true,
@@ -44,8 +47,10 @@ const CODEX_CAPABILITIES: BackendCapabilities = {
   executeTasks: false,
   displayName: 'Codex',
   iconId: 'codex',
-  mcp: true,
-  permissions: true,
+  // The SDK can report MCP calls, but this adapter cannot mount AhaMeet MCP
+  // servers or broker interactive approval requests yet.
+  mcp: false,
+  permissions: false,
   systemPrompt: true,
   skills: false,
   interrupt: true,
@@ -61,53 +66,9 @@ export function codexLoginArgs(): string[] {
 }
 
 // ── Dynamic SDK import ─────────────────────────────────────────────────────────
-// The SDK may not be installed. Use dynamic import to avoid build failures.
+// Keep runtime loading lazy, but take every protocol type from the locked SDK.
 
-interface CodexSdkThread {
-  run(prompt: string, options?: Record<string, unknown>): Promise<{
-    finalResponse: string;
-    items: unknown[];
-  }>;
-  runStreamed(prompt: string, options?: Record<string, unknown>): Promise<{
-    events: AsyncIterable<CodexThreadEvent>;
-  }>;
-}
-
-interface CodexSdk {
-  new (options?: {
-    apiKey?: string;
-    baseUrl?: string;
-    codexPathOverride?: string;
-    env?: Record<string, string>;
-    config?: Record<string, unknown>;
-  }): {
-    startThread(options?: Record<string, unknown>): CodexSdkThread;
-  };
-}
-
-// Codex thread event types (from events.ts in the SDK)
-interface CodexThreadEvent {
-  type: string;
-  thread_id?: string;
-  usage?: { input_tokens: number; output_tokens: number };
-  error?: { message: string };
-  item?: CodexThreadItem;
-}
-
-interface CodexThreadItem {
-  id?: string;
-  type: string;
-  text?: string;
-  status?: string;
-  command?: string;
-  output?: string;
-  path?: string;
-  diff?: string;
-  name?: string;
-  arguments?: string;
-  result?: string;
-  error?: string;
-}
+type CodexSdk = typeof import('@openai/codex-sdk').Codex;
 
 let codexSdkCache: CodexSdk | null | undefined;
 
@@ -115,7 +76,7 @@ async function loadCodexSdk(): Promise<CodexSdk | null> {
   if (codexSdkCache !== undefined) return codexSdkCache;
   try {
     const mod = await import('@openai/codex-sdk');
-    codexSdkCache = mod.Codex as unknown as CodexSdk;
+    codexSdkCache = mod.Codex;
     return codexSdkCache;
   } catch {
     codexSdkCache = null;
@@ -126,7 +87,7 @@ async function loadCodexSdk(): Promise<CodexSdk | null> {
 // ── Session implementation ─────────────────────────────────────────────────────
 
 class CodexSession implements BackendSession {
-  private thread: CodexSdkThread | null = null;
+  private thread: CodexThread | null = null;
   private closed = false;
   private emit: (e: BackendSessionEvent) => void;
   private config: BackendSessionConfig;
@@ -135,8 +96,10 @@ class CodexSession implements BackendSession {
   private turnQueue: Promise<void> = Promise.resolve();
   private binaryPath: string | null;
   private currentAbort: AbortController | null = null;
+  private turnAborts = new Set<AbortController>();
   private meetingCommandHandler?: (command: unknown) => Promise<unknown> | unknown;
   private authRequiredEmitted = false;
+  private sessionId: string | null = null;
 
   constructor(
     binaryPath: string | null,
@@ -180,13 +143,17 @@ class CodexSession implements BackendSession {
         baseUrl: this.baseUrl,
         env: Object.keys(envStrings).length > 0 ? envStrings : undefined,
       });
-      this.thread = codex.startThread({
+      const threadOptions = {
         workingDirectory: this.config.cwd,
         model: this.config.model,
-        approvalPolicy: 'untrusted',
-        sandboxMode: 'workspace-write',
+        approvalPolicy: this.config.executionRole === 'worker' ? 'untrusted' : 'never',
+        sandboxMode: this.config.executionRole === 'worker' ? 'workspace-write' : 'read-only',
         skipGitRepoCheck: true,
-      });
+      } as const;
+      this.thread = this.config.resumeSessionId
+        ? codex.resumeThread(this.config.resumeSessionId, threadOptions)
+        : codex.startThread(threadOptions);
+      this.sessionId = this.config.resumeSessionId ?? this.thread.id;
     } catch (err: unknown) {
       throw new Error(`Codex SDK init failed: ${String(err)}`);
     }
@@ -223,8 +190,11 @@ class CodexSession implements BackendSession {
     }
   }
 
-  private normalizeEvent(event: CodexThreadEvent): NormalizedMessage | null {
+  private normalizeEvent(event: ThreadEvent): NormalizedMessage | null {
     switch (event.type) {
+      case 'thread.started':
+        this.sessionId = event.thread_id;
+        return null;
       case 'item.completed':
         return this.normalizeItem(event.item);
       case 'turn.failed':
@@ -245,19 +215,28 @@ class CodexSession implements BackendSession {
       case 'turn.started':
       case 'item.started':
       case 'item.updated':
-      case 'thread.started':
-      default:
         return null;
+      case 'error':
+        if (isCodexAuthError(event.message)) {
+          this.emitAuthRequired();
+          return null;
+        }
+        return {
+          type: 'assistant', errorCode: 'codex_stream_error', errorDetail: event.message,
+          message: { role: 'assistant', content: [{ type: 'text', text: `Error: ${event.message}` }] },
+        };
+      default:
+        return assertNever(event);
     }
   }
 
-  private normalizeItem(item?: CodexThreadItem): NormalizedMessage | null {
+  private normalizeItem(item?: ThreadItem): NormalizedMessage | null {
     if (!item) return null;
 
     switch (item.type) {
       case 'agent_message':
         {
-          const { visibleText, hasSpeakCommand } = this.dispatchMeetingCommands(item.text ?? '');
+          const { visibleText, hasSpeakCommand } = this.dispatchMeetingCommands(item.text);
           // `speak` is rendered by Orchestrator.narrateAssistantLine(). Emitting
           // the agent message as well would show the same sentence twice and
           // leak the fenced protocol payload into the chat transcript.
@@ -280,15 +259,18 @@ class CodexSession implements BackendSession {
             content: [
               {
                 type: 'tool_use',
-                id: item.id ?? `cmd-${Date.now()}`,
+                id: item.id,
                 name: 'Bash',
-                input: { command: item.command ?? '' },
+                input: { command: item.command },
               },
-              ...(item.output ? [{
-                type: 'tool_result' as const,
-                tool_use_id: item.id ?? `cmd-${Date.now()}`,
-                content: item.output,
-              }] : []),
+              {
+                type: 'tool_result',
+                tool_use_id: item.id,
+                content: item.aggregated_output || `[${item.status}; exit ${item.exit_code ?? 'unknown'}]`,
+                ...(item.status === 'failed' || (item.exit_code !== undefined && item.exit_code !== 0)
+                  ? { is_error: true }
+                  : {}),
+              },
             ],
           },
           raw: item,
@@ -299,14 +281,12 @@ class CodexSession implements BackendSession {
           type: 'assistant',
           message: {
             role: 'assistant',
-            content: [
-              {
+            content: item.changes.map((change, index) => ({
                 type: 'tool_use',
-                id: item.id ?? `file-${Date.now()}`,
+                id: `${item.id}:${index}`,
                 name: 'Write',
-                input: { file_path: item.path ?? '', content: item.diff ?? '' },
-              },
-            ],
+                input: { file_path: change.path, change_kind: change.kind, status: item.status },
+              })),
           },
           raw: item,
         };
@@ -319,10 +299,20 @@ class CodexSession implements BackendSession {
             content: [
               {
                 type: 'tool_use',
-                id: item.id ?? `mcp-${Date.now()}`,
-                name: item.name ?? 'McpTool',
-                input: item.arguments ? safeJsonParse(item.arguments) : {},
+                id: item.id,
+                name: `mcp__${item.server}__${item.tool}`,
+                input: isRecord(item.arguments) ? item.arguments : { value: item.arguments },
               },
+              ...(item.result ? [{
+                type: 'tool_result' as const,
+                tool_use_id: item.id,
+                content: JSON.stringify(item.result.content),
+              }] : item.error ? [{
+                type: 'tool_result' as const,
+                tool_use_id: item.id,
+                content: item.error.message,
+                is_error: true,
+              }] : []),
             ],
           },
           raw: item,
@@ -332,19 +322,52 @@ class CodexSession implements BackendSession {
         // Codex emits a generic item error immediately before turn.failed.
         // The latter contains the actionable detail, so displaying both
         // creates the repeated "Error: Item error" noise seen in chat.
-        if (!item.error || item.error === 'Item error') return null;
+        if (!item.message || item.message === 'Item error') return null;
         return {
           type: 'assistant',
           errorCode: 'codex_item_error',
-          errorDetail: item.error ?? 'Item error',
+          errorDetail: item.message,
           message: {
             role: 'assistant',
-            content: [{ type: 'text', text: `Error: ${item.error ?? 'Item error'}` }],
+            content: [{ type: 'text', text: `Error: ${item.message}` }],
           },
         };
 
+      case 'reasoning':
+        return item.text ? {
+          type: 'assistant',
+          message: { role: 'assistant', content: [{ type: 'text', text: item.text }] },
+          raw: item,
+        } : null;
+
+      case 'web_search':
+        return {
+          type: 'assistant',
+          message: {
+            role: 'assistant',
+            content: [
+              { type: 'tool_use', id: item.id, name: 'WebSearch', input: { query: item.query } },
+              { type: 'tool_result', tool_use_id: item.id, content: 'Search completed' },
+            ],
+          },
+          raw: item,
+        };
+
+      case 'todo_list':
+        return {
+          type: 'assistant',
+          message: {
+            role: 'assistant',
+            content: [{
+              type: 'text',
+              text: item.items.map((todo) => `${todo.completed ? '[x]' : '[ ]'} ${todo.text}`).join('\n'),
+            }],
+          },
+          raw: item,
+        };
+
       default:
-        return null;
+        return assertNever(item);
     }
   }
 
@@ -383,31 +406,46 @@ class CodexSession implements BackendSession {
   end(): void {
     this.closed = true;
     this.currentAbort?.abort();
+    for (const abort of this.turnAborts) abort.abort();
     this.emit({ kind: 'ended' });
     this.emit = () => {};
   }
 
   sendUserText(text: string, _priority?: InputPriority): void {
+    this.enqueueTurn(async () => ({ input: text }));
+  }
+
+  private enqueueTurn(
+    prepare: () => Promise<{ input: CodexInput; cleanup?: () => Promise<void> }>,
+  ): void {
     if (!this.thread || this.closed || this.authRequiredEmitted) return;
     const thread = this.thread; // Capture thread reference before async boundary
+    const abort = new AbortController();
+    this.turnAborts.add(abort);
     // Serialize turns to prevent concurrent runStreamed calls on the same thread
     this.turnQueue = this.turnQueue.then(async () => {
-      if (this.closed || this.authRequiredEmitted) return;
+      let cleanup: (() => Promise<void>) | undefined;
       try {
-        const abort = new AbortController();
+        if (this.closed || this.authRequiredEmitted || abort.signal.aborted) return;
         this.currentAbort = abort;
-        const { events } = await thread.runStreamed(text, { signal: abort.signal });
+        const prepared = await prepare();
+        cleanup = prepared.cleanup;
+        if (this.closed || this.authRequiredEmitted || abort.signal.aborted) return;
+        const { events } = await thread.runStreamed(prepared.input, { signal: abort.signal });
         for await (const event of events) {
           if (this.closed) break;
           const msg = this.normalizeEvent(event);
           if (msg) this.emit({ kind: 'message', message: msg });
         }
-        if (this.currentAbort === abort) this.currentAbort = null;
       } catch (err: unknown) {
         if (!this.closed && !(err instanceof Error && err.name === 'AbortError')) {
           if (isCodexAuthError(String(err))) this.emitAuthRequired();
           else this.emit({ kind: 'error', error: `Codex error: ${String(err)}` });
         }
+      } finally {
+        if (this.currentAbort === abort) this.currentAbort = null;
+        this.turnAborts.delete(abort);
+        await cleanup?.();
       }
     }).catch((err: unknown) => {
       // Log instead of silently swallowing — unhandled rejections in the queue
@@ -418,16 +456,13 @@ class CodexSession implements BackendSession {
     });
   }
 
-  sendUserContent(content: UserContentBlock[], _priority?: InputPriority): void {
-    const text = content
-      .filter((b): b is { type: 'text'; text: string } => b.type === 'text')
-      .map((b) => b.text)
-      .join('\n');
-    const droppedImages = content.filter((b) => b.type === 'image').length;
-    if (droppedImages > 0) {
-      console.warn(`[codex] sendUserContent dropped ${droppedImages} image(s) — Codex SDK text-only mode`);
+  sendUserContent(content: string | UserContentBlock[], _priority?: InputPriority): void {
+    if (typeof content === 'string') {
+      this.sendUserText(content);
+      return;
     }
-    if (text) this.sendUserText(text);
+    if (content.length === 0) return;
+    this.enqueueTurn(() => materializeCodexInput(content));
   }
 
   resolvePermission(_id: string, _decision: 'allow' | 'deny', _message?: string): void {
@@ -436,6 +471,67 @@ class CodexSession implements BackendSession {
 
   async interrupt(): Promise<void> {
     this.currentAbort?.abort();
+    for (const abort of this.turnAborts) abort.abort();
+  }
+
+  snapshot(): { protocol: string; sessionId: string } | null {
+    return this.sessionId ? { protocol: 'codex-sdk', sessionId: this.sessionId } : null;
+  }
+}
+
+const MAX_CODEX_IMAGE_BYTES = 20 * 1024 * 1024;
+
+async function materializeCodexInput(
+  content: UserContentBlock[],
+): Promise<{ input: CodexInput; cleanup?: () => Promise<void> }> {
+  const input: Exclude<CodexInput, string> = [];
+  const images = content.filter((block) => block.type === 'image');
+  let directory: string | undefined;
+  let totalBytes = 0;
+  try {
+    if (images.length > 0) {
+      directory = await mkdtemp(join(tmpdir(), 'aha-meet-codex-'));
+      await chmod(directory, 0o700);
+    }
+    let imageIndex = 0;
+    for (const block of content) {
+      if (block.type === 'text') {
+        input.push({ type: 'text', text: block.text });
+        continue;
+      }
+      if (!/^[A-Za-z0-9+/]*={0,2}$/.test(block.source.data) || block.source.data.length % 4 !== 0) {
+        throw new Error('Invalid base64 image payload');
+      }
+      const estimatedBytes = Math.floor(block.source.data.length * 3 / 4);
+      if (totalBytes + estimatedBytes > MAX_CODEX_IMAGE_BYTES) {
+        throw new Error('Codex image payload exceeds the 20 MB per-turn limit');
+      }
+      const bytes = Buffer.from(block.source.data, 'base64');
+      totalBytes += bytes.byteLength;
+      if (totalBytes > MAX_CODEX_IMAGE_BYTES) {
+        throw new Error('Codex image payload exceeds the 20 MB per-turn limit');
+      }
+      const path = join(directory!, `image-${imageIndex}.${imageExtension(block.source.media_type)}`);
+      imageIndex += 1;
+      await writeFile(path, bytes, { flag: 'wx', mode: 0o600 });
+      input.push({ type: 'local_image', path });
+    }
+    return {
+      input,
+      cleanup: directory ? () => rm(directory!, { recursive: true, force: true }) : undefined,
+    };
+  } catch (error) {
+    if (directory) await rm(directory, { recursive: true, force: true });
+    throw error;
+  }
+}
+
+function imageExtension(mediaType: string): string {
+  switch (mediaType.toLowerCase()) {
+    case 'image/jpeg': return 'jpg';
+    case 'image/gif': return 'gif';
+    case 'image/webp': return 'webp';
+    default: return 'png';
   }
 }
 
@@ -443,12 +539,13 @@ function isCodexAuthError(message: string): boolean {
   return /\b401\b|unauthorized|missing bearer|authentication (?:is )?required/i.test(message);
 }
 
-function safeJsonParse(s: string): Record<string, unknown> {
-  try {
-    return JSON.parse(s);
-  } catch {
-    return { raw: s };
-  }
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function assertNever(value: never): null {
+  void value;
+  return null;
 }
 
 // ── Backend implementation ─────────────────────────────────────────────────────

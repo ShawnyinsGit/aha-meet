@@ -126,6 +126,15 @@ export interface BackendSessionConfig {
   autoApproveScope?: AutoApproveScope;
   /** Backend-specific opaque options. */
   extra?: Record<string, unknown>;
+  /** Native backend session/thread id restored from a Meeting snapshot. */
+  resumeSessionId?: string;
+  /** Least-privilege execution profile selected by the meeting scheduler. */
+  executionRole?: 'host' | 'worker';
+}
+
+export interface BackendSessionSnapshot {
+  protocol: string;
+  sessionId: string;
 }
 
 // ── Auth configuration ────────────────────────────────────────────────────────
@@ -197,6 +206,8 @@ export interface BackendSession {
   setAutoApproveScope?(scope: AutoApproveScope): void;
   /** Set the permission mode (backend-specific). */
   setPermissionMode?(mode: string): Promise<void>;
+  /** Durable native handle used for interrupted recovery. */
+  snapshot?(): BackendSessionSnapshot | null;
 }
 
 // ── CLI backend factory ────────────────────────────────────────────────────────

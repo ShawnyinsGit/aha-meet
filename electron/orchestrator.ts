@@ -21,7 +21,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { ClaudeSession, type SessionEvent } from './claude-session.js';
-import type { BackendSession } from './backends/cli-backend.js';
+import type { BackendSession, BackendSessionSnapshot } from './backends/cli-backend.js';
 import { getBackendRegistry } from './backends/registry.js';
 import type { AutoApproveScope } from './auto-approve-policy.js';
 import type { PlanMeetingTask } from './meeting-tools.js';
@@ -272,6 +272,7 @@ export class Orchestrator implements OrchestratorBridge {
           mcpServers: so.mcpServers as Record<string, unknown> | undefined,
           skills: Array.isArray(so.skills) ? so.skills : undefined,
           autoApproveScope: opts.autoApproveScope,
+          executionRole: purpose,
           extra: {
             ...so,
             meetingCommandHandler: (raw: unknown) => this.executeMeetingCommand(actorHostId, raw),
@@ -364,6 +365,8 @@ export class Orchestrator implements OrchestratorBridge {
         // Without this, the session starts but receives no input and sits idle.
         const greeting = `你好！你已加入会议作为 ${backendId} 主持。请简要介绍自己并等待任务分配。`;
         await hg.start(greeting);
+        if (this.closed) return;
+        await this.snapshotActiveMeeting();
         if (!this.closed) {
           this.safeEmit({
             source: 'system',
@@ -411,11 +414,17 @@ export class Orchestrator implements OrchestratorBridge {
   }
 
   /** List all host groups with their ids and backend ids. */
-  listHosts(): Array<{ id: string; backendId: string; role: 'coordinator' | 'expert' }> {
+  listHosts(): Array<{
+    id: string;
+    backendId: string;
+    role: 'coordinator' | 'expert';
+    backendSession?: BackendSessionSnapshot;
+  }> {
     return Array.from(this.hostGroups.entries()).map(([id, hg]) => ({
       id,
       backendId: hg.backendId,
       role: id === this.coordinatorHostId ? 'coordinator' : 'expert',
+      backendSession: hg.getHost()?.snapshot?.() ?? undefined,
     }));
   }
 
@@ -576,20 +585,27 @@ export class Orchestrator implements OrchestratorBridge {
       || e.event.kind === 'worker-ended'
       || e.event.kind === 'coordinator-failed'
     ) {
-      void this.repository.snapshot({
-        status: 'active',
-        cwd: this.cwd,
-        coordinatorHostId: this.coordinatorHostId,
-        hosts: this.listHosts(),
-        tasks: this.meetingScheduler.snapshot(),
-        autoOrchestration: this.autoOrchestration,
-      });
+      void this.snapshotActiveMeeting();
     }
     this.emit(e);
   }
 
   async start(greeting?: string) {
     await this.defaultHost().start(greeting);
+    // Persist the native backend handle before the renderer is told the Host
+    // is ready. A crash after readiness can then recover the exact thread.
+    await this.snapshotActiveMeeting();
+  }
+
+  private snapshotActiveMeeting(): Promise<void> {
+    return this.repository.snapshot({
+      status: 'active',
+      cwd: this.cwd,
+      coordinatorHostId: this.coordinatorHostId,
+      hosts: this.listHosts(),
+      tasks: this.meetingScheduler.snapshot(),
+      autoOrchestration: this.autoOrchestration,
+    });
   }
 
   sendUserText(text: string) {

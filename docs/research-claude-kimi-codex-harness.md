@@ -193,6 +193,14 @@ Codex 当前使用官方 SDK，所以不存在“命令/事件名凭猜测实现
 7. 错误映射优先使用 `codexErrorInfo` 与 http status，message 只用于展示和 unknown fallback。
 8. 继续把同版本 `@openai/codex` native binary 放在 `app.asar.unpacked`，传绝对 `codexPathOverride`；启动前做 `--version`、`app-server --help`、schema version 和 auth/account preflight。
 
+### 6.5 2026-07-16 实施进度与 app-server 迁移判定
+
+本轮已在 SDK 路径落地以下止血项：事件映射改为直接依赖锁定版官方 TypeScript 类型；修正 command/file/MCP/reasoning/web-search/todo 的字段映射；能力表不再高报 MCP 与交互审批；Host 固定为 `read-only + never`；图片使用单 turn 的 `0600` 临时文件转成 `local_image` 并在完成、失败或中断后清理；捕获 thread id、提供 `resumeThread()` adapter seam，并把原生 session 引用写入 Meeting Host 快照。应用重启后的用户确认与端到端恢复入口仍属于后续恢复切片，当前不得宣称已经自动恢复。
+
+同时用本机官方 Codex CLI `0.144.1` 实测了 `codex app-server --help` 和 `generate-ts --experimental`。当前 CLI 明确提供 stdio transport、`initialize`、`account/read`、`thread/start/resume`、`turn/start/steer/interrupt`、审批请求及结构化通知；一次生成 671 个 TypeScript schema 文件。这证明迁移路径可行，也说明不能在现有 SDK adapter 内零散手写 JSON-RPC 字段。
+
+因此后续采用独立 `CodexAppServerTransport`：构建期按锁定 CLI 生成 schema 并做版本指纹，运行期只加载与 bundled CLI 匹配的 bindings；先交付 `initialize → account/read → thread/start/resume → turn/start/interrupt` 的纵向切片，再接审批和 MCP。完成该切片之前，SDK adapter 保持受控 Coordinator 能力，但 `mcp=false`、`permissions=false`、`executeTasks=false`，不以静态产品愿望冒充运行时能力。
+
 ## 7. 三方统一 Harness 设计
 
 三方 adapter 不应被强迫输出相同的底层事件，但必须实现同一个最小、可验证的 Meeting Backend Contract。
