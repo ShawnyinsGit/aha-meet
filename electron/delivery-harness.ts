@@ -1,0 +1,323 @@
+import { randomUUID } from 'node:crypto';
+
+export type DeliveryStatus =
+  | 'awaiting-spec-approval'
+  | 'preparing-workspace'
+  | 'executing'
+  | 'verifying'
+  | 'reviewing'
+  | 'awaiting-delivery-acceptance'
+  | 'integrating'
+  | 'accepted'
+  | 'reworking'
+  | 'interrupted'
+  | 'failed'
+  | 'cancelled';
+
+export interface AcceptanceCriterion {
+  id: string;
+  description: string;
+  verification?: { kind: 'command'; command: string } | { kind: 'manual' };
+}
+
+export interface DeliveryProposal {
+  meetingId: string;
+  objective: string;
+  workspace: string;
+  sourceRevision: string;
+  acceptanceCriteria: AcceptanceCriterion[];
+}
+
+export interface DeliverySpec {
+  version: number;
+  objective: string;
+  acceptanceCriteria: AcceptanceCriterion[];
+}
+
+export interface WorkOrder {
+  deliveryId: string;
+  attempt: number;
+  meetingId: string;
+  goal: string;
+  acceptanceCriteria: AcceptanceCriterion[];
+  workspace: string;
+  sourceRevision: string;
+}
+
+export interface WorkReport {
+  outcome: 'completed' | 'partial' | 'blocked' | 'failed';
+  summary: string;
+  changes: Array<{ path: string; purpose: string }>;
+  tests: Array<{ name: string; status: 'passed' | 'failed' | 'skipped'; evidenceRef?: string }>;
+  artifacts: Array<{ id?: string; path?: string }>;
+  risks: string[];
+  unresolved: string[];
+}
+
+export interface VerificationEvidence {
+  passed: boolean;
+  checks: unknown[];
+  error?: string;
+}
+
+export interface ReviewVerdict {
+  passed: boolean;
+  findings: unknown[];
+}
+
+export interface DeliveryCandidate {
+  id: string;
+  attempt: number;
+  report: WorkReport;
+  verification: VerificationEvidence;
+  review: ReviewVerdict;
+}
+
+export interface DeliveryView {
+  id: string;
+  meetingId: string;
+  status: DeliveryStatus;
+  spec: DeliverySpec;
+  sourceRevision: string;
+  workspace: string;
+  attempt: number;
+  candidate?: DeliveryCandidate;
+  integration?: Record<string, unknown>;
+  error?: string;
+  updatedAt: number;
+}
+
+export type DeliveryDecision =
+  | { kind: 'approve-spec'; specVersion: number }
+  | { kind: 'revise-spec'; feedback: string }
+  | { kind: 'accept-delivery'; candidateId: string }
+  | { kind: 'return-delivery'; candidateId: string; feedback: string }
+  | { kind: 'cancel' };
+
+export interface DeliveryEvent {
+  deliveryId: string;
+  seq: number;
+  type: 'delivery.proposed' | 'delivery.status-changed' | 'delivery.failed' | 'delivery.accepted';
+  timestamp: number;
+  status: DeliveryStatus;
+  detail?: unknown;
+}
+
+export interface DeliveryHarnessDependencies {
+  runtime: {
+    execute(order: WorkOrder, signal: AbortSignal): Promise<WorkReport>;
+  };
+  verifier: {
+    verify(order: WorkOrder, report: WorkReport): Promise<VerificationEvidence>;
+  };
+  reviewer: {
+    review(order: WorkOrder, report: WorkReport, verification: VerificationEvidence): Promise<ReviewVerdict>;
+  };
+  integrator: {
+    integrate(view: DeliveryView, candidate: DeliveryCandidate): Promise<Record<string, unknown>>;
+  };
+  now?: () => number;
+  id?: () => string;
+}
+
+type DeliveryRecord = {
+  view: DeliveryView;
+  events: DeliveryEvent[];
+  subscribers: Set<(event: DeliveryEvent) => void>;
+  abort?: AbortController;
+};
+
+/** Authoritative delivery state machine. Agent runtimes can execute work, but
+ * only this module can advance a delivery through verification, review,
+ * acceptance, and integration. */
+export class DeliveryHarness {
+  private readonly records = new Map<string, DeliveryRecord>();
+  private readonly now: () => number;
+  private readonly id: () => string;
+
+  constructor(private readonly deps: DeliveryHarnessDependencies) {
+    this.now = deps.now ?? Date.now;
+    this.id = deps.id ?? randomUUID;
+  }
+
+  async propose(input: DeliveryProposal): Promise<DeliveryView> {
+    if (!input.objective.trim()) throw new Error('delivery objective is required');
+    if (input.acceptanceCriteria.length === 0) throw new Error('at least one acceptance criterion is required');
+    const id = this.id();
+    const view: DeliveryView = {
+      id,
+      meetingId: input.meetingId,
+      status: 'awaiting-spec-approval',
+      spec: {
+        version: 1,
+        objective: input.objective,
+        acceptanceCriteria: structuredClone(input.acceptanceCriteria),
+      },
+      sourceRevision: input.sourceRevision,
+      workspace: input.workspace,
+      attempt: 0,
+      updatedAt: this.now(),
+    };
+    const record: DeliveryRecord = { view, events: [], subscribers: new Set() };
+    this.records.set(id, record);
+    this.append(record, 'delivery.proposed');
+    return cloneView(view);
+  }
+
+  async decide(id: string, decision: DeliveryDecision): Promise<DeliveryView> {
+    const record = this.require(id);
+    switch (decision.kind) {
+      case 'approve-spec':
+        if (record.view.status !== 'awaiting-spec-approval') throw new Error('delivery is not awaiting spec approval');
+        if (decision.specVersion !== record.view.spec.version) throw new Error('spec version conflict');
+        record.view.attempt += 1;
+        this.transition(record, 'preparing-workspace');
+        void this.execute(record);
+        break;
+      case 'revise-spec':
+        if (record.view.status !== 'awaiting-spec-approval') throw new Error('delivery is not awaiting spec revision');
+        record.view.spec = {
+          ...record.view.spec,
+          version: record.view.spec.version + 1,
+          objective: `${record.view.spec.objective}\n\nRevision request: ${decision.feedback}`,
+        };
+        record.view.updatedAt = this.now();
+        break;
+      case 'accept-delivery': {
+        if (record.view.status !== 'awaiting-delivery-acceptance' || !record.view.candidate) {
+          throw new Error('delivery is not ready for acceptance');
+        }
+        if (record.view.candidate.id !== decision.candidateId) throw new Error('candidate mismatch');
+        this.transition(record, 'integrating');
+        record.view.integration = await this.deps.integrator.integrate(
+          cloneView(record.view), structuredClone(record.view.candidate),
+        );
+        this.transition(record, 'accepted', 'delivery.accepted');
+        break;
+      }
+      case 'return-delivery':
+        if (record.view.status !== 'awaiting-delivery-acceptance' || record.view.candidate?.id !== decision.candidateId) {
+          throw new Error('delivery candidate cannot be returned');
+        }
+        this.transition(record, 'reworking');
+        record.view.spec = {
+          ...record.view.spec,
+          version: record.view.spec.version + 1,
+          objective: `${record.view.spec.objective}\n\nRework feedback: ${decision.feedback}`,
+        };
+        record.view.candidate = undefined;
+        break;
+      case 'cancel':
+        record.abort?.abort();
+        this.transition(record, 'cancelled');
+        break;
+    }
+    return cloneView(record.view);
+  }
+
+  async inspect(id: string): Promise<DeliveryView> { return cloneView(this.require(id).view); }
+
+  async *observe(id: string, cursor = 0): AsyncIterable<DeliveryEvent> {
+    const record = this.require(id);
+    let nextSeq = cursor + 1;
+    while (true) {
+      const existing = record.events.find((event) => event.seq >= nextSeq);
+      if (existing) {
+        nextSeq = existing.seq + 1;
+        yield structuredClone(existing);
+        continue;
+      }
+      if (isTerminal(record.view.status)) return;
+      const event = await new Promise<DeliveryEvent>((resolve) => {
+        const listener = (incoming: DeliveryEvent) => {
+          if (incoming.seq < nextSeq) return;
+          record.subscribers.delete(listener);
+          resolve(incoming);
+        };
+        record.subscribers.add(listener);
+      });
+      nextSeq = event.seq + 1;
+      yield structuredClone(event);
+    }
+  }
+
+  private async execute(record: DeliveryRecord): Promise<void> {
+    const controller = new AbortController();
+    record.abort = controller;
+    const order = this.toWorkOrder(record.view);
+    try {
+      this.transition(record, 'executing');
+      const report = await this.deps.runtime.execute(order, controller.signal);
+      if (controller.signal.aborted) return;
+      if (report.outcome !== 'completed') throw new Error(`runtime outcome: ${report.outcome}`);
+      this.transition(record, 'verifying');
+      const verification = await this.deps.verifier.verify(order, report);
+      if (!verification.passed) throw new Error(verification.error ?? 'verification failed');
+      this.transition(record, 'reviewing');
+      const review = await this.deps.reviewer.review(order, report, verification);
+      if (!review.passed) throw new Error('independent review failed');
+      record.view.candidate = {
+        id: this.id(),
+        attempt: record.view.attempt,
+        report: structuredClone(report),
+        verification: structuredClone(verification),
+        review: structuredClone(review),
+      };
+      this.transition(record, 'awaiting-delivery-acceptance');
+    } catch (error) {
+      if (controller.signal.aborted || record.view.status === 'cancelled') return;
+      record.view.error = error instanceof Error ? error.message : String(error);
+      this.transition(record, 'failed', 'delivery.failed', record.view.error);
+    } finally {
+      if (record.abort === controller) record.abort = undefined;
+    }
+  }
+
+  private toWorkOrder(view: DeliveryView): WorkOrder {
+    return {
+      deliveryId: view.id,
+      attempt: view.attempt,
+      meetingId: view.meetingId,
+      goal: view.spec.objective,
+      acceptanceCriteria: structuredClone(view.spec.acceptanceCriteria),
+      workspace: view.workspace,
+      sourceRevision: view.sourceRevision,
+    };
+  }
+
+  private require(id: string): DeliveryRecord {
+    const record = this.records.get(id);
+    if (!record) throw new Error(`delivery not found: ${id}`);
+    return record;
+  }
+
+  private transition(
+    record: DeliveryRecord,
+    status: DeliveryStatus,
+    type: DeliveryEvent['type'] = 'delivery.status-changed',
+    detail?: unknown,
+  ): void {
+    record.view.status = status;
+    record.view.updatedAt = this.now();
+    this.append(record, type, detail);
+  }
+
+  private append(record: DeliveryRecord, type: DeliveryEvent['type'], detail?: unknown): void {
+    const event: DeliveryEvent = {
+      deliveryId: record.view.id,
+      seq: record.events.length + 1,
+      type,
+      timestamp: this.now(),
+      status: record.view.status,
+      detail,
+    };
+    record.events.push(event);
+    for (const subscriber of record.subscribers) subscriber(event);
+  }
+}
+
+function cloneView(view: DeliveryView): DeliveryView { return structuredClone(view); }
+
+function isTerminal(status: DeliveryStatus): boolean {
+  return status === 'accepted' || status === 'failed' || status === 'cancelled';
+}

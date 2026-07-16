@@ -16,6 +16,8 @@
     "**/node_modules/@openai/codex-darwin-*/**/*",
     "**/node_modules/@openai/codex-linux-*/**/*",
     "**/node_modules/@openai/codex-win32-*/**/*",
+    "**/node_modules/@qoder-ai/qodercli/**/*",
+    "**/node_modules/@lydell/node-pty-*/**/*",
     "dist/vad/**/*",
     "dist/voice-id/**/*"
   ],

@@ -1,278 +1,379 @@
-// qoder-adapter.ts — Qoder CLI backend adapter.
+// qoder-adapter.ts — Qoder Agent SDK backend adapter.
 //
-// Uses @qoder-ai/qoder-agent-sdk (TypeScript SDK) when available.
-// Falls back to subprocess spawning if the SDK is not installed.
-//
-// The Qoder SDK depends on @modelcontextprotocol/sdk for MCP tool support.
-// It is maintained by the Alibaba/Qoder team.
-//
-// npm: @qoder-ai/qoder-agent-sdk v1.0.11
-// npm: @qoder-ai/qodercli v1.0.38 (the CLI binary)
-//
-// Auth: config-based, API key via environment variable or config file.
-//       Also supports `qoder auth login` for OAuth.
+// Qoder's supported host integration is @qoder-ai/qoder-agent-sdk `query()`.
+// Do not silently fall back to guessed CLI flags: runtime protocol drift must
+// fail during the readiness handshake instead of corrupting a live meeting.
 
-import { spawn } from 'node:child_process';
-import { existsSync } from 'node:fs';
-import {
-  SubprocessBackend,
-  SubprocessSession,
-  resolveBinaryFromPath,
-} from './subprocess-backend.js';
+import type { BackendSession, BackendSessionConfig, BackendSessionEvent,
+  BackendAuthConfig, BackendCapabilities, InputPriority, NormalizedMessage,
+  UserContentBlock } from './cli-backend.js';
+import type { AutoApproveScope } from '../auto-approve-policy.js';
+import { accessSync, constants as fsConstants, existsSync, realpathSync } from 'node:fs';
+import { join } from 'node:path';
+import { resolveBinaryFromPath } from './subprocess-backend.js';
 import { mergedSubprocessEnv } from '../settings-loader.js';
-import type {
-  BackendSession,
-  BackendSessionConfig,
-  BackendSessionEvent,
-  BackendAuthConfig,
-  BackendCapabilities,
-  NormalizedMessage,
-} from './cli-backend.js';
+import { runTerminalLogin } from './terminal-login.js';
 
 const QODER_CAPABILITIES: BackendCapabilities = {
   displayName: 'Qoder',
   iconId: 'qoder',
   mcp: true,
-  permissions: false,
+  permissions: true,
   systemPrompt: true,
-  skills: false,
+  skills: true,
   interrupt: true,
   defaultModel: 'auto',
-  npmPackage: '@qoder-ai/qodercli',
-  installHint: 'npm install -g @qoder-ai/qodercli',
+  npmPackage: undefined,
+  installHint: 'Bundled with AhaMeet',
 };
 
-// ── Dynamic SDK import ─────────────────────────────────────────────────────────
-// Try to load the Qoder agent SDK. If unavailable, fall back to subprocess.
+interface QoderQuery extends AsyncIterable<unknown> {
+  initializationResult(): Promise<Record<string, unknown>>;
+  accountInfo?(): Promise<Record<string, unknown>>;
+  interrupt(): Promise<void>;
+  close(): Promise<void>;
+  setPermissionMode?(mode: string): Promise<void>;
+}
 
 interface QoderSdkModule {
-  QoderAgent?: new (options?: Record<string, unknown>) => {
-    run(prompt: string, options?: Record<string, unknown>): Promise<{
-      output: string;
-      events?: AsyncIterable<unknown>;
-    }>;
+  query(input: { prompt: AsyncIterable<unknown>; options: Record<string, unknown> }): QoderQuery;
+  qodercliAuth(): unknown;
+  accessToken(token: string): unknown;
+}
+
+type QoderBackendDeps = {
+  resolveBinary?: () => string | null;
+  loadSdk?: () => Promise<QoderSdkModule>;
+};
+
+let sdkCache: QoderSdkModule | undefined;
+async function loadQoderSdk(): Promise<QoderSdkModule> {
+  if (sdkCache) return sdkCache;
+  const mod = await import('@qoder-ai/qoder-agent-sdk');
+  sdkCache = mod as unknown as QoderSdkModule;
+  return sdkCache;
+}
+
+class AsyncInputQueue implements AsyncIterable<unknown> {
+  private values: unknown[] = [];
+  private waiters: Array<(result: IteratorResult<unknown>) => void> = [];
+  private closed = false;
+
+  push(value: unknown): void {
+    if (this.closed) return;
+    const waiter = this.waiters.shift();
+    if (waiter) waiter({ value, done: false });
+    else this.values.push(value);
+  }
+
+  close(): void {
+    if (this.closed) return;
+    this.closed = true;
+    for (const waiter of this.waiters.splice(0)) waiter({ value: undefined, done: true });
+  }
+
+  [Symbol.asyncIterator](): AsyncIterator<unknown> {
+    return {
+      next: () => {
+        if (this.values.length > 0) {
+          return Promise.resolve({ value: this.values.shift(), done: false });
+        }
+        if (this.closed) return Promise.resolve({ value: undefined, done: true });
+        return new Promise((resolve) => this.waiters.push(resolve));
+      },
+    };
+  }
+}
+
+type PendingPermission = {
+  input: Record<string, unknown>;
+  resolve: (result: Record<string, unknown>) => void;
+};
+
+class QoderSdkSession implements BackendSession {
+  private readonly input = new AsyncInputQueue();
+  private readonly permissions = new Map<string, PendingPermission>();
+  private query: QoderQuery | null = null;
+  private closed = false;
+  private ended = false;
+  private authRequiredEmitted = false;
+  private autoApproveScope: AutoApproveScope;
+
+  constructor(
+    private readonly binary: string,
+    private readonly config: BackendSessionConfig,
+    private readonly sdkLoader: () => Promise<QoderSdkModule>,
+    private emit: (event: BackendSessionEvent) => void,
+  ) {
+    this.autoApproveScope = config.autoApproveScope ?? 'off';
+  }
+
+  async start(): Promise<void> {
+    if (this.closed || this.query) return;
+    const sdk = await this.sdkLoader();
+    const env = stringEnv(this.config.env ?? mergedSubprocessEnv());
+    const token = env.QODER_PERSONAL_ACCESS_TOKEN;
+    const auth = token ? sdk.accessToken(token) : sdk.qodercliAuth();
+    const query = sdk.query({
+      prompt: this.input,
+      options: {
+        auth,
+        cwd: this.config.cwd,
+        env,
+        pathToQoderCLIExecutable: this.binary,
+        model: this.config.model && this.config.model !== 'auto' ? this.config.model : undefined,
+        systemPrompt: this.config.systemPrompt,
+        skills: this.config.skills,
+        enableFileCheckpointing: true,
+        permissionMode: 'default',
+        canUseTool: (toolName: string, input: Record<string, unknown>, options: {
+          signal: AbortSignal; toolUseID: string;
+        }) => this.requestPermission(toolName, input, options),
+        onAuthExpired: () => this.emitAuthRequired(),
+      },
+    });
+    this.query = query;
+    void this.consume(query);
+
+    const prefix = this.config.systemPrompt ? '' : 'You are a Qoder agent participating in AhaMeet.\n\n';
+    this.input.push(userMessage(`${prefix}Ready. Awaiting instructions.`, 'normal'));
+    await withTimeout(query.initializationResult(), 15_000, 'Qoder SDK readiness handshake timed out');
+  }
+
+  private async consume(query: QoderQuery): Promise<void> {
+    try {
+      for await (const raw of query) {
+        if (this.closed) break;
+        const event = raw as Record<string, unknown>;
+        if (event.type === 'assistant') {
+          const message = normalizeQoderMessage(event);
+          if (message) this.emit({ kind: 'message', message });
+        } else if (event.type === 'result' && event.subtype !== 'success') {
+          const detail = resultError(event);
+          if (/auth|unauthorized|\b401\b/i.test(detail)) this.emitAuthRequired();
+          else this.emit({ kind: 'error', error: `Qoder execution failed: ${detail}` });
+        }
+      }
+      if (!this.closed) this.emitEnded();
+    } catch (error) {
+      if (!this.closed) {
+        const detail = error instanceof Error ? error.message : String(error);
+        if (/auth|unauthorized|\b401\b/i.test(detail)) this.emitAuthRequired();
+        else this.emit({ kind: 'error', error: `Qoder SDK error: ${detail}` });
+        this.emitEnded();
+      }
+    }
+  }
+
+  private requestPermission(
+    toolName: string,
+    input: Record<string, unknown>,
+    options: { signal: AbortSignal; toolUseID: string },
+  ): Promise<Record<string, unknown>> {
+    if (this.closed) return Promise.resolve({
+      behavior: 'deny', message: 'Session closed', toolUseID: options.toolUseID,
+    });
+    // Existing AhaMeet auto-approve policy remains separate from orchestration.
+    // Only the explicit broad scopes skip the renderer prompt here.
+    if (this.autoApproveScope === 'all') {
+      return Promise.resolve({ behavior: 'allow', updatedInput: input, toolUseID: options.toolUseID });
+    }
+    return new Promise((resolve) => {
+      this.permissions.set(options.toolUseID, { input, resolve });
+      options.signal.addEventListener('abort', () => {
+        if (!this.permissions.delete(options.toolUseID)) return;
+        resolve({ behavior: 'deny', message: 'Permission request cancelled', toolUseID: options.toolUseID });
+      }, { once: true });
+      this.emit({
+        kind: 'permission-request',
+        id: options.toolUseID,
+        toolName,
+        input,
+        toolUseID: options.toolUseID,
+      });
+    });
+  }
+
+  sendUserText(text: string, priority: InputPriority = 'normal'): void {
+    if (!text || this.closed || this.authRequiredEmitted) return;
+    this.input.push(userMessage(text, priority));
+  }
+
+  sendUserContent(content: string | UserContentBlock[], priority: InputPriority = 'normal'): void {
+    if (typeof content === 'string') return this.sendUserText(content, priority);
+    if (this.closed || this.authRequiredEmitted || content.length === 0) return;
+    this.input.push({
+      type: 'user', parent_tool_use_id: null, priority: qoderPriority(priority),
+      message: { role: 'user', content },
+    });
+  }
+
+  resolvePermission(id: string, decision: 'allow' | 'deny', message?: string): void {
+    const pending = this.permissions.get(id);
+    if (!pending) return;
+    this.permissions.delete(id);
+    pending.resolve(decision === 'allow'
+      ? { behavior: 'allow', updatedInput: pending.input, toolUseID: id }
+      : { behavior: 'deny', message: message ?? 'Denied by user', toolUseID: id });
+  }
+
+  async interrupt(): Promise<void> { await this.query?.interrupt(); }
+  setAutoApproveScope(scope: AutoApproveScope): void { this.autoApproveScope = scope; }
+  async setPermissionMode(mode: string): Promise<void> { await this.query?.setPermissionMode?.(mode); }
+
+  end(): void {
+    if (this.closed) return;
+    this.closed = true;
+    this.input.close();
+    for (const [id, pending] of this.permissions) {
+      pending.resolve({ behavior: 'deny', message: 'Session closed', toolUseID: id });
+    }
+    this.permissions.clear();
+    void this.query?.close().catch(() => undefined);
+    this.emitEnded();
+  }
+
+  private emitAuthRequired(): void {
+    if (this.authRequiredEmitted || this.closed) return;
+    this.authRequiredEmitted = true;
+    this.emit({ kind: 'auth-required', error: 'Qoder 登录已失效，请重新认证后重连。' });
+  }
+
+  private emitEnded(): void {
+    if (this.ended) return;
+    this.ended = true;
+    this.emit({ kind: 'ended' });
+  }
+}
+
+function userMessage(text: string, priority: InputPriority): Record<string, unknown> {
+  return {
+    type: 'user', parent_tool_use_id: null, priority: qoderPriority(priority),
+    message: { role: 'user', content: [{ type: 'text', text }] },
   };
 }
 
-let qoderSdkCache: QoderSdkModule | null | undefined;
+function qoderPriority(priority: InputPriority): 'now' | 'next' | 'later' {
+  return priority === 'high' ? 'now' : priority === 'low' ? 'later' : 'next';
+}
 
-async function loadQoderSdk(): Promise<QoderSdkModule | null> {
-  if (qoderSdkCache !== undefined) return qoderSdkCache;
+function stringEnv(env: NodeJS.ProcessEnv): Record<string, string> {
+  return Object.fromEntries(Object.entries(env).filter((entry): entry is [string, string] =>
+    typeof entry[1] === 'string'));
+}
+
+function normalizeQoderMessage(event: Record<string, unknown>): NormalizedMessage | null {
+  const message = event.message;
+  if (!message || typeof message !== 'object') return null;
+  return { type: 'assistant', message: message as NormalizedMessage['message'], raw: event };
+}
+
+function resultError(event: Record<string, unknown>): string {
+  if (Array.isArray(event.errors)) return event.errors.map(String).join('; ');
+  if (typeof event.result === 'string') return event.result;
+  return typeof event.subtype === 'string' ? event.subtype : 'unknown error';
+}
+
+async function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
   try {
-    const mod = await import('@qoder-ai/qoder-agent-sdk');
-    qoderSdkCache = mod as unknown as QoderSdkModule;
-    return qoderSdkCache;
-  } catch {
-    qoderSdkCache = null;
-    return null;
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error(message)), ms); }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
   }
 }
 
-// ── Qoder JSONL event shapes ───────────────────────────────────────────────────
-
-interface QoderStreamEvent {
-  type?: string;
-  role?: string;
-  content?: string | Array<{ type: string; text?: string; name?: string; input?: unknown }>;
-  tool_calls?: Array<{ id: string; name: string; input: Record<string, unknown> }>;
-  tool_result?: { tool_use_id: string; content: string; is_error?: boolean };
-  finish_reason?: string;
-  error?: { message: string; code?: string };
-}
-
-// ── Subprocess session ─────────────────────────────────────────────────────────
-
-class QoderSubprocessSession extends SubprocessSession {
-  protected buildArgs(config: BackendSessionConfig): string[] {
-    const args: string[] = [];
-
-    // Qoder CLI flags (best-effort based on common CLI patterns)
-    if (config.model) {
-      args.push('--model', config.model);
-    }
-
-    // Non-interactive / print mode
-    args.push('--print');
-
-    // JSON output
-    args.push('--output-format', 'stream-json');
-
-    // Working directory
-    if (config.cwd) {
-      args.push('--cwd', config.cwd);
-    }
-
-    return args;
-  }
-
-  protected formatPrompt(config: BackendSessionConfig): string {
-    const prefix = config.systemPrompt ? `${config.systemPrompt}\n\n---\n\n` : '';
-    return prefix + 'Ready for instructions.';
-  }
-
-  protected parseStdoutLine(line: string): NormalizedMessage | null {
-    let event: QoderStreamEvent;
-    try {
-      event = JSON.parse(line);
-    } catch {
-      return null;
-    }
-
-    if (event.error) {
-      return {
-        type: 'assistant',
-        errorCode: event.error.code ?? 'qoder_error',
-        errorDetail: event.error.message,
-        message: {
-          role: 'assistant',
-          content: [{ type: 'text', text: `Error: ${event.error.message}` }],
-        },
-      };
-    }
-
-    // Tool results
-    if (event.tool_result) {
-      return {
-        type: 'assistant',
-        message: {
-          role: 'assistant',
-          content: [{
-            type: 'tool_result',
-            tool_use_id: event.tool_result.tool_use_id,
-            content: event.tool_result.content,
-            is_error: event.tool_result.is_error,
-          }],
-        },
-        raw: event,
-      };
-    }
-
-    // Extract text content
-    let text = '';
-    if (typeof event.content === 'string') {
-      text = event.content;
-    } else if (Array.isArray(event.content)) {
-      text = event.content
-        .filter((b) => b.type === 'text' && b.text)
-        .map((b) => b.text!)
-        .join('');
-    }
-
-    // Tool calls
-    const toolBlocks = (event.tool_calls ?? []).map((tc) => ({
-      type: 'tool_use' as const,
-      id: tc.id,
-      name: tc.name,
-      input: typeof tc.input === 'string' ? safeJsonParse(tc.input) : (tc.input ?? {}),
-    }));
-
-    const content: NormalizedMessage['message'] = {
-      role: 'assistant',
-      content: [
-        ...(text ? [{ type: 'text' as const, text }] : []),
-        ...toolBlocks,
-      ],
-    };
-
-    return {
-      type: 'assistant',
-      message: content,
-      raw: event,
-    };
-  }
-}
-
-function safeJsonParse(s: string): Record<string, unknown> {
-  try {
-    return JSON.parse(s);
-  } catch {
-    return { raw: s };
-  }
-}
-
-// ── Backend implementation ─────────────────────────────────────────────────────
-
-export class QoderBackend extends SubprocessBackend {
+export class QoderBackend {
   readonly id = 'qoder';
   readonly capabilities = QODER_CAPABILITIES;
   readonly binaryName = 'qodercli';
 
-  resolveBinary(): string | null {
-    // Try qodercli first (the actual CLI agent binary)
-    const qodercli = resolveBinaryFromPath('qodercli');
-    if (qodercli) return qodercli;
+  constructor(private readonly deps: QoderBackendDeps = {}) {}
 
-    // Fallback to qoder (but this might be the IDE launcher)
-    return resolveBinaryFromPath('qoder');
+  resolveBinary(): string | null {
+    if (this.deps.resolveBinary) return this.deps.resolveBinary();
+    return resolveQoderRuntime();
   }
 
-  createSession(
-    config: BackendSessionConfig,
-    emit: (e: BackendSessionEvent) => void,
-  ): BackendSession {
+  createSession(config: BackendSessionConfig, emit: (event: BackendSessionEvent) => void): BackendSession {
     const binary = this.resolveBinary();
     if (!binary) {
-      emit({ kind: 'error', error: 'Qoder CLI not found. Install with: npm install -g @qoder-ai/qodercli' });
+      emit({ kind: 'error', error: 'Bundled Qoder CLI is unavailable. Reinstall AhaMeet or select a compatible system runtime.' });
       emit({ kind: 'ended' });
-      return {
-        start() {},
-        end() {},
-        sendUserText() {},
-        sendUserContent() {},
-        resolvePermission() {},
-        async interrupt() {},
-      };
+      return noopSession();
     }
-    return new QoderSubprocessSession(binary, config, emit);
+    return new QoderSdkSession(binary, config, this.deps.loadSdk ?? loadQoderSdk, emit);
   }
 
   buildEnv(auth: BackendAuthConfig, extra?: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
-    const env = super.buildEnv(auth, extra);
-    if (auth.apiKey) {
-      // Qoder uses a generic API key env var
-      env.QODER_API_KEY = auth.apiKey;
-    }
-    if (auth.baseUrl) {
-      env.QODER_BASE_URL = auth.baseUrl;
-    }
+    const env = { ...mergedSubprocessEnv(), ...extra };
+    if (auth.apiKey) env.QODER_PERSONAL_ACCESS_TOKEN = auth.apiKey;
+    if (auth.baseUrl) env.QODER_BASE_URL = auth.baseUrl;
     return env;
   }
 
   async validateAuth(config: BackendAuthConfig): Promise<{ ok: boolean; error?: string }> {
-    if (config.authMode === 'apikey' && !config.apiKey) {
-      return { ok: false, error: 'API key is required for Qoder' };
-    }
-    return { ok: true };
+    return config.authMode === 'apikey' && !config.apiKey
+      ? { ok: false, error: 'QODER_PERSONAL_ACCESS_TOKEN is required' }
+      : { ok: true };
   }
 
   async checkAuthStatus(): Promise<{ loggedIn: boolean }> {
-    // Qoder is "logged in" if the binary is available OR an API key is set
     const binary = this.resolveBinary();
-    return { loggedIn: binary !== null };
+    if (!binary) return { loggedIn: false };
+    let query: QoderQuery | undefined;
+    try {
+      const sdk = await (this.deps.loadSdk ?? loadQoderSdk)();
+      async function* noInput(): AsyncGenerator<never> { /* initialization only */ }
+      query = sdk.query({
+        prompt: noInput(),
+        options: {
+          auth: sdk.qodercliAuth(),
+          pathToQoderCLIExecutable: binary,
+          env: stringEnv(mergedSubprocessEnv()),
+        },
+      });
+      await withTimeout(query.initializationResult(), 10_000, 'auth probe timeout');
+      const account = await query.accountInfo?.();
+      return { loggedIn: Boolean(account && Object.keys(account).length > 0) };
+    } catch {
+      return { loggedIn: false };
+    } finally {
+      await query?.close().catch(() => undefined);
+    }
   }
 
   async loginOAuth(): Promise<{ ok: boolean; error?: string }> {
     const binary = this.resolveBinary();
-    if (!binary) {
-      return { ok: false, error: 'Qoder CLI not found. Install it first.' };
-    }
-    return new Promise<{ ok: boolean; error?: string }>((resolve) => {
-      const env = mergedSubprocessEnv();
-      const proc = spawn(binary, ['auth', 'login'], {
-        env,
-        stdio: 'ignore',
-        detached: false,
-      });
-      proc.on('error', (err: Error) => {
-        resolve({ ok: false, error: err.message });
-      });
-      proc.on('close', (code: number | null) => {
-        if (code === 0) {
-          resolve({ ok: true });
-        } else {
-          resolve({ ok: false, error: `qoder auth login exited with code ${code}` });
-        }
-      });
-    });
+    if (!binary) return { ok: false, error: 'Bundled Qoder CLI is unavailable. Reinstall AhaMeet.' };
+    return runTerminalLogin(binary, ['login'], () => this.checkAuthStatus());
   }
+}
+
+/** Resolve an OS-executable path rather than an ASAR virtual path. The Qoder
+ * SDK accepts this through pathToQoderCLIExecutable. */
+export function resolveQoderRuntime(
+  resourcesPath = process.resourcesPath,
+  resolveSystem: () => string | null = () => resolveBinaryFromPath('qodercli'),
+): string | null {
+  const candidates = [
+    resourcesPath ? join(resourcesPath, 'app.asar.unpacked', 'node_modules', '@qoder-ai', 'qodercli', 'bundle', 'qodercli.js') : '',
+    join(process.cwd(), 'node_modules', '@qoder-ai', 'qodercli', 'bundle', 'qodercli.js'),
+    resolveSystem() ?? '',
+  ];
+  for (const candidate of candidates) {
+    if (!candidate || !existsSync(candidate)) continue;
+    try {
+      accessSync(candidate, fsConstants.X_OK);
+      return realpathSync(candidate);
+    } catch { /* continue */ }
+  }
+  return null;
+}
+
+function noopSession(): BackendSession {
+  return { start() {}, end() {}, sendUserText() {}, sendUserContent() {}, resolvePermission() {}, async interrupt() {} };
 }
