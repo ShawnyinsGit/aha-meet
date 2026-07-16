@@ -24,7 +24,7 @@ cross-origin isolation, and final DMG verification.
 - Renderer TypeScript: pass
 - Electron TypeScript: pass
 - Production build: pass
-- Node tests: 104/104 pass
+- Node tests: 105/105 pass
 - Packaged Codex runtime resolver regression: pass
 - MeetingCommand authorization regression: pass
 - Workspace isolation tests: Git worktree + non-Git path lock pass
@@ -75,6 +75,9 @@ cross-origin isolation, and final DMG verification.
   checkpoints. Kimi auth status includes a real ACP session handshake.
 - Kimi ACP workspace reads resolve symlinks before enforcing the workspace
   boundary, and first-turn system instructions also apply to multimodal input.
+- Packaged Whisper points `GGML_BACKEND_PATH` at its bundled baseline Apple
+  Silicon CPU plugin and refreshes the complete native dependency closure on every macOS build;
+  a synthesized Mandarin clip transcribed as “你好，今天我们测试语音识别。”.
 - Removed vulnerable XLSX/PPTX in-process preview dependencies; system-open fallback remains.
 
 ## Formal release checks still open
