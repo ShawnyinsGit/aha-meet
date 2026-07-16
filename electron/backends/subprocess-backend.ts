@@ -294,7 +294,15 @@ function getStandardBinDirs(): string[] {
   }
   const dirs = ['/usr/local/bin', '/opt/homebrew/bin'];
   if (home) {
-    dirs.push(`${home}/.local/bin`, `${home}/.bin`, `${home}/bin`);
+    dirs.push(
+      `${home}/.local/bin`,
+      `${home}/.bin`,
+      `${home}/bin`,
+      // Canonical location used by the current Kimi Code installer. Finder-
+      // launched .app processes do not source ~/.zshrc, so this must be an
+      // explicit candidate rather than relying on the user's interactive PATH.
+      `${home}/.kimi-code/bin`,
+    );
     // npm global bin when the user has a custom prefix (~/.npm-global is the
     // most common convention; also covers npmrc `prefix` set to ~/.npm-global).
     dirs.push(`${home}/.npm-global/bin`);
@@ -393,6 +401,7 @@ export function resolveBinaryFromPath(binaryName: string): string | null {
       `${home}/.local/bin/${binaryName}`,
       `${home}/.bin/${binaryName}`,
       `${home}/bin/${binaryName}`,
+      `${home}/.kimi-code/bin/${binaryName}`,
       // npm global bin when user has custom prefix (~/.npm-global)
       `${home}/.npm-global/bin/${binaryName}`,
       // Homebrew npm global installs on Apple Silicon

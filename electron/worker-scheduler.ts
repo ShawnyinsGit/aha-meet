@@ -636,6 +636,15 @@ export class WorkerScheduler {
           // about it.
           this.queueWorkerUpdate(handle, `[${handle.id}] turn complete`);
         }
+      } else if (e.kind === 'auth-required') {
+        this.opts.emit({
+          source: 'talker',
+          event: { kind: 'worker-ended', workerId, status: 'failed', summary: e.error },
+        });
+        this.harvestUnresolvedAddenda(handle);
+        this.disposeWorker(handle, 'failed', e.error);
+        this.emitPlanUpdate();
+        this.cascadeFailure(workerId);
       } else if (e.kind === 'ended') {
         // SDK stream ended. Two paths land here:
         //   1. Worker reported task_done → markTaskDone already disposed the
@@ -920,12 +929,16 @@ export class WorkerScheduler {
       handle.flushTimer = null;
     }
     if (handle.session) {
+      // Clear the reference before end(): some adapters emit `ended`
+      // synchronously, which would otherwise re-enter disposeWorker and call
+      // end repeatedly on the same session.
+      const session = handle.session;
+      handle.session = null;
       try {
-        handle.session.end();
+        session.end();
       } catch (err) {
         console.warn(`[scheduler] worker.end() threw for ${handle.id}:`, err);
       }
-      handle.session = null;
     }
     handle.bufferedUpdates = [];
     handle.queuedAddenda = [];

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, shell, systemPreferences, nativeTheme } from 'electron';
+import { app, BrowserWindow, dialog, shell, nativeTheme } from 'electron';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import type { AutoApproveScope } from './auto-approve-policy.js';
@@ -7,6 +7,7 @@ import { flushSettingsWrites } from './store.js';
 import { registerCustomBackends } from './backends/registry.js';
 import type { IpcContext, IpcEmittedEvent } from './ipc/context.js';
 import { BrowserTabManager } from './browser-tab-manager.js';
+import { requestMicrophoneAccess } from './microphone-access.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -438,6 +439,17 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
 
   createWindow();
 
+  // Wait until the first renderer is visible before asking. Calling the macOS
+  // permission API earlier can leave the sheet behind the opening window and
+  // makes a first install look as if no native prompt was shown.
+  mainWindow?.webContents.once('did-finish-load', () => {
+    void requestMicrophoneAccess(false).then((granted) => {
+      console.log('[mic-permission] first-window request result:', granted);
+    }).catch((err) => {
+      console.warn('[mic-permission] first-window request failed:', err);
+    });
+  });
+
   // Kick the whisper.cpp HTTP server off the launch critical path.
   import('./whisper-server.js').then(({ startWhisperServer }) => {
     void startWhisperServer().then((r) => {
@@ -446,13 +458,6 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
   }).catch((err) => {
     console.error('[main] whisper-server import failed:', err);
   });
-
-  // Prompt for microphone access at launch.
-  if (process.platform === 'darwin') {
-    void systemPreferences.askForMediaAccess('microphone').then((granted) => {
-      console.log('[mic-permission] launch-time request result:', granted);
-    });
-  }
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();

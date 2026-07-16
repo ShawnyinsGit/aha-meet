@@ -217,6 +217,19 @@ export function BackendSettings() {
     }
   }, [reload]);
 
+  const handleCheckAuth = useCallback(async (backendId: string) => {
+    setLoginStatus((s) => ({ ...s, [backendId]: 'pending' }));
+    const result = await window.vibeMeet.backendAuth.checkStatus(backendId);
+    if (result.ok && result.loggedIn) {
+      setLoginStatus((s) => ({ ...s, [backendId]: 'done' }));
+      setLoginError((e) => { const next = { ...e }; delete next[backendId]; return next; });
+      await reload();
+    } else {
+      setLoginStatus((s) => ({ ...s, [backendId]: 'error' }));
+      setLoginError((e) => ({ ...e, [backendId]: result.error ?? '尚未检测到有效登录，请先在 Terminal 完成认证。' }));
+    }
+  }, [reload]);
+
   // Custom backend form handlers
   const handleCustomFormChange = useCallback((field: keyof CustomBackendFormData, value: string) => {
     setCustomForm((prev) => ({ ...prev, [field]: value }));
@@ -298,7 +311,7 @@ export function BackendSettings() {
       {/* Tab bar */}
       <div className="backend-tabs" role="tablist" aria-label="后端选择">
         {backends.map((b) => {
-          const hasAuth = b.hasApiKey || b.authMode !== 'none';
+          const hasAuth = b.loggedIn;
           const isActive = b.id === activeTab;
           const isCustom = b.id.startsWith('custom-');
           return (
@@ -492,6 +505,7 @@ export function BackendSettings() {
           onSetDefault={() => handleSetDefault(activeBackend.id)}
           onInstall={() => handleInstall(activeBackend.id)}
           onLoginOAuth={() => handleLoginOAuth(activeBackend.id)}
+          onCheckAuth={() => handleCheckAuth(activeBackend.id)}
           onAvatarChange={(dataUrl) => handleSetAvatar(activeBackend.id, dataUrl)}
           onKeyDown={(e) => handleKeyDown(e, activeBackend.id)}
         />
@@ -515,6 +529,7 @@ interface BackendCardProps {
   onSetDefault: () => void;
   onInstall: () => void;
   onLoginOAuth: () => void;
+  onCheckAuth: () => void;
   onAvatarChange: (dataUrl: string | null) => void;
   onKeyDown: (e: React.KeyboardEvent) => void;
 }
@@ -534,10 +549,11 @@ function BackendCard({
   onSetDefault,
   onInstall,
   onLoginOAuth,
+  onCheckAuth,
   onAvatarChange,
   onKeyDown,
 }: BackendCardProps) {
-  const hasAuth = b.hasApiKey || b.authMode !== 'none';
+  const hasAuth = b.loggedIn;
   const avatarInputRef = useRef<HTMLInputElement>(null);
 
   const handleAvatarFile = useCallback((file: File) => {
@@ -688,7 +704,7 @@ function BackendCard({
             <div className="backend-field">
               <label className="backend-field-label">
                 OAuth 登录
-                {b.authMode === 'oauth' && <span className="backend-status-dot status-ok" style={{ marginLeft: 6 }} />}
+                {b.loggedIn && <span className="backend-status-dot status-ok" style={{ marginLeft: 6 }} />}
               </label>
               <button
                 type="button"
@@ -698,8 +714,17 @@ function BackendCard({
               >
                 {loginStatus === 'pending' ? '正在打开浏览器…'
                   : loginStatus === 'done' ? '已登录 ✓'
-                  : b.authMode === 'oauth' ? '重新认证'
+                  : b.loggedIn ? '重新认证'
                   : `使用 ${b.displayName} 登录`}
+              </button>
+              <button
+                type="button"
+                className="backend-btn backend-btn-sm"
+                onClick={onCheckAuth}
+                disabled={loginStatus === 'pending'}
+                style={{ marginLeft: 8 }}
+              >
+                检查登录状态
               </button>
               {loginStatus === 'error' && loginError && (
                 <div className="backend-settings-error" style={{ marginTop: 4, fontSize: 12 }}>✕ {loginError}</div>

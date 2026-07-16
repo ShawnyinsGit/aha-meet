@@ -48,6 +48,7 @@ export interface WorkerDeliveryFile {
 export type RendererEvent =
   | { kind: 'message'; message: any; source?: AgentSource; sessionId?: string; hostId?: string }
   | { kind: 'permission-request'; id: string; toolName: string; input: Record<string, unknown>; toolUseID: string; source?: AgentSource; sessionId?: string; hostId?: string }
+  | { kind: 'auth-required'; error: string; source?: AgentSource; sessionId?: string; hostId?: string }
   | { kind: 'error'; error: string; source?: AgentSource; sessionId?: string; hostId?: string }
   | { kind: 'ended'; source?: AgentSource; sessionId?: string; hostId?: string }
   | { kind: 'worker-spawned'; workerId: string; title: string; deps: string[]; specialty: WorkerSpecialty; source?: AgentSource; sessionId?: string; hostId?: string }
@@ -138,6 +139,8 @@ export interface BackendInfo {
   hasApiKey: boolean;
   /** Whether an auth entry exists for this backend at all. */
   hasAuthEntry: boolean;
+  /** Result of the backend's live credential probe. */
+  loggedIn: boolean;
   baseUrl: string | null;
   model: string | null;
   defaultModel: string | null;

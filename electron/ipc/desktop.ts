@@ -1,6 +1,7 @@
 import { ipcMain, app, desktopCapturer, systemPreferences, shell, session } from 'electron';
 import * as os from 'os';
 import { errorMessage } from '../format-error.js';
+import { requestMicrophoneAccess } from '../microphone-access.js';
 
 function isMacOS14Plus(): boolean {
   if (process.platform !== 'darwin') return false;
@@ -85,10 +86,6 @@ export function registerDesktopIpc(): void {
   });
 
   ipcMain.handle('mic:request-permission', async () => {
-    if (process.platform !== 'darwin') return true;
-    // askForMediaAccess shows the macOS native permission dialog when status is
-    // 'not-determined', and returns false immediately if already denied (the user
-    // must change it in System Settings). Returns true if already granted.
-    return systemPreferences.askForMediaAccess('microphone');
+    return requestMicrophoneAccess(true);
   });
 }

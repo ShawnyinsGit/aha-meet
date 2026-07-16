@@ -75,6 +75,7 @@ export class HostGroup {
   readonly backendId: string;
 
   private host: BackendSession | null = null;
+  private suppressUnexpectedHostEnd = false;
   private scheduler: WorkerScheduler;
   private emit: (e: OrchestratorEvent) => void;
   private cwd: string;
@@ -211,7 +212,10 @@ export class HostGroup {
 
     await this.host.start();
 
-    if (greeting) {
+    // The session may have been torn down (e.g. orchestrator.end() racing with
+    // a slow backend handshake). If so, skip the greeting — sending to a null
+    // host would throw a confusing TypeError.
+    if (this.host && greeting) {
       this.host.sendUserText(greeting, 'normal');
     }
   }
@@ -263,8 +267,22 @@ export class HostGroup {
   }
 
   private onHostEvent(e: SessionEvent) {
+    if (e.kind === 'auth-required') {
+      // Authentication failure is an intentional circuit-breaker, not a
+      // subprocess crash. Stop routing new turns and preserve existing workers.
+      this.suppressUnexpectedHostEnd = true;
+      this.host?.end();
+      this.host = null;
+      this.taggedEmit({ source: 'talker', event: e });
+      return;
+    }
     if (e.kind === 'ended') this.host = null;
     this.taggedEmit({ source: 'talker', event: e });
+
+    if (e.kind === 'ended' && this.suppressUnexpectedHostEnd) {
+      this.suppressUnexpectedHostEnd = false;
+      return;
+    }
 
     if (e.kind === 'ended' && !this.isClosed()) {
       this.taggedEmit({

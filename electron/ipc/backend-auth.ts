@@ -83,8 +83,12 @@ export function registerBackendAuthIpc(): void {
     const authEntries = listBackendAuth();
     const defaultBackend = getSettings().defaultBackend ?? 'claude-code';
 
-    const result = registry.listWithStatus().map(({ backend, available, binaryPath }) => {
+    const result = await Promise.all(registry.listWithStatus().map(async ({ backend, available, binaryPath }) => {
       const auth = authEntries.find((e) => e.backendId === backend.id);
+      let loggedIn = Boolean(auth?.apiKey);
+      if (!loggedIn && available && backend.checkAuthStatus) {
+        try { loggedIn = (await backend.checkAuthStatus()).loggedIn; } catch { loggedIn = false; }
+      }
       return {
         id: backend.id,
         displayName: backend.capabilities.displayName,
@@ -94,6 +98,7 @@ export function registerBackendAuthIpc(): void {
         authMode: auth?.authMode ?? 'none',
         hasApiKey: Boolean(auth?.apiKey),
         hasAuthEntry: Boolean(auth),
+        loggedIn,
         baseUrl: auth?.baseUrl ?? null,
         model: auth?.model ?? null,
         defaultModel: backend.capabilities.defaultModel ?? null,
@@ -104,7 +109,7 @@ export function registerBackendAuthIpc(): void {
         supportsPermissions: backend.capabilities.permissions,
         customAvatar: auth?.customAvatar ?? null,
       };
-    });
+    }));
 
     return result;
   });
@@ -420,7 +425,16 @@ export function registerBackendAuthIpc(): void {
         child.on('close', (code) => {
           activeInstall = null;
           if (code === 0) {
-            resolve({ ok: true });
+            const installedBinary = backend.resolveBinary();
+            if (installedBinary) {
+              sendProgress(`\n✓ Runtime ready: ${installedBinary}\n`);
+              resolve({ ok: true });
+            } else {
+              resolve({
+                ok: false,
+                error: '安装程序已结束，但应用仍找不到 CLI。请重启应用后重试。',
+              });
+            }
           } else {
             resolve({ ok: false, error: `Install exited with code ${code}` });
           }

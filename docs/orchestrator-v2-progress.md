@@ -22,7 +22,7 @@ Packaged Codex runtime: resolve a real executable outside ASAR, preserve the rea
 - Renderer TypeScript: pass
 - Electron TypeScript: pass
 - Production build: pass
-- Node tests: 31/31 pass
+- Node tests: 38/38 pass
 - Packaged Codex runtime resolver regression: pass
 - MeetingCommand authorization regression: pass
 - Workspace isolation tests: Git worktree + non-Git path lock pass
@@ -31,8 +31,8 @@ Packaged Codex runtime: resolve a real executable outside ASAR, preserve the rea
 - Final packaged app startup smoke: pass
 - DMG checksum verification: pass
 - Packaged app 10-second startup smoke: pass
-- DMG: `release/AhaMeet-0.15.0-arm64.dmg`
-- SHA-256: `1fc342dc4ee7c45fcf126a91de3051cf73f1cdb34d86aac4786268a746cb895e`
+- DMG: `release/AhaMeet-0.15.1-arm64.dmg`
+- SHA-256: `7e52ef9e1f987cfa07185f0f397dec7a73d3d206d6648498c766580884e7100c`
 
 ## Implemented
 
@@ -50,6 +50,8 @@ Packaged Codex runtime: resolve a real executable outside ASAR, preserve the rea
 - Coordinator failover prompt, Host reconnect, interrupted-task recovery snapshots.
 - Git worktree isolation and non-Git declared path locks.
 - Non-Git overlapping path locks now serialize pending tasks instead of failing them.
+- Codex `meeting-command` frames are consumed at the Adapter boundary; `speak` no longer duplicates or leaks JSON into chat.
+- First-window macOS microphone consent and denied-state native recovery dialog are covered by regression tests.
 - Removed vulnerable XLSX/PPTX in-process preview dependencies; system-open fallback remains.
 
 ## Formal release checks still open

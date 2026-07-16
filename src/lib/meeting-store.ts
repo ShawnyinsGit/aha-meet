@@ -1148,6 +1148,21 @@ class MeetingStore {
       });
       return;
     }
+    if (e.kind === 'auth-required') {
+      this.updateWorker(slot, source, (w) => ({
+        ...w,
+        status: 'idle',
+        endedAt: Date.now(),
+        activity: appendCapped(
+          w.activity,
+          [{ id: uid(), kind: 'error', title: '需要重新登录', detail: e.error, ts: Date.now(), source }],
+          MAX_ACTIVITY,
+        ),
+      }), e.hostId);
+      this.mutateSlot(slot.id, (s) => ({ ...s, running: false, lastError: e.error }));
+      this.bumpUnread(slot);
+      return;
+    }
     if (e.kind === 'error') {
       this.updateWorker(slot, source, (w) => ({
         ...w,

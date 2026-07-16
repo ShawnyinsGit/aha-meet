@@ -28,3 +28,11 @@ test('rejects malformed actor and oversized command input', () => {
   assert.equal(result.ok, false);
   assert.equal(result.code, 'invalid-command');
 });
+
+test('rejects empty speak commands', () => {
+  const result = authorizeMeetingCommand({ kind: 'speak', text: '' }, {
+    hostId: 'default', role: 'coordinator',
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'invalid-command');
+});

@@ -19,7 +19,7 @@
 // Auth: apiKey in CodexOptions or OPENAI_API_KEY env var.
 //       Also supports `codex auth login` for ChatGPT Plus/Pro OAuth.
 
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { accessSync, constants as fsConstants, existsSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import type {
@@ -36,6 +36,7 @@ import type {
 } from './cli-backend.js';
 import { resolveBinaryFromPath } from './subprocess-backend.js';
 import { mergedSubprocessEnv } from '../settings-loader.js';
+import { runTerminalLogin } from './terminal-login.js';
 
 const CODEX_CAPABILITIES: BackendCapabilities = {
   displayName: 'Codex',
@@ -127,6 +128,7 @@ class CodexSession implements BackendSession {
   private binaryPath: string | null;
   private currentAbort: AbortController | null = null;
   private meetingCommandHandler?: (command: unknown) => Promise<unknown> | unknown;
+  private authRequiredEmitted = false;
 
   constructor(
     binaryPath: string | null,
@@ -199,9 +201,10 @@ class CodexSession implements BackendSession {
       }
     } catch (err: unknown) {
       if (!this.closed) {
-        this.emit({ kind: 'error', error: `Codex stream error: ${String(err)}` });
+        if (isCodexAuthError(String(err))) this.emitAuthRequired();
+        else this.emit({ kind: 'error', error: `Codex stream error: ${String(err)}` });
       }
-      if (!this.closed) throw err;
+      if (!this.closed && !isCodexAuthError(String(err))) throw err;
     } finally {
       this.currentAbort = null;
     }
@@ -212,6 +215,10 @@ class CodexSession implements BackendSession {
       case 'item.completed':
         return this.normalizeItem(event.item);
       case 'turn.failed':
+        if (isCodexAuthError(event.error?.message ?? '')) {
+          this.emitAuthRequired();
+          return null;
+        }
         return {
           type: 'assistant',
           errorCode: 'codex_turn_failed',
@@ -236,15 +243,21 @@ class CodexSession implements BackendSession {
 
     switch (item.type) {
       case 'agent_message':
-        this.dispatchMeetingCommands(item.text ?? '');
-        return {
-          type: 'assistant',
-          message: {
-            role: 'assistant',
-            content: [{ type: 'text', text: item.text ?? '' }],
-          },
-          raw: item,
-        };
+        {
+          const { visibleText, hasSpeakCommand } = this.dispatchMeetingCommands(item.text ?? '');
+          // `speak` is rendered by Orchestrator.narrateAssistantLine(). Emitting
+          // the agent message as well would show the same sentence twice and
+          // leak the fenced protocol payload into the chat transcript.
+          if (!visibleText || hasSpeakCommand) return null;
+          return {
+            type: 'assistant',
+            message: {
+              role: 'assistant',
+              content: [{ type: 'text', text: visibleText }],
+            },
+            raw: item,
+          };
+        }
 
       case 'command_execution':
         return {
@@ -303,6 +316,10 @@ class CodexSession implements BackendSession {
         };
 
       case 'error':
+        // Codex emits a generic item error immediately before turn.failed.
+        // The latter contains the actionable detail, so displaying both
+        // creates the repeated "Error: Item error" noise seen in chat.
+        if (!item.error || item.error === 'Item error') return null;
         return {
           type: 'assistant',
           errorCode: 'codex_item_error',
@@ -318,19 +335,36 @@ class CodexSession implements BackendSession {
     }
   }
 
-  private dispatchMeetingCommands(text: string): void {
-    if (!this.meetingCommandHandler) return;
+  private emitAuthRequired(): void {
+    if (this.authRequiredEmitted) return;
+    this.authRequiredEmitted = true;
+    this.emit({ kind: 'auth-required', error: 'Codex 登录已失效，请完成重新认证后重连 Host。' });
+  }
+
+  private dispatchMeetingCommands(text: string): { visibleText: string; hasSpeakCommand: boolean } {
     const fenced = /```meeting-command\s*([\s\S]*?)```/gi;
+    let hasSpeakCommand = false;
     for (const match of text.matchAll(fenced)) {
       try {
         const command = JSON.parse(match[1]);
-        void Promise.resolve(this.meetingCommandHandler(command)).catch((err) => {
-          this.emit({ kind: 'error', error: `Meeting command failed: ${String(err)}` });
-        });
+        if (
+          command?.kind === 'speak'
+          && typeof command.text === 'string'
+          && command.text.trim().length > 0
+        ) hasSpeakCommand = true;
+        if (this.meetingCommandHandler) {
+          void Promise.resolve(this.meetingCommandHandler(command)).catch((err) => {
+            this.emit({ kind: 'error', error: `Meeting command failed: ${String(err)}` });
+          });
+        }
       } catch (err) {
         this.emit({ kind: 'error', error: `Invalid meeting-command JSON: ${String(err)}` });
       }
     }
+    return {
+      visibleText: text.replace(fenced, '').trim(),
+      hasSpeakCommand,
+    };
   }
 
   end(): void {
@@ -341,7 +375,7 @@ class CodexSession implements BackendSession {
   }
 
   sendUserText(text: string, _priority?: InputPriority): void {
-    if (!this.thread || this.closed) return;
+    if (!this.thread || this.closed || this.authRequiredEmitted) return;
     const thread = this.thread; // Capture thread reference before async boundary
     // Serialize turns to prevent concurrent runStreamed calls on the same thread
     this.turnQueue = this.turnQueue.then(async () => {
@@ -357,7 +391,8 @@ class CodexSession implements BackendSession {
         if (this.currentAbort === abort) this.currentAbort = null;
       } catch (err: unknown) {
         if (!this.closed && !(err instanceof Error && err.name === 'AbortError')) {
-          this.emit({ kind: 'error', error: `Codex error: ${String(err)}` });
+          if (isCodexAuthError(String(err))) this.emitAuthRequired();
+          else this.emit({ kind: 'error', error: `Codex error: ${String(err)}` });
         }
       }
     }).catch((err: unknown) => {
@@ -390,6 +425,10 @@ class CodexSession implements BackendSession {
   }
 }
 
+function isCodexAuthError(message: string): boolean {
+  return /\b401\b|unauthorized|missing bearer|authentication (?:is )?required/i.test(message);
+}
+
 function safeJsonParse(s: string): Record<string, unknown> {
   try {
     return JSON.parse(s);
@@ -404,6 +443,11 @@ export class CodexBackend implements CliBackend {
   readonly id = 'codex';
   readonly capabilities = CODEX_CAPABILITIES;
 
+  constructor(private readonly deps: {
+    resolveBinary?: () => string | null;
+    execFile?: (binary: string, args: string[], options?: Record<string, unknown>) => string;
+  } = {}) {}
+
   createSession(
     config: BackendSessionConfig,
     emit: (e: BackendSessionEvent) => void,
@@ -412,7 +456,7 @@ export class CodexBackend implements CliBackend {
   }
 
   resolveBinary(): string | null {
-    return resolveCodexRuntime();
+    return this.deps.resolveBinary?.() ?? resolveCodexRuntime();
   }
 
   buildEnv(auth: BackendAuthConfig, extra?: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
@@ -434,21 +478,16 @@ export class CodexBackend implements CliBackend {
   }
 
   async checkAuthStatus(): Promise<{ loggedIn: boolean }> {
-    // Codex is logged in if:
-    // 1. An API key is set, OR
-    // 2. The ~/.codex directory exists with config (OAuth login completed)
     const binary = this.resolveBinary();
     if (!binary) return { loggedIn: false };
-
-    // Check for OAuth login — codex stores config in ~/.codex/
-    const { existsSync } = await import('node:fs');
-    const { join } = await import('node:path');
-    const { homedir } = await import('node:os');
-    const codexDir = join(homedir(), '.codex');
-    if (existsSync(join(codexDir, 'config.toml'))) return { loggedIn: true };
-    if (existsSync(join(codexDir, 'auth.json'))) return { loggedIn: true };
-    // Having the directory itself suggests installation
-    return { loggedIn: false };
+    try {
+      const run = this.deps.execFile ?? ((file: string, args: string[]) =>
+        execFileSync(file, args, { env: mergedSubprocessEnv(), encoding: 'utf8', timeout: 10_000 }));
+      const output = run(binary, ['login', 'status'], { encoding: 'utf8', timeout: 10_000 });
+      return { loggedIn: /logged in/i.test(output) && !/not logged in/i.test(output) };
+    } catch {
+      return { loggedIn: false };
+    }
   }
 
   async loginOAuth(): Promise<{ ok: boolean; error?: string }> {
@@ -458,7 +497,7 @@ export class CodexBackend implements CliBackend {
     }
     // OAuth login needs an interactive terminal — launch in Terminal.app on macOS
     if (process.platform === 'darwin') {
-      return this.loginInTerminal(binary, ['auth', 'login']);
+      return runTerminalLogin(binary, ['auth', 'login'], () => this.checkAuthStatus());
     }
     return new Promise<{ ok: boolean; error?: string }>((resolve) => {
       const env = mergedSubprocessEnv();
@@ -473,7 +512,9 @@ export class CodexBackend implements CliBackend {
       });
       proc.on('close', (code: number | null) => {
         if (code === 0) {
-          resolve({ ok: true });
+          void this.checkAuthStatus().then((status) => resolve(status.loggedIn
+            ? { ok: true }
+            : { ok: false, error: 'Codex 登录未完成，请重试。' }));
         } else {
           resolve({ ok: false, error: `codex auth login exited with code ${code}` });
         }
@@ -481,29 +522,6 @@ export class CodexBackend implements CliBackend {
     });
   }
 
-  private loginInTerminal(binary: string, args: string[]): Promise<{ ok: boolean; error?: string }> {
-    // Just run the binary directly in Terminal — it inherits the user's shell env.
-    const cmd = `${binary} ${args.join(' ')}`;
-    const script = `tell application "Terminal"
-activate
-do script "${cmd.replace(/"/g, '\\\\"')}"
-end tell`;
-    return new Promise<{ ok: boolean; error?: string }>((resolve) => {
-      const proc = spawn('osascript', ['-e', script], {
-        stdio: 'ignore',
-      });
-      proc.on('error', (err: Error) => {
-        resolve({ ok: false, error: err.message });
-      });
-      proc.on('close', (code: number | null) => {
-        if (code === 0) {
-          resolve({ ok: true });
-        } else {
-          resolve({ ok: false, error: `Failed to open Terminal (exit ${code}). Try running "codex auth login" manually.` });
-        }
-      });
-    });
-  }
 }
 
 /** Resolve an OS-executable Codex path. In a packaged Electron app the SDK is

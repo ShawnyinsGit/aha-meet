@@ -495,9 +495,7 @@ export function SideDrawer({
               // A backend is "configured" if:
               // - It's the default (bundled, no extra setup needed), OR
               // - It has an auth entry with valid credentials (apiKey or oauth)
-              const isConfigured = b.isDefault || (
-                b.hasAuthEntry && (b.authMode === 'none' || b.hasApiKey || b.authMode === 'oauth')
-              );
+              const isConfigured = b.loggedIn;
               return (
                 <div key={b.id} className={`drawer-participant-row ${isActive ? 'active' : ''}`}>
                   <div className="drawer-participant-info">

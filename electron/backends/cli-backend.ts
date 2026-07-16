@@ -94,6 +94,7 @@ export interface NormalizedMessage {
 export type BackendSessionEvent =
   | { kind: 'message'; message: NormalizedMessage }
   | { kind: 'permission-request'; id: string; toolName: string; input: Record<string, unknown>; toolUseID: string }
+  | { kind: 'auth-required'; error: string }
   | { kind: 'error'; error: string }
   | { kind: 'ended' };
 

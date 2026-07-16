@@ -28,7 +28,7 @@ function shortPath(cwd: string): { label: string; parent: string } {
 
 /** Get auth status label for a backend. */
 function backendAuthLabel(b: BackendInfo): string {
-  if (b.hasApiKey || b.authMode !== 'none') return '✓';
+  if (b.loggedIn) return '✓';
   return '';
 }
 
@@ -245,7 +245,7 @@ export function Lobby({ lastError }: LobbyProps) {
                 >
                   {backends.map((b) => (
                     <option key={b.id} value={b.id}>
-                      {b.displayName} {b.hasApiKey || b.authMode !== 'none' ? '✓' : ''} {b.isDefault ? '(default)' : ''} {!b.available ? '(not installed)' : ''}
+                      {b.displayName} {b.loggedIn ? '✓' : ''} {b.isDefault ? '(default)' : ''} {!b.available ? '(not installed)' : ''}
                     </option>
                   ))}
                 </select>
@@ -257,7 +257,7 @@ export function Lobby({ lastError }: LobbyProps) {
                   <div className="join-auth-block">
                     <div className="join-auth-block-title">
                       <KeyRound size={13} aria-hidden="true" /> API Key
-                      {(currentBackend.hasApiKey || currentBackend.authMode !== 'none') && (
+                      {currentBackend.loggedIn && (
                         <span className="join-auth-badge active">Active</span>
                       )}
                     </div>
@@ -343,7 +343,7 @@ export function Lobby({ lastError }: LobbyProps) {
                     <div className="join-auth-block">
                       <div className="join-auth-block-title">
                         <LogIn size={13} aria-hidden="true" /> {currentBackend.displayName} Account
-                        {currentBackend.authMode === 'oauth' && (
+                        {currentBackend.loggedIn && (
                           <span className="join-auth-badge active">Active</span>
                         )}
                       </div>
@@ -361,7 +361,7 @@ export function Lobby({ lastError }: LobbyProps) {
                       >
                         {loginStatus === 'pending' ? 'Opening browser…'
                           : loginStatus === 'done' ? 'Logged in ✓'
-                          : currentBackend.authMode === 'oauth' ? 'Re-authenticate'
+                          : currentBackend.loggedIn ? 'Re-authenticate'
                           : `Log in with ${currentBackend.displayName}`}
                       </button>
                       {loginStatus === 'error' && (
