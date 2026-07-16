@@ -3839,6 +3839,26 @@ html.popout-view #root {
   border-radius: 999px;
   letter-spacing: 0.02em;
 }
+.user-tasks-recovery-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+  margin-top: 7px;
+}
+.user-tasks-recovery-actions button {
+  border: 1px solid var(--border-soft);
+  border-radius: 6px;
+  padding: 3px 7px;
+  color: var(--text-secondary);
+  background: var(--bg-elevated);
+  cursor: pointer;
+  font: inherit;
+  font-size: 10px;
+}
+.user-tasks-recovery-actions button:hover {
+  color: var(--text-primary);
+  border-color: var(--border-strong);
+}
 .task-status-idle {
   background: rgba(200, 200, 200, 0.15);
   color: var(--text-secondary);

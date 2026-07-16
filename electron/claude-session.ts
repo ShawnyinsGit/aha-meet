@@ -118,6 +118,7 @@ export class ClaudeSession {
   private stderrRing: string[] = [];
   private authRequiredEmitted = false;
   private queryFactory: typeof query;
+  private sessionId: string | null = null;
 
   constructor(opts: {
     emit: (e: SessionEvent) => void;
@@ -247,6 +248,10 @@ export class ClaudeSession {
       try {
         for await (const msg of this.q!) {
           if (this.closed) break;
+          const nativeSessionId = (msg as { session_id?: unknown }).session_id;
+          if (typeof nativeSessionId === 'string' && nativeSessionId.length > 0) {
+            this.sessionId = nativeSessionId;
+          }
           // Surface API-level failures the SDK couldn't classify ('unknown' et
           // al.). The renderer only gets the short code; the real cause lives in
           // request_id + message content, which we log here so a terminal-
@@ -389,6 +394,12 @@ export class ClaudeSession {
     if (this.q) {
       this.q.interrupt().catch(() => { /* ignore */ });
     }
+  }
+
+  snapshot(): { protocol: string; sessionId: string } | null {
+    return this.sessionId
+      ? { protocol: 'claude-agent-sdk', sessionId: this.sessionId }
+      : null;
   }
 
   private pushInput(m: SDKUserMessage, priority: InputPriority) {

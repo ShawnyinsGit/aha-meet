@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -9,6 +9,8 @@ import {
   hasUsableKimiCredentials,
   KimiBackend,
   parseKimiStreamEvent,
+  resolveKimiReadPath,
+  withKimiSystemPrompt,
 } from '../dist-electron/backends/kimi-adapter.js';
 
 test('Kimi Code 0.24 uses supported one-shot stream-json arguments', () => {
@@ -90,4 +92,28 @@ test('Kimi credential probe rejects stale or malformed files instead of trusting
   assert.equal(hasUsableKimiCredentials(path, 2_000), false);
   await writeFile(path, JSON.stringify({ refresh_token: 'refresh', expires_at: 1_000 }));
   assert.equal(hasUsableKimiCredentials(path, 2_000), true);
+});
+
+test('Kimi applies the system prompt to a first multimodal turn', () => {
+  assert.deepEqual(withKimiSystemPrompt(
+    [{ type: 'image', data: 'abc', mimeType: 'image/png' }], 'expert rules', true,
+  ), [
+    { type: 'text', text: 'expert rules\n\n---\n\n' },
+    { type: 'image', data: 'abc', mimeType: 'image/png' },
+  ]);
+});
+
+test('Kimi ACP file reads reject symlinks escaping the workspace', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'ahameet-kimi-root-'));
+  const outside = await mkdtemp(join(tmpdir(), 'ahameet-kimi-outside-'));
+  t.after(() => Promise.all([
+    rm(root, { recursive: true, force: true }),
+    rm(outside, { recursive: true, force: true }),
+  ]));
+  await writeFile(join(outside, 'secret.txt'), 'secret');
+  await symlink(join(outside, 'secret.txt'), join(root, 'linked-secret.txt'));
+  await assert.rejects(
+    resolveKimiReadPath(root, 'linked-secret.txt'),
+    /outside the Meeting workspace/,
+  );
 });

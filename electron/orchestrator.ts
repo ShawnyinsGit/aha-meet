@@ -105,6 +105,11 @@ interface OrchestratorOpts {
   browserTabManager?: BrowserTabManager;
   /** Backend ID for the default host group. Defaults to 'claude-code'. */
   defaultBackendId?: string;
+  /** Existing Meeting identity and native Host handles selected by the user for recovery. */
+  meetingId?: string;
+  recoverySeq?: number;
+  resumeBackendSessions?: Record<string, BackendSessionSnapshot>;
+  recoveredTasks?: Array<Record<string, unknown>>;
 }
 
 export class Orchestrator implements OrchestratorBridge {
@@ -127,6 +132,8 @@ export class Orchestrator implements OrchestratorBridge {
   private repository: MeetingRepository;
   private workspaceManager: TaskWorkspaceManager;
   private diagnostics: DiagnosticLogger;
+  private resumeBackendSessions: Record<string, BackendSessionSnapshot>;
+  private recoveredTasks: Array<Record<string, unknown>>;
   private saveMemoryCallsThisSession = 0;
   private autoOrchestration = false;
   private pendingPlan: PlanMeetingTask[] | null = null;
@@ -185,11 +192,13 @@ export class Orchestrator implements OrchestratorBridge {
     this.confirmDestructive = opts.confirmDestructive;
     this.browserTabManager = opts.browserTabManager;
     this.projectId = computeProjectId(this.cwd);
-    this.meetingId = randomUUID();
-    this.repository = new MeetingRepository(this.meetingId);
+    this.meetingId = opts.meetingId ?? randomUUID();
+    this.resumeBackendSessions = opts.resumeBackendSessions ?? {};
+    this.recoveredTasks = opts.recoveredTasks ?? [];
+    this.repository = new MeetingRepository(this.meetingId, opts.recoverySeq);
     this.workspaceManager = new TaskWorkspaceManager(this.meetingId, this.cwd);
     this.diagnostics = new DiagnosticLogger(this.meetingId);
-    void this.repository.append('meeting-created', { cwd: this.cwd });
+    void this.repository.append(opts.meetingId ? 'meeting-recovered' : 'meeting-created', { cwd: this.cwd });
     this.sessionFactory = opts.sessionFactory ?? Orchestrator.defaultClaudeFactory;
 
     // Create the default HostGroup. Use the user's preferred backend if specified.
@@ -272,9 +281,14 @@ export class Orchestrator implements OrchestratorBridge {
           mcpServers: so.mcpServers as Record<string, unknown> | undefined,
           skills: Array.isArray(so.skills) ? so.skills : undefined,
           autoApproveScope: opts.autoApproveScope,
+          resumeSessionId: purpose === 'host'
+            ? this.resumeBackendSessions[actorHostId]?.sessionId
+            : undefined,
           executionRole: purpose,
           extra: {
             ...so,
+            ...(backendId === 'codex' ? { codexTransport: 'app-server' } : {}),
+            ...(backendId === 'kimi' ? { kimiTransport: 'acp' } : {}),
             meetingCommandHandler: (raw: unknown) => this.executeMeetingCommand(actorHostId, raw),
           },
         },
@@ -592,18 +606,78 @@ export class Orchestrator implements OrchestratorBridge {
 
   async start(greeting?: string) {
     await this.defaultHost().start(greeting);
+    if (this.recoveredTasks.length > 0) {
+      this.emitRecoveredPlan();
+    }
     // Persist the native backend handle before the renderer is told the Host
     // is ready. A crash after readiness can then recover the exact thread.
     await this.snapshotActiveMeeting();
   }
 
+  async resolveRecoveredTask(
+    taskId: string,
+    action: 'continue' | 'retry' | 'complete' | 'abandon',
+  ): Promise<{ ok: true } | { ok: false; error: string }> {
+    const index = this.recoveredTasks.findIndex((task) => task.id === taskId);
+    if (index < 0) return { ok: false, error: 'interrupted task not found' };
+    const current = this.recoveredTasks[index];
+    if (current.status !== 'interrupted' && current.status !== 'running') {
+      return { ok: false, error: `task is already ${String(current.status)}` };
+    }
+
+    if (action === 'complete' || action === 'abandon') {
+      this.recoveredTasks[index] = {
+        ...current,
+        status: action === 'complete' ? 'done' : 'failed',
+      };
+      await this.repository.append('recovered-task-resolved', { taskId, action });
+      this.emitRecoveredPlan();
+      await this.snapshotActiveMeeting();
+      return { ok: true };
+    }
+
+    const task: PlanMeetingTask = {
+      id: String(current.id ?? ''),
+      title: String(current.title ?? current.id ?? 'Recovered task'),
+      prompt: String(current.prompt ?? ''),
+      // An interrupted dependency graph is not silently replayed. A user
+      // explicitly resumes each side-effecting task, so this retry is a new
+      // independent execution at the same durable task identity.
+      deps: [],
+      executorBackendId: typeof current.executorBackendId === 'string'
+        ? current.executorBackendId
+        : undefined,
+      writePaths: Array.isArray(current.writePaths) ? current.writePaths.map(String) : undefined,
+    };
+    if (!task.id || !task.prompt) return { ok: false, error: 'recovered task is missing its id or prompt' };
+    const backendError = this.validateExecutionBackends([task]);
+    if (backendError) return { ok: false, error: backendError };
+    const result = this.meetingScheduler.installPlan([task]);
+    if (!result.ok) return result;
+    this.recoveredTasks.splice(index, 1);
+    await this.repository.append('recovered-task-resolved', { taskId, action });
+    await this.snapshotActiveMeeting();
+    return { ok: true };
+  }
+
+  private emitRecoveredPlan(): void {
+    const nodes = this.recoveredTasks.map((task) => ({
+      id: String(task.id ?? ''),
+      title: String(task.title ?? task.id ?? 'Interrupted task'),
+      status: task.status === 'running' ? 'interrupted' : task.status,
+      deps: Array.isArray(task.deps) ? task.deps.map(String) : [],
+    })).filter((node) => node.id) as MeetingPlanNode[];
+    this.safeEmit({ source: 'system', event: { kind: 'plan-updated', plan: { nodes } } });
+  }
+
   private snapshotActiveMeeting(): Promise<void> {
+    const liveTasks = this.meetingScheduler.snapshot();
     return this.repository.snapshot({
       status: 'active',
       cwd: this.cwd,
       coordinatorHostId: this.coordinatorHostId,
       hosts: this.listHosts(),
-      tasks: this.meetingScheduler.snapshot(),
+      tasks: liveTasks.length > 0 ? liveTasks : this.recoveredTasks,
       autoOrchestration: this.autoOrchestration,
     });
   }

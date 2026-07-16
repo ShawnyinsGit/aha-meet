@@ -751,11 +751,15 @@ class MeetingStore {
     return null;
   }
 
-  async openSession(cwd: string, greeting?: string): Promise<{ ok: boolean; error?: string; sessionId?: string }> {
+  async openSession(
+    cwd: string,
+    greeting?: string,
+    recoveryMeetingId?: string,
+  ): Promise<{ ok: boolean; error?: string; sessionId?: string }> {
     // Default greeting kicks the Talker into speaking on session start so the
     // user gets an immediate "hello, what should we work on?" instead of a
     // dead-air tab. Without this the SDK input loop sits idle.
-    let effectiveGreeting = greeting ?? DEFAULT_GREETING;
+    let effectiveGreeting = recoveryMeetingId ? '' : (greeting ?? DEFAULT_GREETING);
     // If a placeholder already exists for this cwd, resume it instead of
     // creating a second tab. Mirrors main-side cwd uniqueness.
     const existing = this.findByCwd(cwd);
@@ -770,9 +774,16 @@ class MeetingStore {
     // Pre-load transcript to inject resume context if there's history.
     // This gives the AI awareness of the previous conversation so it can
     // continue tasks instead of starting cold each time.
-    effectiveGreeting = await this.buildResumeGreeting(cwd, effectiveGreeting);
+    if (!recoveryMeetingId) {
+      effectiveGreeting = await this.buildResumeGreeting(cwd, effectiveGreeting);
+    }
 
-    const res = await window.vibeMeet.sessions.open(cwd, effectiveGreeting, this.defaultBackendId ?? undefined);
+    const res = await window.vibeMeet.sessions.open(
+      cwd,
+      effectiveGreeting,
+      this.defaultBackendId ?? undefined,
+      recoveryMeetingId,
+    );
     if (!res.ok) {
       if (res.error === 'duplicate' && 'sessionId' in res && res.sessionId) {
         await this.setActive(res.sessionId);
@@ -780,7 +791,7 @@ class MeetingStore {
       }
       return { ok: false, error: res.error };
     }
-    const slot = emptySlot(res.sessionId, res.cwd, this.defaultBackendId ?? 'claude-code');
+    const slot = emptySlot(res.sessionId, res.cwd, res.backendId ?? this.defaultBackendId ?? 'claude-code');
     slot.greeting = effectiveGreeting;
     slot.state = { ...slot.state, running: true };
     this.slots.set(res.sessionId, slot);

@@ -135,6 +135,8 @@ export interface BackendSessionConfig {
 export interface BackendSessionSnapshot {
   protocol: string;
   sessionId: string;
+  protocolVersion?: string;
+  backendVersion?: string;
 }
 
 // ── Auth configuration ────────────────────────────────────────────────────────

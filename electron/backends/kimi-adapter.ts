@@ -3,9 +3,10 @@
 // the session id emitted in the stream's `session.resume_hint` meta event.
 
 import { spawn, type ChildProcess } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { accessSync, constants as fsConstants, readFileSync, realpathSync } from 'node:fs';
+import { readFile, realpath } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { dirname, delimiter, join } from 'node:path';
+import { dirname, delimiter, isAbsolute, join, relative, resolve } from 'node:path';
 import { SubprocessBackend } from './subprocess-backend.js';
 import { runTerminalLogin } from './terminal-login.js';
 import { isolatedSubprocessEnv } from './backend-environment.js';
@@ -13,6 +14,7 @@ import type {
   BackendSession, BackendSessionConfig, BackendSessionEvent, BackendAuthConfig,
   BackendCapabilities, NormalizedMessage, UserContentBlock, InputPriority,
 } from './cli-backend.js';
+import { KimiAcpTransport, type KimiAcpNotification, type KimiAcpRequest } from './kimi-acp-transport.js';
 
 const KIMI_CAPABILITIES: BackendCapabilities = {
   coordinate: false, executeTasks: false,
@@ -23,6 +25,7 @@ const KIMI_CAPABILITIES: BackendCapabilities = {
     ? 'Kimi CLI is not yet available for Windows. Visit https://code.kimi.com for updates.'
     : 'curl -LsSf https://code.kimi.com/install.sh | bash',
 };
+const SUPPORTED_KIMI_ACP_VERSION = '0.24.1';
 
 interface KimiStreamEvent {
   role?: string;
@@ -86,6 +89,188 @@ export function parseKimiStreamEvent(line: string): {
       ...(text ? [{ type: 'text' as const, text }] : []), ...tools,
     ] }, raw: event,
   } };
+}
+
+class KimiAcpSession implements BackendSession {
+  private transport: KimiAcpTransport | null = null;
+  private sessionId: string | null = null;
+  private queue = Promise.resolve();
+  private closed = false;
+  private firstTurn = true;
+  private currentText = '';
+  private authRequiredEmitted = false;
+  private backendVersion: string | undefined;
+  private permissionResolvers = new Map<string, {
+    options: Array<Record<string, unknown>>;
+    resolve: (result: unknown) => void;
+  }>();
+
+  constructor(
+    private readonly binary: string,
+    private readonly config: BackendSessionConfig,
+    private emit: (event: BackendSessionEvent) => void,
+  ) {}
+
+  async start(): Promise<void> {
+    this.transport = new KimiAcpTransport({
+      binaryPath: this.binary,
+      cwd: this.config.cwd,
+      env: this.config.env ?? isolatedSubprocessEnv(),
+      onNotification: (notification) => this.onNotification(notification),
+      onRequest: (request) => this.onRequest(request),
+      onExit: (error) => {
+        if (!this.closed) this.emit({ kind: 'error', error: `Kimi ACP error: ${error.message}` });
+      },
+    });
+    try {
+      const initialized = await this.transport.start();
+      const protocolVersion = initialized.protocolVersion;
+      if (protocolVersion !== 1) throw new Error(`Unsupported Kimi ACP protocol: ${String(protocolVersion)}`);
+      const agentInfo = isRecord(initialized.agentInfo) ? initialized.agentInfo : {};
+      this.backendVersion = typeof agentInfo.version === 'string' ? agentInfo.version : undefined;
+      if (this.backendVersion !== SUPPORTED_KIMI_ACP_VERSION) {
+        throw new Error(
+          `Unsupported Kimi Code runtime ${this.backendVersion ?? 'unknown'}; `
+          + `AhaMeet requires ${SUPPORTED_KIMI_ACP_VERSION}`,
+        );
+      }
+      await this.transport.authenticate();
+      this.sessionId = this.config.resumeSessionId
+        ? await this.transport.resumeSession(this.config.resumeSessionId, this.config.cwd)
+        : await this.transport.newSession(this.config.cwd);
+      // Kimi remains Expert-only in phase one. Enforce its native read-only
+      // plan mode in addition to the scheduler capability gate.
+      await this.transport.setMode(this.sessionId, 'plan');
+    } catch (error) {
+      if (isKimiAuthError(String(error))) this.emitAuthRequired();
+      this.transport.close();
+      this.transport = null;
+      throw error;
+    }
+  }
+
+  sendUserText(text: string, _priority?: InputPriority): void {
+    const prompt = withKimiSystemPrompt(
+      [{ type: 'text', text }],
+      this.config.systemPrompt,
+      this.firstTurn,
+    );
+    this.firstTurn = false;
+    this.enqueuePrompt(prompt);
+  }
+
+  sendUserContent(content: string | UserContentBlock[], _priority?: InputPriority): void {
+    if (typeof content === 'string') return this.sendUserText(content);
+    const prompt = withKimiSystemPrompt(content.map((block) => block.type === 'text'
+      ? { type: 'text', text: block.text }
+      : { type: 'image', data: block.source.data, mimeType: block.source.media_type }),
+    this.config.systemPrompt, this.firstTurn);
+    this.firstTurn = false;
+    this.enqueuePrompt(prompt);
+  }
+
+  private enqueuePrompt(prompt: unknown[]): void {
+    if (this.closed || this.authRequiredEmitted || !this.transport || !this.sessionId) return;
+    this.queue = this.queue.then(async () => {
+      if (this.closed || !this.transport || !this.sessionId) return;
+      this.currentText = '';
+      try {
+        await this.transport.prompt(this.sessionId, prompt);
+        const text = this.currentText.trim();
+        if (text && !this.closed) {
+          this.emit({ kind: 'message', message: {
+            type: 'assistant',
+            message: { role: 'assistant', content: [{ type: 'text', text }] },
+          } });
+        }
+      } catch (error) {
+        if (isKimiAuthError(String(error))) this.emitAuthRequired();
+        else if (!this.closed) this.emit({ kind: 'error', error: `Kimi ACP prompt failed: ${String(error)}` });
+      }
+    });
+  }
+
+  private onNotification(notification: KimiAcpNotification): void {
+    if (notification.method !== 'session/update' || !isRecord(notification.params)) return;
+    const update = notification.params.update;
+    if (!isRecord(update)) return;
+    if (update.sessionUpdate === 'agent_message_chunk' && isRecord(update.content)) {
+      if (update.content.type === 'text' && typeof update.content.text === 'string') {
+        this.currentText += update.content.text;
+      }
+    }
+  }
+
+  private async onRequest(request: KimiAcpRequest): Promise<unknown> {
+    if (request.method === 'fs/read_text_file' && isRecord(request.params)) {
+      const requestedPath = String(request.params.path ?? '');
+      const path = await resolveKimiReadPath(this.config.cwd, requestedPath);
+      const content = await readFile(path, 'utf8');
+      if (content.length > 2_000_000) throw new Error('File exceeds the 2 MB ACP read limit');
+      return { content };
+    }
+    if (request.method === 'fs/write_text_file') throw new Error('Kimi Expert sessions are read-only');
+    if (request.method === 'session/request_permission' && isRecord(request.params)) {
+      const params = request.params;
+      const id = String(request.id);
+      const options = Array.isArray(params.options)
+        ? params.options.filter(isRecord)
+        : [];
+      return new Promise((resolvePermission) => {
+        this.permissionResolvers.set(id, { options, resolve: resolvePermission });
+        const toolCall = isRecord(params.toolCall) ? params.toolCall : {};
+        this.emit({
+          kind: 'permission-request', id,
+          toolName: String(toolCall.title ?? toolCall.kind ?? 'Kimi tool'),
+          input: isRecord(toolCall.rawInput) ? toolCall.rawInput : {},
+          toolUseID: String(toolCall.toolCallId ?? id),
+        });
+      });
+    }
+    throw new Error(`Unsupported Kimi ACP client request: ${request.method}`);
+  }
+
+  resolvePermission(id: string, decision: 'allow' | 'deny'): void {
+    const pending = this.permissionResolvers.get(id);
+    if (!pending) return;
+    this.permissionResolvers.delete(id);
+    const desired = decision === 'allow' ? /^allow/ : /^(reject|deny)/;
+    const option = pending.options.find((item) => desired.test(String(item.kind ?? '')))
+      ?? pending.options[0];
+    pending.resolve(option
+      ? { outcome: { outcome: 'selected', optionId: option.optionId } }
+      : { outcome: { outcome: 'cancelled' } });
+  }
+
+  async interrupt(): Promise<void> {
+    if (this.transport && this.sessionId) this.transport.cancel(this.sessionId);
+  }
+
+  end(): void {
+    if (this.closed) return;
+    this.closed = true;
+    for (const pending of this.permissionResolvers.values()) {
+      pending.resolve({ outcome: { outcome: 'cancelled' } });
+    }
+    this.permissionResolvers.clear();
+    this.transport?.close();
+    this.transport = null;
+    this.emit({ kind: 'ended' });
+    this.emit = () => undefined;
+  }
+
+  snapshot(): { protocol: string; sessionId: string; protocolVersion: string; backendVersion?: string } | null {
+    return this.sessionId ? {
+      protocol: 'kimi-acp', protocolVersion: '1',
+      sessionId: this.sessionId, backendVersion: this.backendVersion,
+    } : null;
+  }
+
+  private emitAuthRequired(): void {
+    if (this.authRequiredEmitted) return;
+    this.authRequiredEmitted = true;
+    this.emit({ kind: 'auth-required', error: 'Kimi 登录已失效，请完成重新认证后重连。' });
+  }
 }
 
 class KimiSession implements BackendSession {
@@ -223,6 +408,16 @@ export class KimiBackend extends SubprocessBackend {
   readonly capabilities = KIMI_CAPABILITIES;
   readonly binaryName = 'kimi';
 
+  resolveBinary(): string | null {
+    const canonical = join(homedir(), '.kimi-code', 'bin', 'kimi');
+    try {
+      accessSync(canonical, fsConstants.X_OK);
+      return realpathSync(canonical);
+    } catch {
+      return super.resolveBinary();
+    }
+  }
+
   createSession(config: BackendSessionConfig, emit: (e: BackendSessionEvent) => void): BackendSession {
     const binary = this.resolveBinary();
     if (!binary) {
@@ -230,7 +425,9 @@ export class KimiBackend extends SubprocessBackend {
       emit({ kind: 'ended' });
       return createNoopSession();
     }
-    return new KimiSession(binary, config, emit);
+    return config.extra?.kimiTransport === 'acp'
+      ? new KimiAcpSession(binary, config, emit)
+      : new KimiSession(binary, config, emit);
   }
 
   buildEnv(auth: BackendAuthConfig, extra?: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
@@ -246,12 +443,27 @@ export class KimiBackend extends SubprocessBackend {
   }
 
   async checkAuthStatus(): Promise<{ loggedIn: boolean }> {
-    if (!this.resolveBinary()) return { loggedIn: false };
-    return {
-      loggedIn: hasUsableKimiCredentials(
-        join(homedir(), '.kimi-code', 'credentials', 'kimi-code.json'),
-      ),
-    };
+    const binary = this.resolveBinary();
+    if (!binary) return { loggedIn: false };
+    const transport = new KimiAcpTransport({
+      binaryPath: binary,
+      cwd: homedir(),
+      env: isolatedSubprocessEnv(),
+    });
+    try {
+      const initialized = await transport.start();
+      const agentInfo = isRecord(initialized.agentInfo) ? initialized.agentInfo : {};
+      if (initialized.protocolVersion !== 1 || agentInfo.version !== SUPPORTED_KIMI_ACP_VERSION) {
+        return { loggedIn: false };
+      }
+      await transport.authenticate();
+      await transport.newSession(homedir());
+      return { loggedIn: true };
+    } catch {
+      return { loggedIn: false };
+    } finally {
+      transport.close();
+    }
   }
 
   async loginOAuth(): Promise<{ ok: boolean; error?: string }> {
@@ -261,6 +473,29 @@ export class KimiBackend extends SubprocessBackend {
       binary, ['login'], () => this.checkAuthStatus(), isolatedSubprocessEnv(),
     );
   }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+export function withKimiSystemPrompt(
+  prompt: Array<Record<string, unknown>>,
+  systemPrompt: string | undefined,
+  firstTurn: boolean,
+): Array<Record<string, unknown>> {
+  if (!firstTurn || !systemPrompt) return prompt;
+  return [{ type: 'text', text: `${systemPrompt}\n\n---\n\n` }, ...prompt];
+}
+
+export async function resolveKimiReadPath(cwd: string, requestedPath: string): Promise<string> {
+  const lexicalTarget = resolve(cwd, requestedPath);
+  const [realRoot, realTarget] = await Promise.all([realpath(cwd), realpath(lexicalTarget)]);
+  const rel = relative(realRoot, realTarget);
+  if (rel.startsWith('..') || isAbsolute(rel)) {
+    throw new Error('Path is outside the Meeting workspace');
+  }
+  return realTarget;
 }
 
 

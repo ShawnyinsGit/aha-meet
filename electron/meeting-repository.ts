@@ -16,7 +16,9 @@ export class MeetingRepository {
   private seq = 0;
   private tail: Promise<void> = Promise.resolve();
 
-  constructor(private readonly meetingId: string) {}
+  constructor(private readonly meetingId: string, initialSeq = 0) {
+    this.seq = initialSeq;
+  }
 
   private root(): string {
     return join(app.getPath('userData'), 'meetings', this.meetingId);
@@ -75,16 +77,16 @@ export class MeetingRepository {
     } catch { return []; }
   }
 
-  static async listRecoverable(): Promise<Array<{ meetingId: string; state: Record<string, unknown> }>> {
+  static async listRecoverable(): Promise<Array<{ meetingId: string; seq: number; state: Record<string, unknown> }>> {
     const root = join(app.getPath('userData'), 'meetings');
     try {
       const entries = await fs.readdir(root, { withFileTypes: true });
-      const out: Array<{ meetingId: string; state: Record<string, unknown> }> = [];
+      const out: Array<{ meetingId: string; seq: number; state: Record<string, unknown> }> = [];
       for (const entry of entries) {
         if (!entry.isDirectory()) continue;
         try {
           const raw = await fs.readFile(join(root, entry.name, 'snapshot.json'), 'utf8');
-          const parsed = JSON.parse(raw) as { state?: Record<string, unknown> };
+          const parsed = JSON.parse(raw) as { seq?: unknown; state?: Record<string, unknown> };
           if (!parsed.state || parsed.state.status !== 'active') continue;
           const tasks = Array.isArray(parsed.state.tasks)
             ? parsed.state.tasks.map((task: Record<string, unknown>) => ({
@@ -92,7 +94,13 @@ export class MeetingRepository {
                 status: task.status === 'running' ? 'interrupted' : task.status,
               }))
             : [];
-          out.push({ meetingId: entry.name, state: { ...parsed.state, status: 'recovering', tasks } });
+          out.push({
+            meetingId: entry.name,
+            seq: typeof parsed.seq === 'number' && Number.isSafeInteger(parsed.seq) && parsed.seq >= 0
+              ? parsed.seq
+              : 0,
+            state: { ...parsed.state, status: 'recovering', tasks },
+          });
         } catch { /* ignore corrupt snapshot */ }
       }
       return out;

@@ -10,10 +10,12 @@
 // matches clicking any other participant.
 
 import type { WorkerState } from '../lib/meeting-store';
-import type { WorkerStatus } from '../types';
+import type { MeetingPlan, WorkerStatus } from '../types';
 
 interface UserTasksPanelProps {
   workers: WorkerState[];
+  plan?: MeetingPlan | null;
+  sessionId?: string | null;
 }
 
 interface TaskRow {
@@ -27,6 +29,7 @@ interface TaskRow {
 const STATUS_LABEL: Record<TaskRow['status'], string> = {
   idle: 'Idle',
   pending: 'Pending',
+  interrupted: 'Interrupted',
   running: 'Running',
   done: 'Done',
   failed: 'Failed',
@@ -35,13 +38,14 @@ const STATUS_LABEL: Record<TaskRow['status'], string> = {
 const STATUS_TONE: Record<TaskRow['status'], string> = {
   idle: 'task-status-idle',
   pending: 'task-status-pending',
+  interrupted: 'task-status-pending',
   running: 'task-status-running',
   done: 'task-status-done',
   failed: 'task-status-failed',
 };
 
-function buildRows(workers: WorkerState[]): TaskRow[] {
-  return workers
+function buildRows(workers: WorkerState[], plan?: MeetingPlan | null): TaskRow[] {
+  const rows = workers
     .filter((w) => w.role !== 'talker')
     .map((w) => ({
       id: w.id,
@@ -51,10 +55,26 @@ function buildRows(workers: WorkerState[]): TaskRow[] {
       detail: w.summary || w.lastText || '',
     }))
     .reverse();
+  const known = new Set(rows.map((row) => row.id));
+  for (const node of plan?.nodes ?? []) {
+    if (!known.has(node.id)) rows.push({
+      id: node.id, title: node.title, status: node.status,
+      owner: 'recovery', detail: node.status === 'interrupted' ? 'Recovered after restart; choose how to proceed.' : '',
+    });
+  }
+  return rows;
 }
 
-export function UserTasksPanel({ workers }: UserTasksPanelProps) {
-  const rows = buildRows(workers);
+export function UserTasksPanel({ workers, plan, sessionId }: UserTasksPanelProps) {
+  const rows = buildRows(workers, plan);
+
+  const resolveInterrupted = async (taskId: string, action: 'continue' | 'retry' | 'complete' | 'abandon') => {
+    if ((action === 'continue' || action === 'retry') && !window.confirm(
+      '该任务上次执行被中断。重新启动可能重复外部副作用，确认继续吗？',
+    )) return;
+    const result = await window.vibeMeet.sessions.resolveRecoveredTask(sessionId ?? null, taskId, action);
+    if (!result.ok) window.alert(result.error);
+  };
 
   return (
     <div className="user-tasks-inline" role="region" aria-label="Your tasks this meeting">
@@ -95,6 +115,14 @@ export function UserTasksPanel({ workers }: UserTasksPanelProps) {
                     <span className={`user-tasks-pill ${STATUS_TONE[row.status]}`}>
                       {STATUS_LABEL[row.status]}
                     </span>
+                    {row.status === 'interrupted' && (
+                      <div className="user-tasks-recovery-actions">
+                        <button type="button" onClick={() => { void resolveInterrupted(row.id, 'continue'); }}>继续</button>
+                        <button type="button" onClick={() => { void resolveInterrupted(row.id, 'retry'); }}>重跑</button>
+                        <button type="button" onClick={() => { void resolveInterrupted(row.id, 'complete'); }}>完成</button>
+                        <button type="button" onClick={() => { void resolveInterrupted(row.id, 'abandon'); }}>放弃</button>
+                      </div>
+                    )}
                   </td>
                   <td className="user-tasks-col-owner">
                     <span className="user-tasks-owner">{row.owner}</span>

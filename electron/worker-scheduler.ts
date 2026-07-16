@@ -210,17 +210,21 @@ export class WorkerScheduler {
   snapshot(): Array<{
     id: string;
     title: string;
+    prompt: string;
     status: WorkerStatusKind | 'interrupted';
     deps: string[];
     executorBackendId?: string;
+    writePaths?: string[];
     workspace?: { kind: string; cwd: string; branch?: string };
   }> {
     return Array.from(this.workers.values()).map((handle) => ({
       id: handle.id,
       title: handle.title,
+      prompt: handle.prompt,
       status: handle.status,
       deps: [...handle.deps],
       executorBackendId: handle.executorBackendId,
+      writePaths: handle.writePaths ? [...handle.writePaths] : undefined,
       workspace: handle.workspace
         ? { kind: handle.workspace.kind, cwd: handle.workspace.cwd, branch: handle.workspace.branch }
         : undefined,

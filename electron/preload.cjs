@@ -6,12 +6,15 @@ const { contextBridge, ipcRenderer } = require('electron');
 // been threaded for tabs yet.
 const api = {
   sessions: {
-    open: (cwd, greeting, backendId) => ipcRenderer.invoke('sessions:open', { cwd, greeting, backendId }),
+    open: (cwd, greeting, backendId, recoveryMeetingId) =>
+      ipcRenderer.invoke('sessions:open', { cwd, greeting, backendId, recoveryMeetingId }),
     close: (id) => ipcRenderer.invoke('sessions:close', { id }),
     setActive: (id) => ipcRenderer.invoke('sessions:set-active', { id }),
     list: () => ipcRenderer.invoke('sessions:list'),
     listRestore: () => ipcRenderer.invoke('sessions:list-restore'),
     listRecoverable: () => ipcRenderer.invoke('sessions:list-recoverable'),
+    resolveRecoveredTask: (sessionId, taskId, action) =>
+      ipcRenderer.invoke('sessions:resolve-recovered-task', { sessionId, taskId, action }),
     addHost: (sessionId, backendId, hostId) =>
       ipcRenderer.invoke('sessions:add-host', { sessionId, backendId, hostId }),
     removeHost: (sessionId, hostId) =>

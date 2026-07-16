@@ -39,6 +39,12 @@ import type {
 import { resolveBinaryFromPath } from './subprocess-backend.js';
 import { runTerminalLogin } from './terminal-login.js';
 import { isolatedSubprocessEnv } from './backend-environment.js';
+import {
+  CodexAppServerTransport,
+  extractCodexRuntimeVersion,
+  type CodexAppServerNotification,
+  type CodexAppServerTransportOptions,
+} from './codex-app-server-transport.js';
 import type { Input as CodexInput, Thread as CodexThread, ThreadEvent, ThreadItem } from '@openai/codex-sdk';
 
 const CODEX_CAPABILITIES: BackendCapabilities = {
@@ -85,6 +91,247 @@ async function loadCodexSdk(): Promise<CodexSdk | null> {
 }
 
 // ── Session implementation ─────────────────────────────────────────────────────
+
+class CodexAppServerSession implements BackendSession {
+  private transport: CodexAppServerTransport | null = null;
+  private threadId: string | null = null;
+  private currentTurnId: string | null = null;
+  private turnQueue: Promise<void> = Promise.resolve();
+  private turnWaiters = new Map<string, { promise: Promise<void>; resolve: () => void }>();
+  private completedTurns = new Set<string>();
+  private closed = false;
+  private endedEmitted = false;
+  private authRequiredEmitted = false;
+  private backendVersion: string | undefined;
+  private meetingCommandHandler?: (command: unknown) => Promise<unknown> | unknown;
+
+  constructor(
+    private readonly binaryPath: string | null,
+    private readonly config: BackendSessionConfig,
+    private emit: (event: BackendSessionEvent) => void,
+    private readonly createTransport: (options: CodexAppServerTransportOptions) => CodexAppServerTransport =
+      (options) => new CodexAppServerTransport(options),
+  ) {
+    const handler = config.extra?.meetingCommandHandler;
+    if (typeof handler === 'function') {
+      this.meetingCommandHandler = handler as (command: unknown) => Promise<unknown> | unknown;
+    }
+  }
+
+  async start(): Promise<void> {
+    if (!this.binaryPath) throw new Error('Codex CLI runtime is unavailable');
+    this.transport = this.createTransport({
+      binaryPath: this.binaryPath,
+      env: this.config.env ?? isolatedSubprocessEnv(),
+      onNotification: (notification) => this.onNotification(notification),
+      onStderr: (line) => {
+        if (isCodexAuthError(line)) this.emitAuthRequired();
+      },
+      onExit: (error) => {
+        if (this.closed) return;
+        this.emit({ kind: 'error', error: `Codex app-server error: ${error.message}` });
+        this.emitEnded();
+      },
+    });
+    try {
+      const ready = await this.transport.start();
+      this.backendVersion = extractCodexRuntimeVersion(ready.userAgent) ?? undefined;
+      const options: Record<string, unknown> = {
+        cwd: this.config.cwd,
+        model: this.config.model,
+        approvalPolicy: this.config.executionRole === 'worker' ? 'untrusted' : 'never',
+        sandbox: this.config.executionRole === 'worker' ? 'workspace-write' : 'read-only',
+        developerInstructions: this.config.systemPrompt,
+        experimentalRawEvents: false,
+      };
+      this.threadId = this.config.resumeSessionId
+        ? await this.transport.resumeThread(this.config.resumeSessionId, options)
+        : await this.transport.openThread(options);
+    } catch (error) {
+      if (isCodexAuthError(String(error))) this.emitAuthRequired();
+      this.transport.close();
+      this.transport = null;
+      throw error;
+    }
+  }
+
+  sendUserText(text: string, _priority?: InputPriority): void {
+    this.enqueueTurn([{ type: 'text', text, text_elements: [] }]);
+  }
+
+  sendUserContent(content: string | UserContentBlock[], _priority?: InputPriority): void {
+    if (typeof content === 'string') {
+      this.sendUserText(content);
+      return;
+    }
+    const input = content.map((block) => block.type === 'text'
+      ? { type: 'text', text: block.text, text_elements: [] }
+      : { type: 'image', url: `data:${block.source.media_type};base64,${block.source.data}` });
+    if (input.length > 0) this.enqueueTurn(input);
+  }
+
+  private enqueueTurn(input: unknown[]): void {
+    if (this.closed || this.authRequiredEmitted || !this.transport || !this.threadId) return;
+    this.turnQueue = this.turnQueue.then(async () => {
+      if (this.closed || this.authRequiredEmitted || !this.transport || !this.threadId) return;
+      let turnId: string | null = null;
+      try {
+        turnId = await this.transport.startTurn(this.threadId, input);
+        this.currentTurnId = turnId;
+        await this.waitForTurn(turnId);
+      } catch (error) {
+        if (isCodexAuthError(String(error))) this.emitAuthRequired();
+        else if (!this.closed) this.emit({ kind: 'error', error: `Codex error: ${String(error)}` });
+      } finally {
+        if (turnId) this.completedTurns.delete(turnId);
+        this.currentTurnId = null;
+      }
+    });
+  }
+
+  private waitForTurn(turnId: string): Promise<void> {
+    if (this.completedTurns.delete(turnId)) return Promise.resolve();
+    const existing = this.turnWaiters.get(turnId);
+    if (existing) return existing.promise;
+    let resolve!: () => void;
+    const promise = new Promise<void>((done) => { resolve = done; });
+    this.turnWaiters.set(turnId, { promise, resolve });
+    return promise;
+  }
+
+  private completeTurn(turnId: string): void {
+    const pending = this.turnWaiters.get(turnId);
+    this.completedTurns.add(turnId);
+    if (pending) {
+      this.turnWaiters.delete(turnId);
+      pending.resolve();
+    }
+  }
+
+  private onNotification(notification: CodexAppServerNotification): void {
+    if (this.closed || !isRecord(notification.params)) return;
+    if (notification.method === 'item/completed' && isRecord(notification.params.item)) {
+      const message = this.normalizeAppServerItem(notification.params.item);
+      if (message) this.emit({ kind: 'message', message });
+      return;
+    }
+    if (notification.method === 'turn/completed' && isRecord(notification.params.turn)) {
+      const turn = notification.params.turn;
+      const turnId = typeof turn.id === 'string' ? turn.id : '';
+      if (turn.status === 'failed') {
+        const detail = isRecord(turn.error) ? String(turn.error.message ?? 'Turn failed') : 'Turn failed';
+        if (isCodexAuthError(detail)) this.emitAuthRequired();
+        else this.emit({ kind: 'error', error: `Codex turn failed: ${detail}` });
+      }
+      if (turnId) this.completeTurn(turnId);
+      return;
+    }
+    if (notification.method === 'error') {
+      const error = isRecord(notification.params.error) ? notification.params.error : {};
+      const detail = String(error.message ?? 'Codex app-server error');
+      if (isCodexAuthError(detail)) this.emitAuthRequired();
+      else if (!notification.params.willRetry) this.emit({ kind: 'error', error: detail });
+    }
+  }
+
+  private normalizeAppServerItem(item: Record<string, unknown>): NormalizedMessage | null {
+    const id = typeof item.id === 'string' ? item.id : `codex-${Date.now()}`;
+    switch (item.type) {
+      case 'agentMessage': {
+        const text = typeof item.text === 'string' ? item.text : '';
+        const { visibleText, hasSpeakCommand } = dispatchAppServerCommands(
+          text, this.meetingCommandHandler, this.emit,
+        );
+        if (!visibleText || hasSpeakCommand) return null;
+        return { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: visibleText }] }, raw: item };
+      }
+      case 'reasoning': {
+        const summary = Array.isArray(item.summary) ? item.summary.map(String).join('\n') : '';
+        return summary ? { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: summary }] }, raw: item } : null;
+      }
+      case 'commandExecution': {
+        const status = String(item.status ?? 'completed');
+        const output = typeof item.aggregatedOutput === 'string' ? item.aggregatedOutput : '';
+        const exitCode = typeof item.exitCode === 'number' ? item.exitCode : null;
+        return {
+          type: 'assistant',
+          message: { role: 'assistant', content: [
+            { type: 'tool_use', id, name: 'Bash', input: { command: String(item.command ?? '') } },
+            {
+              type: 'tool_result', tool_use_id: id,
+              content: output || `[${status}; exit ${exitCode ?? 'unknown'}]`,
+              ...(status === 'failed' || (exitCode !== null && exitCode !== 0) ? { is_error: true } : {}),
+            },
+          ] },
+          raw: item,
+        };
+      }
+      case 'fileChange': {
+        const changes = Array.isArray(item.changes) ? item.changes : [];
+        return {
+          type: 'assistant',
+          message: { role: 'assistant', content: changes.filter(isRecord).map((change, index) => ({
+            type: 'tool_use' as const,
+            id: `${id}:${index}`,
+            name: 'Write',
+            input: { file_path: change.path, change_kind: change.kind, status: item.status },
+          })) },
+          raw: item,
+        };
+      }
+      case 'mcpToolCall':
+        return {
+          type: 'assistant',
+          message: { role: 'assistant', content: [{
+            type: 'tool_use', id, name: `mcp__${String(item.server)}__${String(item.tool)}`,
+            input: isRecord(item.arguments) ? item.arguments : { value: item.arguments },
+          }] },
+          raw: item,
+        };
+      default:
+        return null;
+    }
+  }
+
+  resolvePermission(_id: string, _decision: 'allow' | 'deny', _message?: string): void {}
+
+  async interrupt(): Promise<void> {
+    if (!this.transport || !this.threadId || !this.currentTurnId) return;
+    const turnId = this.currentTurnId;
+    await this.transport.interruptTurn(this.threadId, turnId);
+    await withCodexTimeout(this.waitForTurn(turnId), 10_000, 'Codex interrupt timed out');
+  }
+
+  end(): void {
+    if (this.closed) return;
+    this.closed = true;
+    this.transport?.close();
+    this.transport = null;
+    for (const pending of this.turnWaiters.values()) pending.resolve();
+    this.turnWaiters.clear();
+    this.emitEnded();
+    this.emit = () => {};
+  }
+
+  snapshot(): { protocol: string; sessionId: string; protocolVersion: string; backendVersion?: string } | null {
+    return this.threadId ? {
+      protocol: 'codex-app-server', protocolVersion: 'v2',
+      sessionId: this.threadId, backendVersion: this.backendVersion,
+    } : null;
+  }
+
+  private emitAuthRequired(): void {
+    if (this.authRequiredEmitted) return;
+    this.authRequiredEmitted = true;
+    this.emit({ kind: 'auth-required', error: 'Codex 登录已失效，请完成重新认证后重连 Host。' });
+  }
+
+  private emitEnded(): void {
+    if (this.endedEmitted) return;
+    this.endedEmitted = true;
+    this.emit({ kind: 'ended' });
+  }
+}
 
 class CodexSession implements BackendSession {
   private thread: CodexThread | null = null;
@@ -543,9 +790,46 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+function dispatchAppServerCommands(
+  text: string,
+  handler: ((command: unknown) => Promise<unknown> | unknown) | undefined,
+  emit: (event: BackendSessionEvent) => void,
+): { visibleText: string; hasSpeakCommand: boolean } {
+  const fenced = /```meeting-command\s*([\s\S]*?)```/gi;
+  let hasSpeakCommand = false;
+  for (const match of text.matchAll(fenced)) {
+    try {
+      const command = JSON.parse(match[1]);
+      if (command?.kind === 'speak' && typeof command.text === 'string' && command.text.trim()) {
+        hasSpeakCommand = true;
+      }
+      if (handler) {
+        void Promise.resolve(handler(command)).catch((error) => {
+          emit({ kind: 'error', error: `Meeting command failed: ${String(error)}` });
+        });
+      }
+    } catch (error) {
+      emit({ kind: 'error', error: `Invalid meeting-command JSON: ${String(error)}` });
+    }
+  }
+  return { visibleText: text.replace(fenced, '').trim(), hasSpeakCommand };
+}
+
 function assertNever(value: never): null {
   void value;
   return null;
+}
+
+async function withCodexTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error(message)), ms); }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 // ── Backend implementation ─────────────────────────────────────────────────────
@@ -558,12 +842,18 @@ export class CodexBackend implements CliBackend {
     resolveBinary?: () => string | null;
     execFile?: (binary: string, args: string[], options?: Record<string, unknown>) => string;
     loadSdk?: () => Promise<CodexSdk | null>;
+    createAppServerTransport?: (options: CodexAppServerTransportOptions) => CodexAppServerTransport;
   } = {}) {}
 
   createSession(
     config: BackendSessionConfig,
     emit: (e: BackendSessionEvent) => void,
   ): BackendSession {
+    if (config.extra?.codexTransport === 'app-server') {
+      return new CodexAppServerSession(
+        this.resolveBinary(), config, emit, this.deps.createAppServerTransport,
+      );
+    }
     return new CodexSession(this.resolveBinary(), config, emit, this.deps.loadSdk ?? loadCodexSdk);
   }
 

@@ -7,6 +7,12 @@ interface LobbyProps {
   lastError?: string | null;
 }
 
+interface RecoverableMeeting {
+  meetingId: string;
+  seq: number;
+  state: Record<string, unknown>;
+}
+
 function formatRelative(ts: number): string {
   const diff = Date.now() - ts;
   const min = Math.floor(diff / 60_000);
@@ -51,6 +57,7 @@ export function Lobby({ lastError }: LobbyProps) {
 
   const [opening, setOpening] = useState(false);
   const [openError, setOpenError] = useState<string | null>(null);
+  const [recoverable, setRecoverable] = useState<RecoverableMeeting[]>([]);
 
   // Install state — one backend at a time; log accumulates streamed output.
   const [installing, setInstalling] = useState<string | null>(null);
@@ -74,6 +81,9 @@ export function Lobby({ lastError }: LobbyProps) {
 
   useEffect(() => {
     void reloadBackends();
+    void window.vibeMeet.sessions.listRecoverable()
+      .then((result) => setRecoverable(result.meetings))
+      .catch((error) => console.warn('[Lobby] failed to load recoverable meetings:', error));
   }, [reloadBackends]);
 
   // When selected backend changes, prefill inputs from its config
@@ -107,6 +117,21 @@ export function Lobby({ lastError }: LobbyProps) {
     if (!dir) return;
     await openCwd(dir);
   }, [openCwd]);
+
+  const recoverMeeting = useCallback(async (meeting: RecoverableMeeting) => {
+    if (opening) return;
+    const cwd = typeof meeting.state.cwd === 'string' ? meeting.state.cwd : '';
+    if (!cwd) return;
+    setOpening(true);
+    setOpenError(null);
+    try {
+      const result = await meetingStore.openSession(cwd, '', meeting.meetingId);
+      if (!result.ok) setOpenError(result.error ?? 'Failed to recover meeting');
+      else setRecoverable((items) => items.filter((item) => item.meetingId !== meeting.meetingId));
+    } finally {
+      setOpening(false);
+    }
+  }, [opening]);
 
   const handleBackendChange = useCallback(async (backendId: string) => {
     const result = await window.vibeMeet.backendAuth.setDefault(backendId);
@@ -408,6 +433,40 @@ export function Lobby({ lastError }: LobbyProps) {
             </div>
           )}
         </div>
+
+        {recoverable.length > 0 && (
+          <section className="lobby-section">
+            <div className="lobby-section-title">
+              <Clock size={13} aria-hidden="true" />
+              <span>Interrupted meetings — confirm to resume</span>
+            </div>
+            <ul className="lobby-list">
+              {recoverable.slice(0, 3).map((meeting) => {
+                const cwd = typeof meeting.state.cwd === 'string' ? meeting.state.cwd : '';
+                const { label, parent } = shortPath(cwd);
+                const tasks = Array.isArray(meeting.state.tasks) ? meeting.state.tasks.length : 0;
+                return (
+                  <li key={meeting.meetingId}>
+                    <button
+                      type="button"
+                      className="lobby-row"
+                      onClick={() => { void recoverMeeting(meeting); }}
+                      disabled={opening || !cwd}
+                      title="Resume Host context; running tasks stay interrupted"
+                    >
+                      <span className="lobby-row-icon" aria-hidden="true"><Clock size={16} /></span>
+                      <span className="lobby-row-main">
+                        <span className="lobby-row-name">Resume {label}</span>
+                        <span className="lobby-row-path">{parent} · {tasks} saved tasks</span>
+                      </span>
+                      <span className="lobby-row-meta">Confirm</span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          </section>
+        )}
 
         {lobby.recent.length > 0 && (
           <section className="lobby-section">

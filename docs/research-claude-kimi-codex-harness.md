@@ -201,6 +201,32 @@ Codex 当前使用官方 SDK，所以不存在“命令/事件名凭猜测实现
 
 因此后续采用独立 `CodexAppServerTransport`：构建期按锁定 CLI 生成 schema 并做版本指纹，运行期只加载与 bundled CLI 匹配的 bindings；先交付 `initialize → account/read → thread/start/resume → turn/start/interrupt` 的纵向切片，再接审批和 MCP。完成该切片之前，SDK adapter 保持受控 Coordinator 能力，但 `mcp=false`、`permissions=false`、`executeTasks=false`，不以静态产品愿望冒充运行时能力。
 
+2026-07-16 后续实现已完成上述稳定核心：生产 Host 默认走 stdio
+app-server，真实 `0.144.1` OAuth 探针在不发送模型 turn 的情况下完成
+account + thread 握手；SDK 路径保留为受限兼容 fixture。审批与 Meeting MCP
+尚未桥通，因此三项能力仍保持 false，不因换了 transport 就提前放开 Worker。
+当前纵向切片还会拒绝非 `0.144.1` app-server，并把 backend/protocol version
+与 thread id 一起持久化；系统 CLI 升级造成协议漂移时会在 Coordinator 启动
+前硬失败，而不是继续解析未知事件。
+
+### 6.6 Kimi ACP 与 Claude checkpoint 实施状态
+
+Kimi 生产 Expert 路径已从 stream-json 切换到 ACP 1：initialize 返回的
+`agentInfo.version=0.24.1` 和 capability 经过验证，authenticate、session
+new/resume、prompt、cancel、image block、只读文件 reverse-RPC 和 permission
+request 均走长驻 JSON-RPC。Host 强制设为 Kimi 原生 `plan` mode，且仍保持
+`coordinate=false`、`executeTasks=false`、`mcp=false`，直到 WorkReport/MCP
+交付闭环完成。认证 UI 改用 ACP authenticate 权威探针，不再以 credential
+文件存在作为登录成功。
+最终探针进一步执行真实 `session/new`，防止 initialize/authenticate 成功但
+会话实际不可用时仍显示“已配置”。ACP 文件 reverse-RPC 会解析真实路径后
+再检查 workspace 边界，阻断符号链接逃逸；首轮多模态消息也会携带角色提示。
+
+Claude 默认生产路径已统一经过 `ClaudeCodeBackend`；SDK 精确 pin 为
+`0.3.150`，system init 的 session id 会写入 Meeting snapshot，恢复时下推
+`Options.resume`。当前测试机 `claude auth status --json` 为 loggedIn=false，
+所以真实云端 smoke 被正确门禁为 auth-required，没有用模拟成功替代。
+
 ## 7. 三方统一 Harness 设计
 
 三方 adapter 不应被强迫输出相同的底层事件，但必须实现同一个最小、可验证的 Meeting Backend Contract。

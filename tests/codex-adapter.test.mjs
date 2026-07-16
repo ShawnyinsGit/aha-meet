@@ -268,3 +268,79 @@ test('Codex interrupt cancels an image turn from the moment it is queued', async
   assert.equal(calls, 1, 'only the readiness turn reached the SDK');
   session.end();
 });
+
+test('Codex production app-server session becomes ready without a model turn', async () => {
+  const calls = [];
+  const events = [];
+  let notification;
+  const transport = {
+    async start() { calls.push('initialize/account'); return { userAgent: 'Codex/0.144.1', account: { type: 'chatgpt' } }; },
+    async openThread() { calls.push('thread/start'); return 'app-thread-1'; },
+    async resumeThread(id) { calls.push(`thread/resume:${id}`); return id; },
+    async startTurn(_threadId, input) {
+      calls.push(['turn/start', input]);
+      queueMicrotask(() => {
+        notification({ method: 'item/completed', params: {
+          item: { type: 'agentMessage', id: 'a1', text: 'hello from app-server' },
+          threadId: 'app-thread-1', turnId: 'turn-1',
+        } });
+        notification({ method: 'turn/completed', params: {
+          threadId: 'app-thread-1', turn: { id: 'turn-1', status: 'completed', error: null },
+        } });
+      });
+      return 'turn-1';
+    },
+    async interruptTurn() {},
+    close() { calls.push('close'); },
+  };
+  const backend = new CodexBackend({
+    resolveBinary: () => '/fake/codex',
+    createAppServerTransport: (options) => { notification = options.onNotification; return transport; },
+  });
+  const session = backend.createSession({
+    cwd: '/workspace', executionRole: 'host', extra: { codexTransport: 'app-server' },
+  }, (event) => events.push(event));
+  await session.start();
+  assert.deepEqual(calls, ['initialize/account', 'thread/start']);
+  assert.deepEqual(session.snapshot(), {
+    protocol: 'codex-app-server', protocolVersion: 'v2',
+    sessionId: 'app-thread-1', backendVersion: '0.144.1',
+  });
+  session.sendUserText('actual user input');
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(calls[2][0], 'turn/start');
+  assert.equal(events[0].message.message.content[0].text, 'hello from app-server');
+  session.end();
+});
+
+test('Codex app-server interrupt shares the authoritative turn completion waiter', async () => {
+  let notify;
+  let turnNumber = 0;
+  const transport = {
+    async start() { return { userAgent: 'Codex/0.144.1', account: { type: 'chatgpt' } }; },
+    async openThread() { return 'thread-interrupt'; },
+    async resumeThread(id) { return id; },
+    async startTurn() { turnNumber += 1; return `turn-${turnNumber}`; },
+    async interruptTurn(_threadId, turnId) {
+      queueMicrotask(() => notify({ method: 'turn/completed', params: {
+        threadId: 'thread-interrupt', turn: { id: turnId, status: 'interrupted', error: null },
+      } }));
+    },
+    close() {},
+  };
+  const backend = new CodexBackend({
+    resolveBinary: () => '/fake/codex',
+    createAppServerTransport: (options) => { notify = options.onNotification; return transport; },
+  });
+  const session = backend.createSession({
+    cwd: '/workspace', extra: { codexTransport: 'app-server' },
+  }, () => {});
+  await session.start();
+  session.sendUserText('long turn');
+  await new Promise((resolve) => setImmediate(resolve));
+  await session.interrupt();
+  session.sendUserText('next turn');
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(turnNumber, 2, 'the queue advances after authoritative interrupted completion');
+  session.end();
+});

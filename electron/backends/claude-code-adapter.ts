@@ -134,6 +134,10 @@ class ClaudeCodeSession implements BackendSession {
       mode as Parameters<ClaudeSession['setPermissionMode']>[0],
     );
   }
+
+  snapshot(): { protocol: string; sessionId: string } | null {
+    return this.inner.snapshot();
+  }
 }
 
 function buildClaudeSessionOptions(config: BackendSessionConfig): Record<string, unknown> {
@@ -145,6 +149,7 @@ function buildClaudeSessionOptions(config: BackendSessionConfig): Record<string,
   if (config.model !== undefined) extra.model = config.model;
   if (config.mcpServers !== undefined) extra.mcpServers = config.mcpServers;
   if (config.skills !== undefined) extra.skills = config.skills;
+  if (config.resumeSessionId !== undefined) extra.resume = config.resumeSessionId;
   return extra;
 }
 

@@ -20,6 +20,7 @@ interface ActivityTabContentProps {
   onOpenInTerminal?: (workerId: string) => void;
   /** Map of iconId → custom avatar data URL */
   customAvatars?: Map<string, string | null>;
+  sessionId?: string | null;
 }
 
 export function ActivityTabContent({
@@ -33,6 +34,7 @@ export function ActivityTabContent({
   onSelectId: _onSelectId,
   onOpenInTerminal,
   customAvatars,
+  sessionId,
 }: ActivityTabContentProps) {
   const sortedWorkers = useMemo(() => {
     const statusPriority = (w: WorkerState): number => {
@@ -40,6 +42,7 @@ export function ActivityTabContent({
       switch (w.status) {
         case 'running': return 1;
         case 'pending': return 2;
+        case 'interrupted': return 3;
         case 'idle':    return 3;
         case 'done':    return 4;
         case 'failed':  return 4;
@@ -87,7 +90,7 @@ export function ActivityTabContent({
   return (
     <div className="activity-detail">
       {isUserSelected ? (
-        <UserTasksPanel workers={workers} />
+        <UserTasksPanel workers={workers} plan={plan} sessionId={sessionId} />
       ) : selectedWorker && (
         <ClaudeWorkspace
           key={selectedWorker.id}
