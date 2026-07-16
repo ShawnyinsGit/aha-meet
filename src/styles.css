@@ -38,1327 +38,36 @@
 
 @media (prefers-color-scheme: light) {
   :root {
-    /* macOS HIG: systemGray6 for backgrounds, systemBackground for panels */
+    /* DingTalk-style light palette: gray-white background, crisp black text,
+       and slightly warmer panels so cards/buttons don't disappear into the page. */
     --bg-app: #f2f2f7;
     --bg-stage: #e5e5ea;
-    --bg-tile: #ffffff;
-    --bg-elevated: #ffffff;
+    --bg-tile: #f7f7f9;
+    --bg-elevated: #fbfbfd;
     --bg-glass: rgba(255, 255, 255, 0.82);
     --bg-panel: #ffffff;
-    --bg-hover: rgba(0, 0, 0, 0.04);
+    --bg-hover: rgba(0, 0, 0, 0.05);
     --bg-input: #ffffff;
-    --border-soft: rgba(0, 0, 0, 0.1);
-    --border-strong: rgba(0, 0, 0, 0.2);
+    --border-soft: rgba(0, 0, 0, 0.14);
+    --border-strong: rgba(0, 0, 0, 0.24);
     --text-primary: #1c1c1e;
     --text-secondary: #3a3a3c;
-    --text-muted: #8e8e93;
+    --text-muted: #6c6c70;
     --accent: #007aff;
-    --accent-soft: rgba(0, 122, 255, 0.1);
-    --accent-glow: rgba(0, 122, 255, 0.3);
-    --danger: #ff3b30;
-    --danger-soft: rgba(255, 59, 48, 0.1);
+    --accent-soft: rgba(0, 122, 255, 0.12);
+    --accent-glow: rgba(0, 122, 255, 0.28);
+    --danger: #d70015;
+    --danger-soft: rgba(255, 59, 48, 0.12);
     --warn: #ff9500;
-    --success: #34c759;
-    --success-soft: rgba(52, 199, 89, 0.1);
-    --danger-result-soft: rgba(255, 59, 48, 0.08);
-    --shadow-card: 0 4px 24px -4px rgba(0, 0, 0, 0.08);
-    --shadow-soft: 0 2px 8px -2px rgba(0, 0, 0, 0.06);
-    --shadow-lg: 0 8px 24px -4px rgba(0, 0, 0, 0.12);
+    --success: #248a3d;
+    --success-soft: rgba(52, 199, 89, 0.12);
+    --danger-result-soft: rgba(255, 59, 48, 0.1);
+    --shadow-card: 0 4px 24px -4px rgba(0, 0, 0, 0.1);
+    --shadow-soft: 0 2px 8px -2px rgba(0, 0, 0, 0.08);
+    --shadow-lg: 0 8px 24px -4px rgba(0, 0, 0, 0.14);
     --bg-primary: #ffffff;
     --bg-secondary: #f2f2f7;
     --bg-tertiary: #e5e5ea;
-  }
-
-  /* Join screen decorative tiles */
-  .join-tile-ai { background: linear-gradient(160deg, #dce8ff, #ebeef5); }
-  .join-tile-self { background: linear-gradient(160deg, #f0dcff, #f2e8ff); }
-  .join-tile-label { color: var(--text-primary); }
-  .join-tile-meta { background: rgba(0, 0, 0, 0.12); color: var(--text-secondary); }
-
-  .join-screen {
-    background:
-      radial-gradient(900px 600px at 12% 6%, rgba(0, 122, 255, 0.06), transparent 60%),
-      radial-gradient(700px 500px at 88% 90%, rgba(52, 199, 89, 0.05), transparent 60%),
-      var(--bg-app);
-  }
-
-  /* Stage area */
-  .stage-sharing { background: #e8e8ed; }
-  .stage-default { background: linear-gradient(170deg, #e8e8ed 0%, #f2f2f7 100%); }
-  .stage-video { background: #e8e8ed; }
-
-  /* Participant tiles */
-  .tile-ai .tile-stage { background: linear-gradient(160deg, #dce8ff, #ebeef5); }
-  .tile-self .tile-stage { background: linear-gradient(160deg, #f0dcff, #f2e8ff); }
-
-  /* ---------- Inputs (select, input, textarea) ---------- */
-  .memory-cat-select,
-  .memory-textarea,
-  .memory-tag-input,
-  .memory-search-input,
-  .skill-install-input {
-    background: var(--bg-input);
-    border-color: var(--border-soft);
-    color: var(--text-primary);
-  }
-  .memory-cat-select:focus,
-  .memory-textarea:focus,
-  .memory-tag-input:focus,
-  .memory-search-input:focus,
-  .skill-install-input:focus {
-    border-color: var(--accent);
-  }
-  .voice-select {
-    background: var(--bg-input);
-    border-color: var(--border-soft);
-    color: var(--text-primary);
-  }
-  .voice-select:focus { border-color: var(--accent); }
-
-  /* ---------- Hover states ---------- */
-  .memory-chip:hover,
-  .memory-btn:hover,
-  .skill-btn:hover { background: var(--bg-hover); }
-
-  .skill-btn-danger:hover { background: var(--danger-soft); }
-
-  /* ---------- Text colors ---------- */
-  .memory-error,
-  .skill-error { color: var(--danger); }
-
-  /* Settings armed state */
-  .drawer-settings-armed .drawer-settings-title { color: #b85a00; }
-  .drawer-settings-armed .drawer-settings-hint { color: #a85500; }
-
-  /* Tile specialty and status colors */
-  .tile-specialty-devops { color: #8a4400; }
-  .tile-specialty-review { color: #9e0050; }
-  .tile-specialty-electron { color: #006699; }
-  .tile-specialty-general { color: var(--text-secondary); }
-  .tile-history-status-failed { color: var(--danger); }
-  .tile-history-status-done { color: var(--success); }
-  .tile-history-status-running,
-  .tile-history-status-pending { color: var(--accent); }
-
-  .tb-btn-danger { color: var(--danger); }
-
-  .attachment-chip-pdf .attachment-icon { color: #c85000; }
-  .attachment-chip-rejected .attachment-icon { color: var(--danger); }
-  .attachment-chip-rejected .attachment-size { color: var(--danger); }
-
-  /* ---------- Buttons ---------- */
-  .skill-install-btn,
-  .memory-btn {
-    background: var(--bg-elevated);
-    border: 1px solid var(--border-soft);
-    color: var(--text-primary);
-  }
-  .skill-install-btn:hover,
-  .memory-btn:hover {
-    background: var(--bg-hover);
-    border-color: var(--border-strong);
-  }
-  .memory-btn-primary {
-    background: var(--accent);
-    border-color: var(--accent);
-    color: #ffffff;
-  }
-  .memory-btn-danger {
-    color: var(--danger);
-    border-color: var(--danger);
-    background: transparent;
-  }
-
-  /* ---------- Skill panel ---------- */
-  .skill-item {
-    background: var(--bg-elevated);
-    border-color: var(--border-soft);
-  }
-  .skill-item-source { color: var(--text-muted); }
-  .skill-item-desc { color: var(--text-secondary); }
-  .skill-item-readonly { color: var(--text-muted); }
-
-  /* ---------- Voice panel ---------- */
-  .voice-pref-row {
-    border-color: var(--border-soft);
-  }
-  .voice-polish-toggle {
-    color: var(--text-primary);
-  }
-
-  /* ---------- Voice lock panel ---------- */
-  .voice-lock-status {
-    color: var(--text-secondary);
-  }
-
-  /* ---------- Memory panel ---------- */
-  .memory-chip {
-    background: var(--bg-elevated);
-    border: 1px solid var(--border-soft);
-    color: var(--text-primary);
-  }
-  .memory-chip-active {
-    background: var(--accent);
-    border-color: var(--accent);
-    color: #ffffff;
-  }
-  .memory-row {
-    border-color: var(--border-soft);
-  }
-  .memory-row-content { color: var(--text-primary); }
-  .memory-tag-chip {
-    background: var(--accent-soft);
-    color: var(--accent);
-  }
-  .memory-row-editing {
-    border-color: var(--accent);
-    background: var(--bg-elevated);
-  }
-  .memory-empty { color: var(--text-muted); }
-
-  /* ---------- Settings window panels ---------- */
-  .settings-window-body .drawer-settings {
-    background: var(--bg-panel);
-  }
-
-  /* ---------- Drawer toggle switch ---------- */
-  .drawer-toggle {
-    background: rgba(0, 0, 0, 0.12);
-  }
-  .drawer-toggle-knob {
-    background: #ffffff;
-  }
-  .drawer-toggle-on {
-    background: rgba(255, 138, 0, 0.85);
-    border-color: rgba(255, 138, 0, 0.9);
-  }
-  .drawer-toggle-on .drawer-toggle-knob {
-    background: #ffffff;
-  }
-
-  /* ---------- Install result banners ---------- */
-  .skill-install-result-success {
-    background: var(--success-soft);
-    border-color: var(--success);
-    color: #1a7a35;
-  }
-  .skill-install-result-error {
-    background: var(--danger-result-soft);
-    border-color: var(--danger);
-    color: var(--danger);
-  }
-
-  /* ---------- Chat bubbles ---------- */
-  .msg-user .msg-body {
-    color: #1c1c1e;
-  }
-
-  /* ---------- Workspace status bar ---------- */
-  .workspace-status-speaking { color: #007aff; }
-  .workspace-status-working { color: #248a3d; }
-  .workspace-status-waiting { color: #b25000; }
-
-  /* ---------- Scope picker (auto-approve dropdown) ---------- */
-  .mtg-scope-picker {
-    background: #ffffff;
-    border-color: rgba(0, 0, 0, 0.12);
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
-  }
-  .mtg-scope-picker-title { color: var(--text-muted); }
-  .mtg-scope-option {
-    color: var(--text-primary);
-    border-color: var(--border-soft);
-  }
-  .mtg-scope-option:hover {
-    background: var(--bg-hover);
-    border-color: var(--border-strong);
-  }
-  .mtg-scope-option-active { color: var(--success); }
-  .mtg-scope-option-desc { color: var(--text-muted); }
-
-  /* ---------- Auto-approve toggle ---------- */
-  .mtg-trust-chip { color: #8a4400; }
-  .mtg-trust-chip:hover { color: #6e3600; }
-  .mtg-approve-toggle {
-    background: rgba(0, 0, 0, 0.04);
-    border-color: var(--border-soft);
-    color: var(--text-secondary);
-  }
-  .mtg-approve-toggle:hover {
-    background: var(--bg-hover);
-    color: var(--text-primary);
-  }
-  .mtg-approve-toggle-track { background: rgba(0, 0, 0, 0.12); }
-  .mtg-approve-toggle-on { color: #8a4400; }
-  .mtg-approve-toggle-on:hover { color: #6e3600; }
-
-  /* ---------- Multi-agent toggle ---------- */
-  .mtg-multi-toggle-on { color: var(--accent); }
-  .mtg-multi-toggle-on:hover { color: #005ec4; }
-
-  /* ---------- Tab bar ---------- */
-  .stage-tab-bar {
-    background: var(--bg-elevated);
-    border-color: var(--border-soft);
-  }
-  .stage-tab:hover {
-    background: var(--bg-hover);
-    color: var(--text-primary);
-  }
-  .stage-tab-active {
-    background: var(--accent-soft);
-    color: var(--text-primary);
-  }
-  .stage-tab-close:hover {
-    background: rgba(0, 0, 0, 0.08);
-    color: var(--text-primary);
-  }
-  .stage-tab-add-btn:hover {
-    background: var(--bg-hover);
-    color: var(--text-primary);
-  }
-  .stage-tab-menu {
-    background: #ffffff;
-    border-color: var(--border-soft);
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
-  }
-  .stage-tab-menu-item { color: var(--text-primary); }
-  .stage-tab-menu-item:hover {
-    background: var(--bg-hover);
-    color: var(--text-primary);
-  }
-  .tab-strip-close:hover { background: rgba(0, 0, 0, 0.08); }
-  .tab-strip-add:hover { background: rgba(0, 0, 0, 0.06); }
-
-  /* ---------- Gallery / tiles ---------- */
-  .tiles--overlay .tile {
-    background: rgba(255, 255, 255, 0.85);
-    border-color: var(--border-soft);
-  }
-  .tile-role-badge { color: var(--text-muted); }
-  .tile-stage {
-    background: var(--bg-elevated);
-    border-color: var(--border-soft);
-  }
-  .tile-specialty-badge {
-    color: var(--text-secondary);
-    border-color: var(--border-soft);
-  }
-  .tile-specialty-frontend { color: #7b2d8e; }
-  .tile-specialty-backend { color: #0056b3; }
-  .tile-specialty-electron { color: #006699; }
-  .tile-specialty-devops { color: #8a4400; }
-  .tile-specialty-test { color: #1a7a35; }
-  .tile-specialty-docs { color: #4a4a4a; }
-  .tile-specialty-review { color: #9e0050; }
-  .tile-specialty-general {
-    color: var(--text-secondary);
-    border-color: var(--border-soft);
-  }
-  .tile-history-toggle {
-    color: var(--text-secondary);
-    background: rgba(0, 0, 0, 0.04);
-    border-color: var(--border-soft);
-  }
-  .tile-history-toggle:hover {
-    background: var(--bg-hover);
-    border-color: var(--border-strong);
-  }
-  .tile-history-toggle-open { color: var(--accent); }
-  .tile-history-panel {
-    background: #ffffff;
-    border-color: var(--border-soft);
-  }
-  .tile-history-header { color: var(--text-muted); }
-  .tile-history-item { border-left-color: var(--border-soft); }
-  .tile-history-status {
-    background: rgba(0, 0, 0, 0.04);
-    color: var(--text-muted);
-  }
-  .tile-history-status-done { color: var(--success); }
-  .tile-history-status-failed { color: var(--danger); }
-  .tile-history-meta { color: var(--text-muted); }
-  .tiles-bar {
-    background: var(--bg-elevated);
-    border-color: var(--border-soft);
-  }
-
-  /* ---------- Drawer / settings panels ---------- */
-  .drawer-settings {
-    background: var(--bg-elevated);
-    border-color: var(--border-soft);
-  }
-  .drawer-tabs {
-    background: var(--bg-elevated);
-    border-color: var(--border-soft);
-  }
-  .drawer-composer {
-    background: var(--bg-elevated);
-    border-color: var(--border-soft);
-  }
-  .voice-lock-cancel { color: var(--danger); }
-
-  /* ---------- Chat area ---------- */
-  .drawer-send-icon { color: var(--accent); }
-  .drawer-send-icon:hover { color: #005ec4; }
-  .drawer-attach-icon:hover { background: var(--bg-hover); }
-  .attachment-chip {
-    background: var(--bg-elevated);
-    border-color: var(--border-soft);
-  }
-  .attachment-chip-remove:hover { background: rgba(0, 0, 0, 0.08); }
-  .attachment-chip-text .attachment-icon { color: #1a7a35; }
-  .attachment-chip-word .attachment-icon { color: var(--accent); }
-  .attachment-chip-pdf .attachment-icon { color: #c85000; }
-  .attachment-chip-image .attachment-icon { color: #8a6d00; }
-  .attachment-chip-rejected { color: var(--danger); }
-  .attachment-chip-sent {
-    background: var(--bg-elevated);
-    border-color: var(--border-soft);
-  }
-  .mtg-dropping::after {
-    color: var(--accent);
-    background: rgba(242, 242, 247, 0.85);
-  }
-
-  /* ---------- Activity area ---------- */
-  .act-row.has-detail:hover { background: var(--bg-hover); }
-  .act-action {
-    border-color: var(--border-soft);
-    background: var(--bg-elevated);
-    color: var(--text-primary);
-  }
-  .act-action:hover {
-    background: var(--bg-hover);
-    border-color: var(--border-strong);
-  }
-
-  /* ---------- Workspace status pills ---------- */
-  .workspace-status-speaking { color: var(--accent); }
-  .workspace-status-working { color: var(--success); }
-  .workspace-status-waiting { color: var(--warn); }
-
-  /* ---------- Worker cards (multi-agent) ---------- */
-  .worker-card-stage {
-    background: var(--bg-elevated);
-    border-color: var(--border-soft);
-  }
-  .worker-card-stage-talker {
-    background: linear-gradient(160deg, #dce8ff, #ebeef5);
-  }
-  .worker-card-stage-worker {
-    background: linear-gradient(160deg, #e0f0e8, #ebeef5);
-  }
-  .worker-card-footer {
-    background: var(--bg-elevated);
-    border-color: var(--border-soft);
-  }
-  .worker-card-sidebar:hover { border-color: var(--border-strong); }
-  .worker-card-pill-idle { background: var(--bg-hover); }
-  .worker-card-pill-waiting { color: var(--warn); }
-  .worker-card-pill-working { color: var(--accent); }
-  .worker-card-pill-done { color: var(--success); }
-  .worker-card-pill-failed { color: var(--danger); }
-  .worker-card-dep-chip { color: var(--warn); }
-  .worker-card-activity-row { border-left-color: var(--border-soft); }
-  .worker-card-activity-system { border-color: var(--border-soft); }
-  .worker-card-perm-allow { color: var(--success); }
-  .worker-card-perm-deny { color: var(--danger); }
-  .worker-card-summary { border-top-color: var(--border-soft); }
-
-  /* ---------- Workspace task pills ---------- */
-  .workspace-task-pill-idle { background: var(--bg-hover); }
-  .workspace-task-pill-waiting { color: var(--warn); }
-  .workspace-task-pill-working { color: var(--accent); }
-  .workspace-task-pill-done { color: var(--success); }
-  .workspace-task-pill-failed { color: var(--danger); }
-  .workspace-task-pill-speaking { color: var(--accent); }
-  .workspace-feed-row-clickable:hover { background: var(--bg-hover); }
-  .workspace-feed-row-open { background: var(--accent-soft); }
-  .workspace-feed-task-pill-pending { color: var(--warn); }
-  .workspace-feed-task-pill-running { color: var(--accent); }
-  .workspace-feed-task-pill-done { color: var(--success); }
-  .workspace-feed-task-pill-failed { color: var(--danger); }
-
-  /* ---------- Browser panel ---------- */
-  .browser-stage {
-    background: var(--bg-elevated);
-    border-color: var(--border-soft);
-  }
-  .browser-toolbar {
-    background: var(--bg-elevated);
-    border-color: var(--border-soft);
-  }
-  .browser-tab {
-    background: var(--bg-elevated);
-    color: var(--text-primary);
-  }
-  .browser-tab:hover {
-    background: var(--bg-hover);
-    color: var(--text-primary);
-  }
-  .browser-tab-active {
-    background: var(--accent-soft);
-    color: var(--text-primary);
-  }
-  .browser-tab-favicon { color: var(--text-muted); }
-  .browser-tab-close:hover { background: rgba(0, 0, 0, 0.08); }
-  .browser-tab-add:hover {
-    background: var(--bg-hover);
-    color: var(--text-primary);
-  }
-  .browser-nav-btn:hover {
-    background: var(--bg-hover);
-    color: var(--text-primary);
-  }
-  .browser-url-input {
-    background: var(--bg-input);
-    color: var(--text-primary);
-    border-color: var(--border-soft);
-  }
-
-  /* ---------- Delivery stage ---------- */
-  .stage-delivery {
-    background: linear-gradient(170deg, #e8e8ed 0%, #f2f2f7 100%);
-  }
-  .delivery-viewer-summary { color: var(--text-primary); }
-  .delivery-viewer-sidebar {
-    background: var(--bg-elevated);
-    border-color: var(--border-soft);
-  }
-  .delivery-viewer-file:hover { background: var(--bg-hover); }
-  .delivery-viewer-content {
-    background: var(--bg-elevated);
-    border-color: var(--border-soft);
-  }
-  .delivery-viewer-feedback-input {
-    background: var(--bg-input);
-    border-color: var(--border-soft);
-    color: var(--text-primary);
-  }
-  .delivery-viewer-btn-primary:hover { background: #005ec4; }
-  .delivery-viewer-btn-secondary {
-    background: var(--bg-elevated);
-    border-color: var(--border-soft);
-  }
-  .delivery-viewer-btn-secondary:hover {
-    background: var(--bg-hover);
-    border-color: var(--border-strong);
-  }
-
-  /* ---------- Participant tabs ---------- */
-  .participant-tabs {
-    background: var(--bg-elevated);
-    border-color: var(--border-soft);
-  }
-  .participant-tabs-bar {
-    border-bottom-color: var(--border-soft);
-    background: var(--bg-elevated);
-  }
-  .participant-tab {
-    color: var(--text-secondary);
-  }
-  .participant-tab:hover {
-    background: var(--bg-hover);
-    color: var(--text-primary);
-  }
-  .participant-tab-active {
-    color: var(--accent);
-  }
-
-  /* ---------- Review / Spec panels ---------- */
-  .review-panel-empty { color: var(--text-muted); }
-  .review-panel-summary { color: var(--accent); }
-  .review-change {
-    background: var(--bg-elevated);
-    border-color: var(--border-soft);
-  }
-  .review-change-header {
-    background: var(--bg-hover);
-  }
-  .review-change-tool { color: var(--text-primary); }
-  .review-change-path { color: var(--text-secondary); }
-  .review-change-ts { color: var(--text-muted); }
-  .review-change-detail { color: var(--text-secondary); }
-  .spec-panel-empty { color: var(--text-muted); }
-  .spec-panel-header h3 { color: var(--text-primary); }
-  .spec-panel-count { color: var(--text-muted); }
-  .spec-message {
-    background: var(--bg-elevated);
-    border-color: var(--border-soft);
-  }
-  .spec-message-meta {
-    background: var(--bg-hover);
-  }
-  .spec-message-ts { color: var(--text-muted); }
-
-  /* ---------- Terminal panel (always dark) ---------- */
-  .terminal-panel {
-    background: #1e1e1e;
-    color: #e0e0e0;
-  }
-  .terminal-panel-empty { color: rgba(255, 255, 255, 0.4); }
-  .terminal-block { background: #2d2d2d; }
-  .terminal-block-header {
-    background: #333;
-    color: rgba(255, 255, 255, 0.6);
-  }
-  .terminal-block-command { color: #68d391; }
-  .terminal-block-output {
-    color: rgba(255, 255, 255, 0.85);
-    background: #252525;
-    border-top-color: #333;
-  }
-
-  /* ---------- File tree ---------- */
-  .file-tree-row:hover { background: var(--bg-hover); }
-  .file-tree-spinner {
-    border-color: rgba(0, 0, 0, 0.15);
-    border-top-color: var(--accent);
-  }
-
-  /* ---------- Pickers / modals ---------- */
-  .picker-backdrop {
-    background: rgba(0, 0, 0, 0.4);
-  }
-  .picker-error { color: var(--danger); }
-  .picker-btn-relaunch { color: var(--danger); }
-  .picker-btn-relaunch:hover { color: #c00; }
-  .plan-modal-help code {
-    background: rgba(0, 0, 0, 0.06);
-    color: var(--accent);
-  }
-  .plan-modal-textarea {
-    background: var(--bg-input);
-    border-color: var(--border-soft);
-    color: var(--text-primary);
-  }
-  .plan-modal-preview {
-    background: var(--bg-hover);
-  }
-  .plan-modal-preview code { color: var(--accent); }
-  .plan-modal-error { color: var(--danger); }
-  .plan-modal-cancel:hover { background: var(--bg-hover); }
-  .error-banner { color: var(--danger); }
-  .error-banner__reconnect {
-    background: var(--bg-elevated);
-    color: var(--text-primary);
-    border-color: var(--border-soft);
-  }
-  .error-banner__reconnect:hover {
-    background: var(--bg-hover);
-    border-color: var(--border-strong);
-  }
-  .settings-modal {
-    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.05);
-  }
-
-  /* ---------- Join screen extras ---------- */
-  .join-error { color: var(--danger); }
-  .join-auth-badge.active { color: var(--success); }
-  .join-auth-error { color: var(--danger); }
-
-  /* ---------- Skill panel extras ---------- */
-  .skill-install-result-dismiss:hover { background: var(--bg-hover); }
-  .skill-btn-danger { color: var(--danger); }
-  .skill-item-source {
-    background: var(--bg-hover);
-  }
-  .skill-btn {
-    background: var(--bg-elevated);
-    border-color: var(--border-soft);
-    color: var(--text-primary);
-  }
-  .skill-btn:hover {
-    background: var(--bg-hover);
-    border-color: var(--border-strong);
-  }
-
-  /* ---------- Memory panel extras ---------- */
-  .memory-chip-active { color: #ffffff; }
-  .memory-scope-toggle {
-    background: var(--bg-elevated);
-    border-color: var(--border-soft);
-  }
-  .memory-scope-on { color: #8a4400; }
-  .memory-btn-primary { color: #ffffff; }
-  .memory-btn-danger { color: var(--danger); }
-
-  /* ---------- Workspace feed rows ---------- */
-  .workspace-feed-row {
-    background: var(--bg-elevated);
-    border-color: var(--border-soft);
-  }
-  .workspace-feed-row-clickable:hover {
-    background: var(--bg-hover);
-    border-color: var(--border-strong);
-  }
-  .workspace-feed-row-open {
-    background: var(--accent-soft);
-    border-color: var(--accent);
-  }
-
-  /* ---------- Agent pills ---------- */
-  .agent-pill-talker {
-    background: rgba(0, 122, 255, 0.1);
-    color: #0055cc;
-  }
-  .agent-pill-worker {
-    background: rgba(52, 199, 89, 0.1);
-    color: #1a7a35;
-  }
-
-  /* ---------- Tile status, footer, role badge ---------- */
-  .tile-status {
-    background: rgba(0, 0, 0, 0.06);
-    color: var(--text-secondary);
-    backdrop-filter: none;
-  }
-  .tile-footer {
-    background: rgba(0, 0, 0, 0.03);
-  }
-  .tile-role-badge {
-    color: var(--text-muted);
-    background: rgba(0, 0, 0, 0.06);
-  }
-
-  /* ---------- Tile specialty badge (dark hardcoded) ---------- */
-  .tile-specialty-frontend { background: rgba(177, 91, 255, 0.1); border-color: rgba(177, 91, 255, 0.3); color: #7b2d8e; }
-  .tile-specialty-backend  { background: rgba(51, 112, 255, 0.1); border-color: rgba(51, 112, 255, 0.3); color: #0056b3; }
-  .tile-specialty-electron { background: rgba(0, 182, 255, 0.1); border-color: rgba(0, 182, 255, 0.3); color: #006699; }
-  .tile-specialty-devops   { background: rgba(255, 138, 0, 0.1); border-color: rgba(255, 138, 0, 0.3); color: #8a4400; }
-  .tile-specialty-test     { background: rgba(75, 200, 110, 0.1); border-color: rgba(75, 200, 110, 0.3); color: #1a7a35; }
-  .tile-specialty-docs     { background: rgba(180, 180, 180, 0.15); border-color: rgba(180, 180, 180, 0.35); color: #4a4a4a; }
-  .tile-specialty-review   { background: rgba(255, 95, 162, 0.1); border-color: rgba(255, 95, 162, 0.3); color: #9e0050; }
-  .tile-specialty-general  { background: rgba(0, 0, 0, 0.04); border-color: rgba(0, 0, 0, 0.12); color: var(--text-secondary); }
-
-  /* ---------- Tiles bar / detail / dock (gallery containers) ---------- */
-  .tiles-bar {
-    background: var(--bg-elevated);
-    border-color: var(--border-soft);
-    backdrop-filter: none;
-  }
-  .tiles-bar-collapse {
-    background: rgba(0, 0, 0, 0.04);
-    border-color: var(--border-soft);
-    color: var(--text-secondary);
-  }
-  .tiles-bar-collapse:hover {
-    background: rgba(0, 0, 0, 0.08);
-    color: var(--text-primary);
-  }
-  .tiles-detail {
-    background: var(--bg-elevated);
-    border-color: var(--border-soft);
-    backdrop-filter: none;
-  }
-  .dock-sidebar {
-    background: var(--bg-elevated);
-    border-color: var(--border-soft);
-    backdrop-filter: none;
-  }
-  .dock-detail {
-    background: var(--bg-elevated);
-    border-color: var(--border-soft);
-    backdrop-filter: none;
-  }
-
-  /* ---------- Worker card ---------- */
-  .worker-card {
-    background: var(--bg-elevated);
-    border-color: var(--border-soft);
-  }
-  .worker-card-sidebar:hover { border-color: var(--border-strong); }
-  .worker-card-status-badge {
-    background: rgba(0, 0, 0, 0.06);
-    color: var(--text-secondary);
-    backdrop-filter: none;
-  }
-  .worker-card-tool {
-    background: rgba(0, 0, 0, 0.04);
-  }
-  .worker-card-pill-idle    { background: rgba(0, 0, 0, 0.05); color: var(--text-muted); }
-  .worker-card-pill-waiting { background: rgba(255, 149, 0, 0.1); color: #b25000; }
-  .worker-card-pill-working { background: rgba(0, 122, 255, 0.1); color: var(--accent); }
-  .worker-card-pill-done    { background: rgba(52, 199, 89, 0.1); color: #248a3d; }
-  .worker-card-pill-failed  { background: rgba(255, 59, 48, 0.1); color: var(--danger); }
-  .worker-card-dep-chip {
-    background: rgba(255, 149, 0, 0.1);
-    color: #b25000;
-  }
-  .worker-card-activity-row {
-    border-left-color: var(--border-soft);
-  }
-  .worker-card-activity-tool-call   { border-color: var(--accent); }
-  .worker-card-activity-tool-result { border-color: var(--success); }
-  .worker-card-activity-error       { border-color: var(--danger); }
-  .worker-card-activity-system      { border-color: var(--border-soft); }
-  .worker-card-perm {
-    background: rgba(255, 149, 0, 0.06);
-    border-color: rgba(255, 149, 0, 0.25);
-  }
-  .worker-card-perm-allow {
-    background: rgba(52, 199, 89, 0.1);
-    color: #248a3d;
-    border-color: rgba(52, 199, 89, 0.3);
-  }
-  .worker-card-perm-deny {
-    background: rgba(255, 59, 48, 0.08);
-    color: var(--danger);
-    border-color: rgba(255, 59, 48, 0.3);
-  }
-  .worker-card-summary {
-    border-top-color: var(--border-soft);
-  }
-  .worker-card-icon-speaking { background: rgba(0, 122, 255, 0.1); }
-  .worker-card-icon-perm { background: rgba(255, 149, 0, 0.12); }
-
-  /* ---------- Workspace status pills ---------- */
-  .workspace-status-speaking {
-    color: var(--accent);
-    border-color: var(--accent);
-    background: var(--accent-soft);
-  }
-  .workspace-status-speaking .workspace-status-dot {
-    background: var(--accent);
-    box-shadow: 0 0 0 4px rgba(0, 122, 255, 0.15);
-  }
-  .workspace-status-working {
-    color: #248a3d;
-    border-color: rgba(52, 199, 89, 0.4);
-    background: rgba(52, 199, 89, 0.08);
-  }
-  .workspace-status-waiting {
-    color: #b25000;
-    border-color: rgba(255, 149, 0, 0.35);
-    background: rgba(255, 149, 0, 0.08);
-  }
-
-  /* ---------- Workspace aurora (lighten for light mode) ---------- */
-  .workspace-aurora {
-    background:
-      radial-gradient(600px 380px at 18% 20%, rgba(0, 122, 255, 0.08), transparent 70%),
-      radial-gradient(500px 320px at 82% 88%, rgba(0, 182, 255, 0.06), transparent 70%);
-  }
-  .workspace-speaking .workspace-aurora { opacity: 1; }
-  .workspace-waiting .workspace-aurora {
-    background:
-      radial-gradient(600px 380px at 50% 30%, rgba(255, 149, 0, 0.08), transparent 70%);
-  }
-
-  /* ---------- Workspace task pills ---------- */
-  .workspace-task-pill-idle     { background: rgba(0, 0, 0, 0.05); color: var(--text-muted); }
-  .workspace-task-pill-waiting  { background: rgba(255, 149, 0, 0.1); color: #b25000; }
-  .workspace-task-pill-working  { background: rgba(0, 122, 255, 0.1); color: var(--accent); }
-  .workspace-task-pill-done     { background: rgba(52, 199, 89, 0.1); color: #248a3d; }
-  .workspace-task-pill-failed   { background: rgba(255, 59, 48, 0.1); color: var(--danger); }
-  .workspace-task-pill-speaking { background: rgba(0, 122, 255, 0.1); color: var(--accent); }
-
-  /* ---------- Workspace feed task pills ---------- */
-  .workspace-feed-task-pill-pending { background: rgba(255, 149, 0, 0.1); color: #b25000; }
-  .workspace-feed-task-pill-running { background: rgba(0, 122, 255, 0.1); color: var(--accent); }
-  .workspace-feed-task-pill-done    { background: rgba(52, 199, 89, 0.1); color: #248a3d; }
-  .workspace-feed-task-pill-failed  { background: rgba(255, 59, 48, 0.1); color: var(--danger); }
-
-  /* ---------- Tab strip (multi-meeting switcher) ---------- */
-  .tab-strip-item:hover {
-    background: var(--bg-hover);
-    color: var(--text-primary);
-  }
-  .tab-strip-item-active {
-    background: var(--bg-stage);
-    border-color: var(--border-soft);
-    color: var(--text-primary);
-  }
-  .tab-strip-close:hover { background: rgba(0, 0, 0, 0.06); }
-  .tab-strip-add:hover { background: rgba(0, 0, 0, 0.04); }
-
-  /* ---------- File tree ---------- */
-  .file-tree-row:hover { background: var(--bg-hover); }
-  .file-tree-row.active { background: var(--accent-soft); }
-  .file-tree-spinner {
-    border-color: rgba(0, 0, 0, 0.12);
-    border-top-color: var(--accent);
-  }
-
-  /* ---------- Delivery viewer ---------- */
-  .delivery-viewer-sidebar {
-    background: var(--bg-elevated);
-    border-color: var(--border-soft);
-  }
-  .delivery-viewer-file:hover { background: var(--bg-hover); }
-  .delivery-viewer-file.is-active {
-    background: var(--accent-soft);
-    border-color: var(--accent);
-    color: var(--text-primary);
-  }
-  .delivery-viewer-content {
-    background: var(--bg-elevated);
-    border-color: var(--border-soft);
-  }
-  .delivery-viewer-toast {
-    background: var(--bg-elevated);
-    border-color: var(--border-soft);
-  }
-  .delivery-viewer-btn-secondary {
-    background: var(--bg-elevated);
-    border-color: var(--border-soft);
-    color: var(--text-primary);
-  }
-  .delivery-viewer-btn-secondary:hover:not(:disabled) {
-    background: var(--bg-hover);
-  }
-
-  /* ---------- Drawer tabs & composer ---------- */
-  .drawer-tabs {
-    background: var(--bg-elevated);
-    border-color: var(--border-soft);
-  }
-  .drawer-composer {
-    background: var(--bg-elevated);
-    border-color: var(--border-soft);
-  }
-  .drawer-settings {
-    background: var(--bg-elevated);
-    border-color: var(--border-soft);
-  }
-
-  /* ---------- Message bubbles ---------- */
-  .msg-user .msg-body {
-    background: var(--accent-soft);
-    color: var(--accent);
-  }
-  .msg-assistant .msg-body {
-    background: var(--bg-elevated);
-    color: var(--text-primary);
-  }
-
-  /* ---------- Error banner ---------- */
-  .error-banner { color: var(--danger); }
-  .error-banner__reconnect {
-    background: var(--bg-elevated);
-    color: var(--text-primary);
-    border-color: var(--border-soft);
-  }
-  .error-banner__reconnect:hover {
-    background: var(--bg-hover);
-  }
-
-  /* ---------- Stage banner ---------- */
-  .stage-banner {
-    background: rgba(0, 0, 0, 0.55);
-    color: #ffffff;
-  }
-  .stage-banner-stop {
-    background: rgba(255, 255, 255, 0.18);
-    color: #ffffff;
-  }
-
-  /* ---------- Workspace now card ---------- */
-  .workspace-now-card {
-    background: var(--bg-elevated);
-    border-color: var(--border-soft);
-    backdrop-filter: none;
-  }
-
-  /* ---------- Workspace task card ---------- */
-  .workspace-task-card {
-    background: var(--bg-elevated);
-    border-color: var(--border-soft);
-    backdrop-filter: none;
-  }
-  .workspace-task-card:hover { border-color: var(--accent); }
-  .workspace-task-card-open { border-color: var(--accent); }
-
-  /* ---------- Attachment strip ---------- */
-  .attachment-chip {
-    background: var(--bg-elevated);
-    border-color: var(--border-soft);
-  }
-  .attachment-chip-remove:hover { background: rgba(0, 0, 0, 0.08); }
-  .attachment-chip-text .attachment-icon { color: #248a3d; }
-  .attachment-chip-word .attachment-icon { color: var(--accent); }
-  .attachment-chip-image .attachment-icon { color: #8a6d00; }
-  .attachment-chip-sent {
-    background: var(--bg-elevated);
-    border-color: var(--border-soft);
-  }
-
-  /* ---------- File viewer ---------- */
-  .file-viewer-action-btn:hover {
-    background: rgba(0, 0, 0, 0.06);
-    color: var(--text-primary);
-  }
-  .file-viewer-open-btn {
-    background: var(--bg-elevated);
-    border-color: var(--border-soft);
-    color: var(--text-primary);
-  }
-  .file-viewer-open-btn:hover {
-    background: var(--bg-hover);
-    border-color: var(--border-strong);
-  }
-  .file-viewer-close:hover {
-    background: rgba(0, 0, 0, 0.06);
-    color: var(--text-primary);
-  }
-  .file-viewer-md-body code {
-    background: rgba(0, 0, 0, 0.06);
-  }
-  .file-viewer-md-body .md-code-block {
-    background: rgba(0, 0, 0, 0.04);
-  }
-  .file-viewer-md-body a {
-    color: var(--accent);
-  }
-
-  /* ---------- User tasks pills ---------- */
-  .task-status-idle {
-    background: rgba(0, 0, 0, 0.05);
-    color: var(--text-secondary);
-  }
-  .task-status-pending {
-    background: rgba(255, 149, 0, 0.1);
-    color: #b25000;
-  }
-  .task-status-running {
-    background: rgba(0, 122, 255, 0.1);
-    color: var(--accent);
-  }
-  .task-status-done {
-    background: rgba(52, 199, 89, 0.1);
-    color: #248a3d;
-  }
-  .task-status-failed {
-    background: rgba(255, 59, 48, 0.1);
-    color: var(--danger);
-  }
-  .user-tasks-owner {
-    background: rgba(0, 0, 0, 0.04);
-    border-color: var(--border-soft);
-    color: var(--text-secondary);
-  }
-
-  /* ---------- Review panel ---------- */
-  .review-panel-empty { color: var(--text-muted); }
-  .review-panel-summary {
-    background: var(--accent-soft);
-    color: var(--accent);
-  }
-  .review-change {
-    background: var(--bg-elevated);
-    border-color: var(--border-soft);
-  }
-  .review-change-header { background: var(--bg-hover); }
-  .review-change-tool { color: var(--text-primary); }
-  .review-change-path { color: var(--text-secondary); }
-  .review-change-ts { color: var(--text-muted); }
-  .review-change-detail { color: var(--text-secondary); }
-
-  /* ---------- Spec panel ---------- */
-  .spec-panel-empty { color: var(--text-muted); }
-  .spec-panel-header { background: var(--accent-soft); }
-  .spec-panel-header h3 { color: var(--text-primary); }
-  .spec-panel-count { color: var(--text-muted); }
-  .spec-message {
-    background: var(--bg-elevated);
-    border-color: var(--border-soft);
-  }
-  .spec-message-meta { background: var(--bg-hover); }
-  .spec-message-role { color: var(--accent); }
-  .spec-message-ts { color: var(--text-muted); }
-  .spec-message-text { color: var(--text-primary); }
-
-  /* ---------- Participant tabs ---------- */
-  .participant-tabs {
-    background: var(--bg-elevated);
-    backdrop-filter: none;
-  }
-  .participant-tabs-bar {
-    background: var(--bg-elevated);
-    border-bottom-color: var(--border-soft);
-  }
-  .participant-tab {
-    color: var(--text-secondary);
-  }
-  .participant-tab:hover {
-    background: var(--bg-hover);
-    color: var(--text-primary);
-  }
-  .participant-tab-active {
-    background: var(--accent-soft);
-    color: var(--accent);
-  }
-  .participant-placeholder { color: var(--text-muted); }
-
-  /* ---------- Workspace delivery accept ---------- */
-  .workspace-delivery-accept-btn {
-    background: rgba(52, 199, 89, 0.08);
-    border-color: rgba(52, 199, 89, 0.3);
-    color: #248a3d;
-  }
-  .workspace-delivery-accept-btn:hover {
-    background: rgba(52, 199, 89, 0.15);
-    border-color: rgba(52, 199, 89, 0.5);
-  }
-
-  /* ---------- Skill install result dismiss ---------- */
-  .skill-install-result-dismiss:hover { background: rgba(0, 0, 0, 0.06); }
-
-  /* ---------- Browser panel (additional) ---------- */
-  .browser-tab-close:hover { background: rgba(0, 0, 0, 0.06); }
-
-  /* ---------- Toolbar ---------- */
-  .tb-btn-danger { color: var(--danger); }
-  .tb-btn-warn { background: rgba(255, 149, 0, 0.1); color: var(--warn); }
-
-  /* ---------- Error text colors (readable on light bg) ---------- */
-  .file-viewer-error { color: var(--danger); }
-  .stage-error-floating { color: var(--danger); }
-
-  /* ---------- Picker items ---------- */
-  .picker-item {
-    background: var(--bg-elevated);
-    border-color: var(--border-soft);
-  }
-  .picker-item:hover { border-color: var(--accent); }
-
-  /* ---------- Drawer input & stage ---------- */
-  .drawer-input {
-    background: var(--bg-input);
-    border-color: var(--border-soft);
-    color: var(--text-primary);
-  }
-
-  /* ---------- Perm card ---------- */
-  .perm-card {
-    background: var(--bg-elevated);
-    border-color: var(--accent);
-  }
-  .perm-input {
-    background: var(--bg-input);
-    color: var(--text-secondary);
-  }
-  .perm-deny {
-    background: var(--bg-elevated);
-    border-color: var(--border-strong);
-    color: var(--text-secondary);
-  }
-  .perm-deny:hover { background: var(--bg-hover); }
-
-  /* ---------- Workspace status off ---------- */
-  .workspace-status-off { color: var(--text-muted); }
-
-  /* ---------- Drawer empty / scroll ---------- */
-  .drawer-empty { color: var(--text-muted); }
-
-  /* ---------- Picker permission section ---------- */
-  .picker-permission-icon {
-    background: var(--bg-elevated);
-    border-color: var(--border-soft);
-  }
-
-  /* ---------- Skill install form ---------- */
-  .skill-install-form { gap: 6px; }
-
-  /* ---------- Voice select guide ---------- */
-  .voice-select-guide:hover { background: rgba(0, 122, 255, 0.15); }
-
-  /* ---------- Plan modal ---------- */
-  .plan-modal {
-    background: var(--bg-elevated);
-    border-color: var(--border-soft);
-  }
-  .plan-modal-textarea {
-    background: var(--bg-input);
-    border-color: var(--border-soft);
-    color: var(--text-primary);
-  }
-  .plan-modal-cancel {
-    border-color: var(--border-soft);
-    color: var(--text-secondary);
-  }
-  .plan-modal-cancel:hover { background: var(--bg-hover); }
-
-  /* ---------- Settings modal backdrop & shadow ---------- */
-  .settings-modal-backdrop {
-    background: rgba(0, 0, 0, 0.3);
-  }
-  .settings-modal {
-    background: rgba(255, 255, 255, 0.92);
-    box-shadow: 0 24px 64px rgba(0, 0, 0, 0.12), 0 0 0 1px rgba(0, 0, 0, 0.05);
-  }
-
-  /* ---------- Plan modal backdrop & shadow ---------- */
-  .plan-modal-backdrop {
-    background: rgba(0, 0, 0, 0.3);
-  }
-  .plan-modal {
-    box-shadow: 0 16px 48px -8px rgba(0, 0, 0, 0.15);
-  }
-  .plan-modal-preview code {
-    background: rgba(0, 122, 255, 0.08);
-    color: var(--accent);
-  }
-  .plan-modal-error {
-    background: var(--danger-soft);
-    color: var(--danger);
-    border-color: rgba(255, 59, 48, 0.3);
-  }
-
-  /* ---------- Review document ---------- */
-  .review-document {
-    background: var(--accent-soft);
-    border-color: rgba(0, 122, 255, 0.2);
-  }
-  .review-document-header {
-    background: rgba(0, 122, 255, 0.08);
-  }
-  .review-document-title { color: var(--text-primary); }
-  .review-document-ts { color: var(--text-muted); }
-  .review-document-detail { color: var(--text-secondary); }
-  .review-document-open {
-    background: var(--accent-soft);
-    border-color: rgba(0, 122, 255, 0.3);
-    color: var(--accent);
-  }
-  .review-document-open:hover {
-    background: rgba(0, 122, 255, 0.18);
-    border-color: rgba(0, 122, 255, 0.4);
-  }
-
-  /* ---------- Tiles bar invite ---------- */
-  .tiles-bar-invite-btn {
-    background: rgba(0, 0, 0, 0.03);
-    border-color: rgba(0, 0, 0, 0.15);
-    color: var(--text-muted);
-  }
-  .tiles-bar-invite-btn:hover {
-    background: rgba(0, 0, 0, 0.06);
-    color: var(--text-primary);
-    border-color: rgba(0, 0, 0, 0.25);
-  }
-  .tiles-bar-invite-dropdown {
-    background: #ffffff;
-    border-color: var(--border-soft);
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
-  }
-  .tiles-bar-invite-title { color: var(--text-muted); }
-  .tiles-bar-invite-item {
-    color: var(--text-primary);
-  }
-  .tiles-bar-invite-item:hover:not(.disabled) {
-    background: var(--bg-hover);
-  }
-  .tiles-bar-invite-item.disabled {
-    color: var(--text-muted);
-    opacity: 0.5;
-  }
-  .tiles-bar-invite-added { color: var(--text-muted); }
-
-  /* ---------- Scope picker active state ---------- */
-  .mtg-scope-option-active {
-    background: rgba(52, 199, 89, 0.08);
-    border-color: rgba(52, 199, 89, 0.3);
-    color: #248a3d;
-  }
-  .mtg-scope-option-active:hover {
-    background: rgba(52, 199, 89, 0.14);
-  }
-  .mtg-scope-option-active .mtg-scope-option-desc {
-    color: rgba(36, 138, 61, 0.6);
-  }
-
-  /* ---------- Multi-toggle-on ---------- */
-  .mtg-multi-toggle-on {
-    background: rgba(0, 122, 255, 0.08);
-    border-color: rgba(0, 122, 255, 0.3);
-    color: var(--accent);
-  }
-  .mtg-multi-toggle-on:hover {
-    background: rgba(0, 122, 255, 0.14);
-    color: #005ec4;
-  }
-  .mtg-multi-toggle-on .mtg-approve-toggle-track {
-    background: rgba(0, 122, 255, 0.6);
-  }
-
-  /* ---------- Backend settings error ---------- */
-  .backend-settings-error {
-    color: var(--danger);
-    background: var(--danger-soft);
-  }
-
-  /* ---------- Drawer settings armed ---------- */
-  .drawer-settings-armed {
-    background: linear-gradient(180deg, rgba(255, 138, 0, 0.08), rgba(255, 87, 51, 0.04));
-    border-bottom-color: rgba(255, 138, 0, 0.35);
-  }
-  .drawer-settings-armed .drawer-settings-title { color: #8a4400; }
-  .drawer-settings-armed .drawer-settings-hint { color: #a85500; }
-
-  /* ---------- Voice lock cancel ---------- */
-  .voice-lock-cancel {
-    color: #ffffff;
-    background: var(--danger-soft);
-    border-color: rgba(255, 59, 48, 0.5);
-  }
-  .voice-lock-cancel:hover {
-    background: rgba(255, 59, 48, 0.2);
-    border-color: var(--danger);
-  }
-
-  /* ---------- Picker relaunch button ---------- */
-  .picker-btn-relaunch {
-    background: var(--danger-soft);
-    color: var(--danger);
-    border-color: rgba(255, 59, 48, 0.3);
-  }
-  .picker-btn-relaunch:hover {
-    background: rgba(255, 59, 48, 0.15);
-    color: #c00;
-  }
-
-  /* ---------- Participant tabs scrollbar ---------- */
-  .participant-tabs-bar::-webkit-scrollbar-thumb {
-    background: rgba(0, 0, 0, 0.15);
-  }
-
-  /* ---------- Tiles bar scroll (light scrollbar) ---------- */
-  .tiles-bar-scroll::-webkit-scrollbar-thumb {
-    background: rgba(0, 0, 0, 0.12);
-  }
-
-  /* ---------- Host terminal strip (light mode) ---------- */
-  .host-terminal-strip {
-    background: var(--bg-elevated);
-    border-color: var(--border-soft);
-    backdrop-filter: none;
-  }
-  .host-terminal-header {
-    background: var(--bg-elevated);
-    border-bottom-color: var(--border-soft);
-  }
-  .host-terminal-tab {
-    color: var(--text-secondary);
-  }
-  .host-terminal-tab:hover {
-    background: var(--bg-hover);
-    color: var(--text-primary);
-  }
-  .host-terminal-tab-active {
-    background: var(--accent-soft);
-    color: var(--accent);
-  }
-  .host-terminal-collapse-btn {
-    color: var(--text-muted);
-  }
-  .host-terminal-collapse-btn:hover {
-    background: var(--bg-hover);
-    color: var(--text-primary);
-  }
-  .host-terminal-header::-webkit-scrollbar-thumb {
-    background: rgba(0, 0, 0, 0.12);
   }
 }
 
@@ -1511,7 +220,7 @@ button:disabled {
 
 /* Auth section */
 .join-auth-section {
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-soft);
   border-radius: var(--radius-md);
   overflow: hidden;
 }
@@ -1532,7 +241,7 @@ button:disabled {
 .join-auth-chevron.open { transform: rotate(180deg); }
 
 .join-auth-body {
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--border-soft);
   padding: 14px;
   display: flex; flex-direction: column; gap: 14px;
   background: var(--bg-elevated);
@@ -1559,7 +268,7 @@ button:disabled {
 
 .join-auth-input {
   flex: 1; padding: 7px 10px; font-size: 12px; font-family: inherit;
-  background: var(--bg-app); border: 1px solid var(--border);
+  background: var(--bg-app); border: 1px solid var(--border-soft);
   border-radius: var(--radius-sm); color: var(--text-primary);
   outline: none;
   transition: border-color var(--transition);
@@ -1569,7 +278,7 @@ button:disabled {
 
 .lobby-backend-select {
   width: 100%; padding: 7px 10px; font-size: 12px; font-family: inherit;
-  background: var(--bg-app); border: 1px solid var(--border);
+  background: var(--bg-app); border: 1px solid var(--border-soft);
   border-radius: var(--radius-sm); color: var(--text-primary);
   outline: none; cursor: pointer;
   appearance: none;
@@ -1599,7 +308,7 @@ button:disabled {
   margin-top: 8px; padding: 8px 10px;
   font-size: 10px; line-height: 1.5;
   font-family: var(--mono-font, 'SF Mono', Menlo, monospace);
-  background: var(--bg-app); border: 1px solid var(--border);
+  background: var(--bg-app); border: 1px solid var(--border-soft);
   border-radius: var(--radius-sm);
   color: var(--text-secondary);
   max-height: 160px; overflow-y: auto;
@@ -1610,7 +319,7 @@ button:disabled {
   padding: 7px 14px; font-size: 12px; font-weight: 500;
   border-radius: var(--radius-sm);
   background: var(--bg-app); color: var(--text-primary);
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-soft);
   cursor: pointer; white-space: nowrap;
   transition: background var(--transition), border-color var(--transition);
 }
@@ -7704,3 +6413,1556 @@ html.popout-view #root {
 }
 
 
+/* =========================================================
+   Light mode component overrides moved to the end so they
+   override base-style hardcoded colors by cascade order.
+   ========================================================= */
+@media (prefers-color-scheme: light) {
+
+  /* Join screen decorative tiles */
+  .join-tile-ai { background: linear-gradient(160deg, #dce8ff, #ebeef5); }
+  .join-tile-self { background: linear-gradient(160deg, #f0dcff, #f2e8ff); }
+  .join-tile-label { color: var(--text-primary); }
+  .join-tile-meta { background: rgba(0, 0, 0, 0.12); color: var(--text-secondary); }
+
+  .join-screen {
+    background:
+      radial-gradient(900px 600px at 12% 6%, rgba(0, 122, 255, 0.06), transparent 60%),
+      radial-gradient(700px 500px at 88% 90%, rgba(52, 199, 89, 0.05), transparent 60%),
+      var(--bg-app);
+  }
+
+  /* Stage area */
+  .stage-sharing { background: #e8e8ed; }
+  .stage-default { background: linear-gradient(170deg, #e8e8ed 0%, #f2f2f7 100%); }
+  .stage-video { background: #e8e8ed; }
+
+  /* Participant tiles */
+  .tile-ai .tile-stage { background: linear-gradient(160deg, #dce8ff, #ebeef5); }
+  .tile-self .tile-stage { background: linear-gradient(160deg, #f0dcff, #f2e8ff); }
+
+  /* ---------- Inputs (select, input, textarea) ---------- */
+  .memory-cat-select,
+  .memory-textarea,
+  .memory-tag-input,
+  .memory-search-input,
+  .skill-install-input {
+    background: var(--bg-input);
+    border-color: var(--border-soft);
+    color: var(--text-primary);
+  }
+  .memory-cat-select:focus,
+  .memory-textarea:focus,
+  .memory-tag-input:focus,
+  .memory-search-input:focus,
+  .skill-install-input:focus {
+    border-color: var(--accent);
+  }
+  .voice-select {
+    background: var(--bg-input);
+    border-color: var(--border-soft);
+    color: var(--text-primary);
+  }
+  .voice-select:focus { border-color: var(--accent); }
+
+  /* ---------- Hover states ---------- */
+  .memory-chip:hover,
+  .memory-btn:hover,
+  .skill-btn:hover { background: var(--bg-hover); }
+
+  .skill-btn-danger:hover { background: var(--danger-soft); }
+
+  /* ---------- Text colors ---------- */
+  .memory-error,
+  .skill-error { color: var(--danger); }
+
+  /* Settings armed state */
+  .drawer-settings-armed .drawer-settings-title { color: #b85a00; }
+  .drawer-settings-armed .drawer-settings-hint { color: #a85500; }
+
+  /* Tile specialty and status colors */
+  .tile-specialty-devops { color: #8a4400; }
+  .tile-specialty-review { color: #9e0050; }
+  .tile-specialty-electron { color: #006699; }
+  .tile-specialty-general { color: var(--text-secondary); }
+  .tile-history-status-failed { color: var(--danger); }
+  .tile-history-status-done { color: var(--success); }
+  .tile-history-status-running,
+  .tile-history-status-pending { color: var(--accent); }
+
+  .tb-btn-danger { color: var(--danger); }
+
+  .attachment-chip-pdf .attachment-icon { color: #c85000; }
+  .attachment-chip-rejected .attachment-icon { color: var(--danger); }
+  .attachment-chip-rejected .attachment-size { color: var(--danger); }
+
+  /* ---------- Buttons ---------- */
+  .skill-install-btn,
+  .memory-btn {
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-soft);
+    color: var(--text-primary);
+  }
+  .skill-install-btn:hover,
+  .memory-btn:hover {
+    background: var(--bg-hover);
+    border-color: var(--border-strong);
+  }
+  .memory-btn-primary {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #ffffff;
+  }
+  .memory-btn-danger {
+    color: var(--danger);
+    border-color: var(--danger);
+    background: transparent;
+  }
+
+  /* ---------- Skill panel ---------- */
+  .skill-item {
+    background: var(--bg-elevated);
+    border-color: var(--border-soft);
+  }
+  .skill-item-source { color: var(--text-muted); }
+  .skill-item-desc { color: var(--text-secondary); }
+  .skill-item-readonly { color: var(--text-muted); }
+
+  /* ---------- Voice panel ---------- */
+  .voice-pref-row {
+    border-color: var(--border-soft);
+  }
+  .voice-polish-toggle {
+    color: var(--text-primary);
+  }
+
+  /* ---------- Voice lock panel ---------- */
+  .voice-lock-status {
+    color: var(--text-secondary);
+  }
+
+  /* ---------- Memory panel ---------- */
+  .memory-chip {
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-soft);
+    color: var(--text-primary);
+  }
+  .memory-chip-active {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #ffffff;
+  }
+  .memory-row {
+    border-color: var(--border-soft);
+  }
+  .memory-row-content { color: var(--text-primary); }
+  .memory-tag-chip {
+    background: var(--accent-soft);
+    color: var(--accent);
+  }
+  .memory-row-editing {
+    border-color: var(--accent);
+    background: var(--bg-elevated);
+  }
+  .memory-empty { color: var(--text-muted); }
+
+  /* ---------- Settings window panels ---------- */
+  .settings-window-body .drawer-settings {
+    background: var(--bg-panel);
+  }
+
+  /* ---------- Drawer toggle switch ---------- */
+  .drawer-toggle {
+    background: rgba(0, 0, 0, 0.12);
+  }
+  .drawer-toggle-knob {
+    background: #ffffff;
+  }
+  .drawer-toggle-on {
+    background: rgba(255, 138, 0, 0.85);
+    border-color: rgba(255, 138, 0, 0.9);
+  }
+  .drawer-toggle-on .drawer-toggle-knob {
+    background: #ffffff;
+  }
+
+  /* ---------- Install result banners ---------- */
+  .skill-install-result-success {
+    background: var(--success-soft);
+    border-color: var(--success);
+    color: #1a7a35;
+  }
+  .skill-install-result-error {
+    background: var(--danger-result-soft);
+    border-color: var(--danger);
+    color: var(--danger);
+  }
+
+  /* ---------- Chat bubbles ---------- */
+  .msg-user .msg-body {
+    color: #1c1c1e;
+  }
+
+  /* ---------- Workspace status bar ---------- */
+  .workspace-status-speaking { color: #007aff; }
+  .workspace-status-working { color: #248a3d; }
+  .workspace-status-waiting { color: #b25000; }
+
+  /* ---------- Scope picker (auto-approve dropdown) ---------- */
+  .mtg-scope-picker {
+    background: #ffffff;
+    border-color: rgba(0, 0, 0, 0.12);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+  }
+  .mtg-scope-picker-title { color: var(--text-muted); }
+  .mtg-scope-option {
+    color: var(--text-primary);
+    border-color: var(--border-soft);
+  }
+  .mtg-scope-option:hover {
+    background: var(--bg-hover);
+    border-color: var(--border-strong);
+  }
+  .mtg-scope-option-active { color: var(--success); }
+  .mtg-scope-option-desc { color: var(--text-muted); }
+
+  /* ---------- Auto-approve toggle ---------- */
+  .mtg-trust-chip { color: #8a4400; }
+  .mtg-trust-chip:hover { color: #6e3600; }
+  .mtg-approve-toggle {
+    background: rgba(0, 0, 0, 0.04);
+    border-color: var(--border-soft);
+    color: var(--text-secondary);
+  }
+  .mtg-approve-toggle:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+  }
+  .mtg-approve-toggle-track { background: rgba(0, 0, 0, 0.12); }
+  .mtg-approve-toggle-on { color: #8a4400; }
+  .mtg-approve-toggle-on:hover { color: #6e3600; }
+
+  /* ---------- Multi-agent toggle ---------- */
+  .mtg-multi-toggle-on { color: var(--accent); }
+  .mtg-multi-toggle-on:hover { color: #005ec4; }
+
+  /* ---------- Tab bar ---------- */
+  .stage-tab-bar {
+    background: var(--bg-elevated);
+    border-color: var(--border-soft);
+  }
+  .stage-tab:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+  }
+  .stage-tab-active {
+    background: var(--accent-soft);
+    color: var(--text-primary);
+  }
+  .stage-tab-close:hover {
+    background: rgba(0, 0, 0, 0.08);
+    color: var(--text-primary);
+  }
+  .stage-tab-add-btn:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+  }
+  .stage-tab-menu {
+    background: #ffffff;
+    border-color: var(--border-soft);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  }
+  .stage-tab-menu-item { color: var(--text-primary); }
+  .stage-tab-menu-item:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+  }
+  .tab-strip-close:hover { background: rgba(0, 0, 0, 0.08); }
+  .tab-strip-add:hover { background: rgba(0, 0, 0, 0.06); }
+
+  /* ---------- Gallery / tiles ---------- */
+  .tiles--overlay .tile {
+    background: rgba(255, 255, 255, 0.85);
+    border-color: var(--border-soft);
+  }
+  .tile-role-badge { color: var(--text-muted); }
+  .tile-stage {
+    background: var(--bg-elevated);
+    border-color: var(--border-soft);
+  }
+  .tile-specialty-badge {
+    color: var(--text-secondary);
+    border-color: var(--border-soft);
+  }
+  .tile-specialty-frontend { color: #7b2d8e; }
+  .tile-specialty-backend { color: #0056b3; }
+  .tile-specialty-electron { color: #006699; }
+  .tile-specialty-devops { color: #8a4400; }
+  .tile-specialty-test { color: #1a7a35; }
+  .tile-specialty-docs { color: #4a4a4a; }
+  .tile-specialty-review { color: #9e0050; }
+  .tile-specialty-general {
+    color: var(--text-secondary);
+    border-color: var(--border-soft);
+  }
+  .tile-history-toggle {
+    color: var(--text-secondary);
+    background: rgba(0, 0, 0, 0.04);
+    border-color: var(--border-soft);
+  }
+  .tile-history-toggle:hover {
+    background: var(--bg-hover);
+    border-color: var(--border-strong);
+  }
+  .tile-history-toggle-open { color: var(--accent); }
+  .tile-history-panel {
+    background: #ffffff;
+    border-color: var(--border-soft);
+  }
+  .tile-history-header { color: var(--text-muted); }
+  .tile-history-item { border-left-color: var(--border-soft); }
+  .tile-history-status {
+    background: rgba(0, 0, 0, 0.04);
+    color: var(--text-muted);
+  }
+  .tile-history-status-done { color: var(--success); }
+  .tile-history-status-failed { color: var(--danger); }
+  .tile-history-meta { color: var(--text-muted); }
+  .tiles-bar {
+    background: var(--bg-elevated);
+    border-color: var(--border-soft);
+  }
+
+  /* ---------- Drawer / settings panels ---------- */
+  .drawer-settings {
+    background: var(--bg-elevated);
+    border-color: var(--border-soft);
+  }
+  .drawer-tabs {
+    background: var(--bg-elevated);
+    border-color: var(--border-soft);
+  }
+  .drawer-composer {
+    background: var(--bg-elevated);
+    border-color: var(--border-soft);
+  }
+  .voice-lock-cancel { color: var(--danger); }
+
+  /* ---------- Chat area ---------- */
+  .drawer-send-icon { color: var(--accent); }
+  .drawer-send-icon:hover { color: #005ec4; }
+  .drawer-attach-icon:hover { background: var(--bg-hover); }
+  .attachment-chip {
+    background: var(--bg-elevated);
+    border-color: var(--border-soft);
+  }
+  .attachment-chip-remove:hover { background: rgba(0, 0, 0, 0.08); }
+  .attachment-chip-text .attachment-icon { color: #1a7a35; }
+  .attachment-chip-word .attachment-icon { color: var(--accent); }
+  .attachment-chip-pdf .attachment-icon { color: #c85000; }
+  .attachment-chip-image .attachment-icon { color: #8a6d00; }
+  .attachment-chip-rejected { color: var(--danger); }
+  .attachment-chip-sent {
+    background: var(--bg-elevated);
+    border-color: var(--border-soft);
+  }
+  .mtg-dropping::after {
+    color: var(--accent);
+    background: rgba(242, 242, 247, 0.85);
+  }
+
+  /* ---------- Activity area ---------- */
+  .act-row.has-detail:hover { background: var(--bg-hover); }
+  .act-action {
+    border-color: var(--border-soft);
+    background: var(--bg-elevated);
+    color: var(--text-primary);
+  }
+  .act-action:hover {
+    background: var(--bg-hover);
+    border-color: var(--border-strong);
+  }
+
+  /* ---------- Workspace status pills ---------- */
+  .workspace-status-speaking { color: var(--accent); }
+  .workspace-status-working { color: var(--success); }
+  .workspace-status-waiting { color: var(--warn); }
+
+  /* ---------- Worker cards (multi-agent) ---------- */
+  .worker-card-stage {
+    background: var(--bg-elevated);
+    border-color: var(--border-soft);
+  }
+  .worker-card-stage-talker {
+    background: linear-gradient(160deg, #dce8ff, #ebeef5);
+  }
+  .worker-card-stage-worker {
+    background: linear-gradient(160deg, #e0f0e8, #ebeef5);
+  }
+  .worker-card-footer {
+    background: var(--bg-elevated);
+    border-color: var(--border-soft);
+  }
+  .worker-card-sidebar:hover { border-color: var(--border-strong); }
+  .worker-card-pill-idle { background: var(--bg-hover); }
+  .worker-card-pill-waiting { color: var(--warn); }
+  .worker-card-pill-working { color: var(--accent); }
+  .worker-card-pill-done { color: var(--success); }
+  .worker-card-pill-failed { color: var(--danger); }
+  .worker-card-dep-chip { color: var(--warn); }
+  .worker-card-activity-row { border-left-color: var(--border-soft); }
+  .worker-card-activity-system { border-color: var(--border-soft); }
+  .worker-card-perm-allow { color: var(--success); }
+  .worker-card-perm-deny { color: var(--danger); }
+  .worker-card-summary { border-top-color: var(--border-soft); }
+
+  /* ---------- Workspace task pills ---------- */
+  .workspace-task-pill-idle { background: var(--bg-hover); }
+  .workspace-task-pill-waiting { color: var(--warn); }
+  .workspace-task-pill-working { color: var(--accent); }
+  .workspace-task-pill-done { color: var(--success); }
+  .workspace-task-pill-failed { color: var(--danger); }
+  .workspace-task-pill-speaking { color: var(--accent); }
+  .workspace-feed-row-clickable:hover { background: var(--bg-hover); }
+  .workspace-feed-row-open { background: var(--accent-soft); }
+  .workspace-feed-task-pill-pending { color: var(--warn); }
+  .workspace-feed-task-pill-running { color: var(--accent); }
+  .workspace-feed-task-pill-done { color: var(--success); }
+  .workspace-feed-task-pill-failed { color: var(--danger); }
+
+  /* ---------- Browser panel ---------- */
+  .browser-stage {
+    background: var(--bg-elevated);
+    border-color: var(--border-soft);
+  }
+  .browser-toolbar {
+    background: var(--bg-elevated);
+    border-color: var(--border-soft);
+  }
+  .browser-tab {
+    background: var(--bg-elevated);
+    color: var(--text-primary);
+  }
+  .browser-tab:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+  }
+  .browser-tab-active {
+    background: var(--accent-soft);
+    color: var(--text-primary);
+  }
+  .browser-tab-favicon { color: var(--text-muted); }
+  .browser-tab-close:hover { background: rgba(0, 0, 0, 0.08); }
+  .browser-tab-add:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+  }
+  .browser-nav-btn:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+  }
+  .browser-url-input {
+    background: var(--bg-input);
+    color: var(--text-primary);
+    border-color: var(--border-soft);
+  }
+
+  /* ---------- Delivery stage ---------- */
+  .stage-delivery {
+    background: linear-gradient(170deg, #e8e8ed 0%, #f2f2f7 100%);
+  }
+  .delivery-viewer-summary { color: var(--text-primary); }
+  .delivery-viewer-sidebar {
+    background: var(--bg-elevated);
+    border-color: var(--border-soft);
+  }
+  .delivery-viewer-file:hover { background: var(--bg-hover); }
+  .delivery-viewer-content {
+    background: var(--bg-elevated);
+    border-color: var(--border-soft);
+  }
+  .delivery-viewer-feedback-input {
+    background: var(--bg-input);
+    border-color: var(--border-soft);
+    color: var(--text-primary);
+  }
+  .delivery-viewer-btn-primary:hover { background: #005ec4; }
+  .delivery-viewer-btn-secondary {
+    background: var(--bg-elevated);
+    border-color: var(--border-soft);
+  }
+  .delivery-viewer-btn-secondary:hover {
+    background: var(--bg-hover);
+    border-color: var(--border-strong);
+  }
+
+  /* ---------- Participant tabs ---------- */
+  .participant-tabs {
+    background: var(--bg-elevated);
+    border-color: var(--border-soft);
+  }
+  .participant-tabs-bar {
+    border-bottom-color: var(--border-soft);
+    background: var(--bg-elevated);
+  }
+  .participant-tab {
+    color: var(--text-secondary);
+  }
+  .participant-tab:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+  }
+  .participant-tab-active {
+    color: var(--accent);
+  }
+
+  /* ---------- Review / Spec panels ---------- */
+  .review-panel-empty { color: var(--text-muted); }
+  .review-panel-summary { color: var(--accent); }
+  .review-change {
+    background: var(--bg-elevated);
+    border-color: var(--border-soft);
+  }
+  .review-change-header {
+    background: var(--bg-hover);
+  }
+  .review-change-tool { color: var(--text-primary); }
+  .review-change-path { color: var(--text-secondary); }
+  .review-change-ts { color: var(--text-muted); }
+  .review-change-detail { color: var(--text-secondary); }
+  .spec-panel-empty { color: var(--text-muted); }
+  .spec-panel-header h3 { color: var(--text-primary); }
+  .spec-panel-count { color: var(--text-muted); }
+  .spec-message {
+    background: var(--bg-elevated);
+    border-color: var(--border-soft);
+  }
+  .spec-message-meta {
+    background: var(--bg-hover);
+  }
+  .spec-message-ts { color: var(--text-muted); }
+
+  /* ---------- Terminal panel (always dark) ---------- */
+  .terminal-panel {
+    background: #1e1e1e;
+    color: #e0e0e0;
+  }
+  .terminal-panel-empty { color: rgba(255, 255, 255, 0.4); }
+  .terminal-block { background: #2d2d2d; }
+  .terminal-block-header {
+    background: #333;
+    color: rgba(255, 255, 255, 0.6);
+  }
+  .terminal-block-command { color: #68d391; }
+  .terminal-block-output {
+    color: rgba(255, 255, 255, 0.85);
+    background: #252525;
+    border-top-color: #333;
+  }
+
+  /* ---------- File tree ---------- */
+  .file-tree-row:hover { background: var(--bg-hover); }
+  .file-tree-spinner {
+    border-color: rgba(0, 0, 0, 0.15);
+    border-top-color: var(--accent);
+  }
+
+  /* ---------- Pickers / modals ---------- */
+  .picker-backdrop {
+    background: rgba(0, 0, 0, 0.4);
+  }
+  .picker-error { color: var(--danger); }
+  .picker-btn-relaunch { color: var(--danger); }
+  .picker-btn-relaunch:hover { color: #c00; }
+  .plan-modal-help code {
+    background: rgba(0, 0, 0, 0.06);
+    color: var(--accent);
+  }
+  .plan-modal-textarea {
+    background: var(--bg-input);
+    border-color: var(--border-soft);
+    color: var(--text-primary);
+  }
+  .plan-modal-preview {
+    background: var(--bg-hover);
+  }
+  .plan-modal-preview code { color: var(--accent); }
+  .plan-modal-error { color: var(--danger); }
+  .plan-modal-cancel:hover { background: var(--bg-hover); }
+  .error-banner { color: var(--danger); }
+  .error-banner__reconnect {
+    background: var(--bg-elevated);
+    color: var(--text-primary);
+    border-color: var(--border-soft);
+  }
+  .error-banner__reconnect:hover {
+    background: var(--bg-hover);
+    border-color: var(--border-strong);
+  }
+  .settings-modal {
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.05);
+  }
+
+  /* ---------- Join screen extras ---------- */
+  .join-error { color: var(--danger); }
+  .join-auth-badge.active { color: var(--success); }
+  .join-auth-error { color: var(--danger); }
+
+  /* ---------- Skill panel extras ---------- */
+  .skill-install-result-dismiss:hover { background: var(--bg-hover); }
+  .skill-btn-danger { color: var(--danger); }
+  .skill-item-source {
+    background: var(--bg-hover);
+  }
+  .skill-btn {
+    background: var(--bg-elevated);
+    border-color: var(--border-soft);
+    color: var(--text-primary);
+  }
+  .skill-btn:hover {
+    background: var(--bg-hover);
+    border-color: var(--border-strong);
+  }
+
+  /* ---------- Memory panel extras ---------- */
+  .memory-chip-active { color: #ffffff; }
+  .memory-scope-toggle {
+    background: var(--bg-elevated);
+    border-color: var(--border-soft);
+  }
+  .memory-scope-on { color: #8a4400; }
+  .memory-btn-primary { color: #ffffff; }
+  .memory-btn-danger { color: var(--danger); }
+
+  /* ---------- Workspace feed rows ---------- */
+  .workspace-feed-row {
+    background: var(--bg-elevated);
+    border-color: var(--border-soft);
+  }
+  .workspace-feed-row-clickable:hover {
+    background: var(--bg-hover);
+    border-color: var(--border-strong);
+  }
+  .workspace-feed-row-open {
+    background: var(--accent-soft);
+    border-color: var(--accent);
+  }
+
+  /* ---------- Agent pills ---------- */
+  .agent-pill-talker {
+    background: rgba(0, 122, 255, 0.1);
+    color: #0055cc;
+  }
+  .agent-pill-worker {
+    background: rgba(52, 199, 89, 0.1);
+    color: #1a7a35;
+  }
+
+  /* ---------- Tile status, footer, role badge ---------- */
+  .tile-status {
+    background: rgba(0, 0, 0, 0.06);
+    color: var(--text-secondary);
+    backdrop-filter: none;
+  }
+  .tile-footer {
+    background: rgba(0, 0, 0, 0.03);
+  }
+  .tile-role-badge {
+    color: var(--text-muted);
+    background: rgba(0, 0, 0, 0.06);
+  }
+
+  /* ---------- Tile specialty badge (dark hardcoded) ---------- */
+  .tile-specialty-frontend { background: rgba(177, 91, 255, 0.1); border-color: rgba(177, 91, 255, 0.3); color: #7b2d8e; }
+  .tile-specialty-backend  { background: rgba(51, 112, 255, 0.1); border-color: rgba(51, 112, 255, 0.3); color: #0056b3; }
+  .tile-specialty-electron { background: rgba(0, 182, 255, 0.1); border-color: rgba(0, 182, 255, 0.3); color: #006699; }
+  .tile-specialty-devops   { background: rgba(255, 138, 0, 0.1); border-color: rgba(255, 138, 0, 0.3); color: #8a4400; }
+  .tile-specialty-test     { background: rgba(75, 200, 110, 0.1); border-color: rgba(75, 200, 110, 0.3); color: #1a7a35; }
+  .tile-specialty-docs     { background: rgba(180, 180, 180, 0.15); border-color: rgba(180, 180, 180, 0.35); color: #4a4a4a; }
+  .tile-specialty-review   { background: rgba(255, 95, 162, 0.1); border-color: rgba(255, 95, 162, 0.3); color: #9e0050; }
+  .tile-specialty-general  { background: rgba(0, 0, 0, 0.04); border-color: rgba(0, 0, 0, 0.12); color: var(--text-secondary); }
+
+  /* ---------- Tiles bar / detail / dock (gallery containers) ---------- */
+  .tiles-bar {
+    background: var(--bg-elevated);
+    border-color: var(--border-soft);
+    backdrop-filter: none;
+  }
+  .tiles-bar-collapse {
+    background: rgba(0, 0, 0, 0.04);
+    border-color: var(--border-soft);
+    color: var(--text-secondary);
+  }
+  .tiles-bar-collapse:hover {
+    background: rgba(0, 0, 0, 0.08);
+    color: var(--text-primary);
+  }
+  .tiles-detail {
+    background: var(--bg-elevated);
+    border-color: var(--border-soft);
+    backdrop-filter: none;
+  }
+  .dock-sidebar {
+    background: var(--bg-elevated);
+    border-color: var(--border-soft);
+    backdrop-filter: none;
+  }
+  .dock-detail {
+    background: var(--bg-elevated);
+    border-color: var(--border-soft);
+    backdrop-filter: none;
+  }
+
+  /* ---------- Worker card ---------- */
+  .worker-card {
+    background: var(--bg-elevated);
+    border-color: var(--border-soft);
+  }
+  .worker-card-sidebar:hover { border-color: var(--border-strong); }
+  .worker-card-status-badge {
+    background: rgba(0, 0, 0, 0.06);
+    color: var(--text-secondary);
+    backdrop-filter: none;
+  }
+  .worker-card-tool {
+    background: rgba(0, 0, 0, 0.04);
+  }
+  .worker-card-pill-idle    { background: rgba(0, 0, 0, 0.05); color: var(--text-muted); }
+  .worker-card-pill-waiting { background: rgba(255, 149, 0, 0.1); color: #b25000; }
+  .worker-card-pill-working { background: rgba(0, 122, 255, 0.1); color: var(--accent); }
+  .worker-card-pill-done    { background: rgba(52, 199, 89, 0.1); color: #248a3d; }
+  .worker-card-pill-failed  { background: rgba(255, 59, 48, 0.1); color: var(--danger); }
+  .worker-card-dep-chip {
+    background: rgba(255, 149, 0, 0.1);
+    color: #b25000;
+  }
+  .worker-card-activity-row {
+    border-left-color: var(--border-soft);
+  }
+  .worker-card-activity-tool-call   { border-color: var(--accent); }
+  .worker-card-activity-tool-result { border-color: var(--success); }
+  .worker-card-activity-error       { border-color: var(--danger); }
+  .worker-card-activity-system      { border-color: var(--border-soft); }
+  .worker-card-perm {
+    background: rgba(255, 149, 0, 0.06);
+    border-color: rgba(255, 149, 0, 0.25);
+  }
+  .worker-card-perm-allow {
+    background: rgba(52, 199, 89, 0.1);
+    color: #248a3d;
+    border-color: rgba(52, 199, 89, 0.3);
+  }
+  .worker-card-perm-deny {
+    background: rgba(255, 59, 48, 0.08);
+    color: var(--danger);
+    border-color: rgba(255, 59, 48, 0.3);
+  }
+  .worker-card-summary {
+    border-top-color: var(--border-soft);
+  }
+  .worker-card-icon-speaking { background: rgba(0, 122, 255, 0.1); }
+  .worker-card-icon-perm { background: rgba(255, 149, 0, 0.12); }
+
+  /* ---------- Workspace status pills ---------- */
+  .workspace-status-speaking {
+    color: var(--accent);
+    border-color: var(--accent);
+    background: var(--accent-soft);
+  }
+  .workspace-status-speaking .workspace-status-dot {
+    background: var(--accent);
+    box-shadow: 0 0 0 4px rgba(0, 122, 255, 0.15);
+  }
+  .workspace-status-working {
+    color: #248a3d;
+    border-color: rgba(52, 199, 89, 0.4);
+    background: rgba(52, 199, 89, 0.08);
+  }
+  .workspace-status-waiting {
+    color: #b25000;
+    border-color: rgba(255, 149, 0, 0.35);
+    background: rgba(255, 149, 0, 0.08);
+  }
+
+  /* ---------- Workspace aurora (lighten for light mode) ---------- */
+  .workspace-aurora {
+    background:
+      radial-gradient(600px 380px at 18% 20%, rgba(0, 122, 255, 0.08), transparent 70%),
+      radial-gradient(500px 320px at 82% 88%, rgba(0, 182, 255, 0.06), transparent 70%);
+  }
+  .workspace-speaking .workspace-aurora { opacity: 1; }
+  .workspace-waiting .workspace-aurora {
+    background:
+      radial-gradient(600px 380px at 50% 30%, rgba(255, 149, 0, 0.08), transparent 70%);
+  }
+
+  /* ---------- Workspace task pills ---------- */
+  .workspace-task-pill-idle     { background: rgba(0, 0, 0, 0.05); color: var(--text-muted); }
+  .workspace-task-pill-waiting  { background: rgba(255, 149, 0, 0.1); color: #b25000; }
+  .workspace-task-pill-working  { background: rgba(0, 122, 255, 0.1); color: var(--accent); }
+  .workspace-task-pill-done     { background: rgba(52, 199, 89, 0.1); color: #248a3d; }
+  .workspace-task-pill-failed   { background: rgba(255, 59, 48, 0.1); color: var(--danger); }
+  .workspace-task-pill-speaking { background: rgba(0, 122, 255, 0.1); color: var(--accent); }
+
+  /* ---------- Workspace feed task pills ---------- */
+  .workspace-feed-task-pill-pending { background: rgba(255, 149, 0, 0.1); color: #b25000; }
+  .workspace-feed-task-pill-running { background: rgba(0, 122, 255, 0.1); color: var(--accent); }
+  .workspace-feed-task-pill-done    { background: rgba(52, 199, 89, 0.1); color: #248a3d; }
+  .workspace-feed-task-pill-failed  { background: rgba(255, 59, 48, 0.1); color: var(--danger); }
+
+  /* ---------- Tab strip (multi-meeting switcher) ---------- */
+  .tab-strip-item:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+  }
+  .tab-strip-item-active {
+    background: var(--bg-stage);
+    border-color: var(--border-soft);
+    color: var(--text-primary);
+  }
+  .tab-strip-close:hover { background: rgba(0, 0, 0, 0.06); }
+  .tab-strip-add:hover { background: rgba(0, 0, 0, 0.04); }
+
+  /* ---------- File tree ---------- */
+  .file-tree-row:hover { background: var(--bg-hover); }
+  .file-tree-row.active { background: var(--accent-soft); }
+  .file-tree-spinner {
+    border-color: rgba(0, 0, 0, 0.12);
+    border-top-color: var(--accent);
+  }
+
+  /* ---------- Delivery viewer ---------- */
+  .delivery-viewer-sidebar {
+    background: var(--bg-elevated);
+    border-color: var(--border-soft);
+  }
+  .delivery-viewer-file:hover { background: var(--bg-hover); }
+  .delivery-viewer-file.is-active {
+    background: var(--accent-soft);
+    border-color: var(--accent);
+    color: var(--text-primary);
+  }
+  .delivery-viewer-content {
+    background: var(--bg-elevated);
+    border-color: var(--border-soft);
+  }
+  .delivery-viewer-toast {
+    background: var(--bg-elevated);
+    border-color: var(--border-soft);
+  }
+  .delivery-viewer-btn-secondary {
+    background: var(--bg-elevated);
+    border-color: var(--border-soft);
+    color: var(--text-primary);
+  }
+  .delivery-viewer-btn-secondary:hover:not(:disabled) {
+    background: var(--bg-hover);
+  }
+
+  /* ---------- Drawer tabs & composer ---------- */
+  .drawer-tabs {
+    background: var(--bg-elevated);
+    border-color: var(--border-soft);
+  }
+  .drawer-composer {
+    background: var(--bg-elevated);
+    border-color: var(--border-soft);
+  }
+  .drawer-settings {
+    background: var(--bg-elevated);
+    border-color: var(--border-soft);
+  }
+
+  /* ---------- Message bubbles ---------- */
+  .msg-user .msg-body {
+    background: var(--accent-soft);
+    color: var(--accent);
+  }
+  .msg-assistant .msg-body {
+    background: var(--bg-elevated);
+    color: var(--text-primary);
+  }
+
+  /* ---------- Error banner ---------- */
+  .error-banner { color: var(--danger); }
+  .error-banner__reconnect {
+    background: var(--bg-elevated);
+    color: var(--text-primary);
+    border-color: var(--border-soft);
+  }
+  .error-banner__reconnect:hover {
+    background: var(--bg-hover);
+  }
+
+  /* ---------- Stage banner ---------- */
+  .stage-banner {
+    background: rgba(0, 0, 0, 0.55);
+    color: #ffffff;
+  }
+  .stage-banner-stop {
+    background: rgba(255, 255, 255, 0.18);
+    color: #ffffff;
+  }
+
+  /* ---------- Workspace now card ---------- */
+  .workspace-now-card {
+    background: var(--bg-elevated);
+    border-color: var(--border-soft);
+    backdrop-filter: none;
+  }
+
+  /* ---------- Workspace task card ---------- */
+  .workspace-task-card {
+    background: var(--bg-elevated);
+    border-color: var(--border-soft);
+    backdrop-filter: none;
+  }
+  .workspace-task-card:hover { border-color: var(--accent); }
+  .workspace-task-card-open { border-color: var(--accent); }
+
+  /* ---------- Attachment strip ---------- */
+  .attachment-chip {
+    background: var(--bg-elevated);
+    border-color: var(--border-soft);
+  }
+  .attachment-chip-remove:hover { background: rgba(0, 0, 0, 0.08); }
+  .attachment-chip-text .attachment-icon { color: #248a3d; }
+  .attachment-chip-word .attachment-icon { color: var(--accent); }
+  .attachment-chip-image .attachment-icon { color: #8a6d00; }
+  .attachment-chip-sent {
+    background: var(--bg-elevated);
+    border-color: var(--border-soft);
+  }
+
+  /* ---------- File viewer ---------- */
+  .file-viewer-action-btn:hover {
+    background: rgba(0, 0, 0, 0.06);
+    color: var(--text-primary);
+  }
+  .file-viewer-open-btn {
+    background: var(--bg-elevated);
+    border-color: var(--border-soft);
+    color: var(--text-primary);
+  }
+  .file-viewer-open-btn:hover {
+    background: var(--bg-hover);
+    border-color: var(--border-strong);
+  }
+  .file-viewer-close:hover {
+    background: rgba(0, 0, 0, 0.06);
+    color: var(--text-primary);
+  }
+  .file-viewer-md-body code {
+    background: rgba(0, 0, 0, 0.06);
+  }
+  .file-viewer-md-body .md-code-block {
+    background: rgba(0, 0, 0, 0.04);
+  }
+  .file-viewer-md-body a {
+    color: var(--accent);
+  }
+
+  /* ---------- User tasks pills ---------- */
+  .task-status-idle {
+    background: rgba(0, 0, 0, 0.05);
+    color: var(--text-secondary);
+  }
+  .task-status-pending {
+    background: rgba(255, 149, 0, 0.1);
+    color: #b25000;
+  }
+  .task-status-running {
+    background: rgba(0, 122, 255, 0.1);
+    color: var(--accent);
+  }
+  .task-status-done {
+    background: rgba(52, 199, 89, 0.1);
+    color: #248a3d;
+  }
+  .task-status-failed {
+    background: rgba(255, 59, 48, 0.1);
+    color: var(--danger);
+  }
+  .user-tasks-owner {
+    background: rgba(0, 0, 0, 0.04);
+    border-color: var(--border-soft);
+    color: var(--text-secondary);
+  }
+
+  /* ---------- Review panel ---------- */
+  .review-panel-empty { color: var(--text-muted); }
+  .review-panel-summary {
+    background: var(--accent-soft);
+    color: var(--accent);
+  }
+  .review-change {
+    background: var(--bg-elevated);
+    border-color: var(--border-soft);
+  }
+  .review-change-header { background: var(--bg-hover); }
+  .review-change-tool { color: var(--text-primary); }
+  .review-change-path { color: var(--text-secondary); }
+  .review-change-ts { color: var(--text-muted); }
+  .review-change-detail { color: var(--text-secondary); }
+
+  /* ---------- Spec panel ---------- */
+  .spec-panel-empty { color: var(--text-muted); }
+  .spec-panel-header { background: var(--accent-soft); }
+  .spec-panel-header h3 { color: var(--text-primary); }
+  .spec-panel-count { color: var(--text-muted); }
+  .spec-message {
+    background: var(--bg-elevated);
+    border-color: var(--border-soft);
+  }
+  .spec-message-meta { background: var(--bg-hover); }
+  .spec-message-role { color: var(--accent); }
+  .spec-message-ts { color: var(--text-muted); }
+  .spec-message-text { color: var(--text-primary); }
+
+  /* ---------- Participant tabs ---------- */
+  .participant-tabs {
+    background: var(--bg-elevated);
+    backdrop-filter: none;
+  }
+  .participant-tabs-bar {
+    background: var(--bg-elevated);
+    border-bottom-color: var(--border-soft);
+  }
+  .participant-tab {
+    color: var(--text-secondary);
+  }
+  .participant-tab:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+  }
+  .participant-tab-active {
+    background: var(--accent-soft);
+    color: var(--accent);
+  }
+  .participant-placeholder { color: var(--text-muted); }
+
+  /* ---------- Workspace delivery accept ---------- */
+  .workspace-delivery-accept-btn {
+    background: rgba(52, 199, 89, 0.08);
+    border-color: rgba(52, 199, 89, 0.3);
+    color: #248a3d;
+  }
+  .workspace-delivery-accept-btn:hover {
+    background: rgba(52, 199, 89, 0.15);
+    border-color: rgba(52, 199, 89, 0.5);
+  }
+
+  /* ---------- Skill install result dismiss ---------- */
+  .skill-install-result-dismiss:hover { background: rgba(0, 0, 0, 0.06); }
+
+  /* ---------- Browser panel (additional) ---------- */
+  .browser-tab-close:hover { background: rgba(0, 0, 0, 0.06); }
+
+  /* ---------- Toolbar ---------- */
+  .tb-btn-danger { color: var(--danger); }
+  .tb-btn-warn { background: rgba(255, 149, 0, 0.1); color: var(--warn); }
+
+  /* ---------- Error text colors (readable on light bg) ---------- */
+  .file-viewer-error { color: var(--danger); }
+  .stage-error-floating { color: var(--danger); }
+
+  /* ---------- Picker items ---------- */
+  .picker-item {
+    background: var(--bg-elevated);
+    border-color: var(--border-soft);
+  }
+  .picker-item:hover { border-color: var(--accent); }
+
+  /* ---------- Drawer input & stage ---------- */
+  .drawer-input {
+    background: var(--bg-input);
+    border-color: var(--border-soft);
+    color: var(--text-primary);
+  }
+
+  /* ---------- Perm card ---------- */
+  .perm-card {
+    background: var(--bg-elevated);
+    border-color: var(--accent);
+  }
+  .perm-input {
+    background: var(--bg-input);
+    color: var(--text-secondary);
+  }
+  .perm-deny {
+    background: var(--bg-elevated);
+    border-color: var(--border-strong);
+    color: var(--text-secondary);
+  }
+  .perm-deny:hover { background: var(--bg-hover); }
+
+  /* ---------- Workspace status off ---------- */
+  .workspace-status-off { color: var(--text-muted); }
+
+  /* ---------- Drawer empty / scroll ---------- */
+  .drawer-empty { color: var(--text-muted); }
+
+  /* ---------- Picker permission section ---------- */
+  .picker-permission-icon {
+    background: var(--bg-elevated);
+    border-color: var(--border-soft);
+  }
+
+  /* ---------- Skill install form ---------- */
+  .skill-install-form { gap: 6px; }
+
+  /* ---------- Voice select guide ---------- */
+  .voice-select-guide:hover { background: rgba(0, 122, 255, 0.15); }
+
+  /* ---------- Plan modal ---------- */
+  .plan-modal {
+    background: var(--bg-elevated);
+    border-color: var(--border-soft);
+  }
+  .plan-modal-textarea {
+    background: var(--bg-input);
+    border-color: var(--border-soft);
+    color: var(--text-primary);
+  }
+  .plan-modal-cancel {
+    border-color: var(--border-soft);
+    color: var(--text-secondary);
+  }
+  .plan-modal-cancel:hover { background: var(--bg-hover); }
+
+  /* ---------- Settings modal backdrop & shadow ---------- */
+  .settings-modal-backdrop {
+    background: rgba(0, 0, 0, 0.3);
+  }
+  .settings-modal {
+    background: rgba(255, 255, 255, 0.92);
+    box-shadow: 0 24px 64px rgba(0, 0, 0, 0.12), 0 0 0 1px rgba(0, 0, 0, 0.05);
+  }
+
+  /* ---------- Plan modal backdrop & shadow ---------- */
+  .plan-modal-backdrop {
+    background: rgba(0, 0, 0, 0.3);
+  }
+  .plan-modal {
+    box-shadow: 0 16px 48px -8px rgba(0, 0, 0, 0.15);
+  }
+  .plan-modal-preview code {
+    background: rgba(0, 122, 255, 0.08);
+    color: var(--accent);
+  }
+  .plan-modal-error {
+    background: var(--danger-soft);
+    color: var(--danger);
+    border-color: rgba(255, 59, 48, 0.3);
+  }
+
+  /* ---------- Review document ---------- */
+  .review-document {
+    background: var(--accent-soft);
+    border-color: rgba(0, 122, 255, 0.2);
+  }
+  .review-document-header {
+    background: rgba(0, 122, 255, 0.08);
+  }
+  .review-document-title { color: var(--text-primary); }
+  .review-document-ts { color: var(--text-muted); }
+  .review-document-detail { color: var(--text-secondary); }
+  .review-document-open {
+    background: var(--accent-soft);
+    border-color: rgba(0, 122, 255, 0.3);
+    color: var(--accent);
+  }
+  .review-document-open:hover {
+    background: rgba(0, 122, 255, 0.18);
+    border-color: rgba(0, 122, 255, 0.4);
+  }
+
+  /* ---------- Tiles bar invite ---------- */
+  .tiles-bar-invite-btn {
+    background: rgba(0, 0, 0, 0.03);
+    border-color: rgba(0, 0, 0, 0.15);
+    color: var(--text-muted);
+  }
+  .tiles-bar-invite-btn:hover {
+    background: rgba(0, 0, 0, 0.06);
+    color: var(--text-primary);
+    border-color: rgba(0, 0, 0, 0.25);
+  }
+  .tiles-bar-invite-dropdown {
+    background: #ffffff;
+    border-color: var(--border-soft);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  }
+  .tiles-bar-invite-title { color: var(--text-muted); }
+  .tiles-bar-invite-item {
+    color: var(--text-primary);
+  }
+  .tiles-bar-invite-item:hover:not(.disabled) {
+    background: var(--bg-hover);
+  }
+  .tiles-bar-invite-item.disabled {
+    color: var(--text-muted);
+    opacity: 0.5;
+  }
+  .tiles-bar-invite-added { color: var(--text-muted); }
+
+  /* ---------- Scope picker active state ---------- */
+  .mtg-scope-option-active {
+    background: rgba(52, 199, 89, 0.08);
+    border-color: rgba(52, 199, 89, 0.3);
+    color: #248a3d;
+  }
+  .mtg-scope-option-active:hover {
+    background: rgba(52, 199, 89, 0.14);
+  }
+  .mtg-scope-option-active .mtg-scope-option-desc {
+    color: rgba(36, 138, 61, 0.6);
+  }
+
+  /* ---------- Multi-toggle-on ---------- */
+  .mtg-multi-toggle-on {
+    background: rgba(0, 122, 255, 0.08);
+    border-color: rgba(0, 122, 255, 0.3);
+    color: var(--accent);
+  }
+  .mtg-multi-toggle-on:hover {
+    background: rgba(0, 122, 255, 0.14);
+    color: #005ec4;
+  }
+  .mtg-multi-toggle-on .mtg-approve-toggle-track {
+    background: rgba(0, 122, 255, 0.6);
+  }
+
+  /* ---------- Backend settings error ---------- */
+  .backend-settings-error {
+    color: var(--danger);
+    background: var(--danger-soft);
+  }
+
+  /* ---------- Drawer settings armed ---------- */
+  .drawer-settings-armed {
+    background: linear-gradient(180deg, rgba(255, 138, 0, 0.08), rgba(255, 87, 51, 0.04));
+    border-bottom-color: rgba(255, 138, 0, 0.35);
+  }
+  .drawer-settings-armed .drawer-settings-title { color: #8a4400; }
+  .drawer-settings-armed .drawer-settings-hint { color: #a85500; }
+
+  /* ---------- Voice lock cancel ---------- */
+  .voice-lock-cancel {
+    color: #ffffff;
+    background: var(--danger-soft);
+    border-color: rgba(255, 59, 48, 0.5);
+  }
+  .voice-lock-cancel:hover {
+    background: rgba(255, 59, 48, 0.2);
+    border-color: var(--danger);
+  }
+
+  /* ---------- Picker relaunch button ---------- */
+  .picker-btn-relaunch {
+    background: var(--danger-soft);
+    color: var(--danger);
+    border-color: rgba(255, 59, 48, 0.3);
+  }
+  .picker-btn-relaunch:hover {
+    background: rgba(255, 59, 48, 0.15);
+    color: #c00;
+  }
+
+  /* ---------- Participant tabs scrollbar ---------- */
+  .participant-tabs-bar::-webkit-scrollbar-thumb {
+    background: rgba(0, 0, 0, 0.15);
+  }
+
+  /* ---------- Tiles bar scroll (light scrollbar) ---------- */
+  .tiles-bar-scroll::-webkit-scrollbar-thumb {
+    background: rgba(0, 0, 0, 0.12);
+  }
+
+  /* ---------- Host terminal strip (light mode) ---------- */
+  .host-terminal-strip {
+    background: var(--bg-elevated);
+    border-color: var(--border-soft);
+    backdrop-filter: none;
+  }
+  .host-terminal-header {
+    background: var(--bg-elevated);
+    border-bottom-color: var(--border-soft);
+  }
+  .host-terminal-tab {
+    color: var(--text-secondary);
+  }
+  .host-terminal-tab:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+  }
+  .host-terminal-tab-active {
+    background: var(--accent-soft);
+    color: var(--accent);
+  }
+  .host-terminal-collapse-btn {
+    color: var(--text-muted);
+  }
+  .host-terminal-collapse-btn:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+  }
+  .host-terminal-header::-webkit-scrollbar-thumb {
+    background: rgba(0, 0, 0, 0.12);
+  }
+
+  /* ---- Light mode overrides for border shorthand ---- */
+  .mtg-approve-toggle { border: var(--border-soft); }
+  .mtg-scope-picker { border: var(--border-soft); }
+  .tile-specialty-badge { border: var(--border-soft); }
+  .tile-history-toggle { border: var(--border-soft); }
+  .tile-history-panel { border: var(--border-soft); }
+  .tile-history-item { border-left: var(--border-soft); }
+  .img-preview-close { border: var(--border-strong); }
+  .slash-picker { border: var(--border-soft); }
+  .act-action { border: var(--border-soft); }
+  .error-banner__reconnect { border: var(--border-strong); }
+  .tiles-bar { border: var(--border-soft); }
+  .tiles-bar-collapse { border: var(--border-soft); }
+  .tiles-bar-invite-btn { border: var(--border-soft); }
+  .tiles-detail { border: var(--border-soft); }
+  .tiles-gallery-invite-btn { border: var(--border-soft); }
+  .tiles-gallery-placeholder { border: var(--border-soft); }
+  .dock-sidebar { border: var(--border-soft); }
+  .dock-detail { border: var(--border-soft); }
+  .worker-card { border: var(--border-soft); }
+  .worker-card-activity-row { border-left: var(--border-soft); }
+  .worker-card-summary { border-top: var(--border-soft); }
+  .file-tree-spinner { border: var(--border-soft); }
+  .participant-tabs-bar { border-bottom: var(--border-soft); }
+  .host-terminal-strip { border: var(--border-soft); }
+  .host-terminal-header { border-bottom: var(--border-soft); }
+
+  /* ---- Auto-generated light mode overrides for base-style hardcoded colors ---- */
+  .join-avatar { color: var(--text-primary); }
+  .join-tile-meta { background: var(--bg-app); }
+  .join-cta { color: var(--text-primary); }
+  .join-error { color: var(--danger); }
+  .lobby-install-btn { color: var(--text-primary); }
+  .join-auth-error { color: var(--danger); }
+  .mtg-leave { color: var(--text-primary); }
+  .mtg-trust-chip { color: var(--warn); }
+  .mtg-trust-chip:hover { color: var(--warn); }
+  .mtg-approve-toggle { background: var(--bg-hover); }
+  .mtg-approve-toggle:hover { background: var(--bg-elevated); }
+  .mtg-approve-toggle-track { background: var(--bg-panel); }
+  .mtg-approve-toggle-on { color: var(--warn); }
+  .mtg-approve-toggle-on:hover { color: var(--warn); }
+  .mtg-approve-toggle-on .mtg-approve-toggle-knob { background: var(--bg-elevated); }
+  .mtg-multi-toggle-on .mtg-approve-toggle-knob { background: var(--bg-elevated); }
+  .mtg-scope-picker-title { color: var(--text-muted); }
+  .mtg-scope-option { color: var(--text-secondary); }
+  .mtg-scope-option:hover { background: var(--bg-hover); border-color: var(--border-soft); }
+  .mtg-scope-option-desc { color: var(--text-muted); }
+  .settings-modal-backdrop { background: var(--bg-app); }
+  .stage-sharing { background: var(--bg-app); }
+  .stage-video { background: var(--bg-app); }
+  .stage-error-floating { color: var(--danger); }
+  .stage-banner { background: var(--bg-app); color: var(--text-primary); }
+  .stage-banner-stop { background: var(--bg-panel); color: var(--text-primary); }
+  .stage-banner-stop:hover { background: var(--bg-panel); }
+  .stage-tab-close:hover { background: var(--bg-elevated); }
+  .stage-tab-popout:hover { background: var(--bg-elevated); }
+  .workspace-hero-terminal-btn { background: var(--bg-hover); }
+  .workspace-hero-terminal-btn:hover { background: var(--bg-elevated); border-color: var(--border-strong); }
+  .workspace-avatar { color: var(--text-primary); }
+  .workspace-avatar-worker { color: var(--text-primary); }
+  .workspace-status-speaking { color: var(--accent); }
+  .workspace-feed-row { background: var(--bg-app); }
+  .agent-pill-talker { color: var(--accent); }
+  .agent-pill-worker { color: var(--success); }
+  .tiles--overlay .tile { border-color: var(--border-soft); }
+  .tiles--overlay .tile-footer { background: var(--bg-app); }
+  .tile-role-badge { color: var(--text-muted); background: var(--bg-app); }
+  .avatar { color: var(--text-primary); }
+  .tile-status { background: var(--bg-app); }
+  .tile-footer { background: var(--bg-app); }
+  .tile-specialty-badge { color: var(--text-secondary); background: var(--bg-app); }
+  .tile-specialty-electron { color: var(--accent); }
+  .tile-specialty-general { background: var(--bg-app); border-color: var(--border-soft); color: var(--text-secondary); }
+  .tile-history-toggle { color: var(--text-secondary); background: var(--bg-elevated); }
+  .tile-history-toggle:hover { background: var(--bg-panel); border-color: var(--border-strong); }
+  .tile-history-toggle-open { color: var(--accent); }
+  .tile-history-status { background: var(--bg-elevated); color: var(--text-secondary); }
+  .drawer-settings { background: var(--bg-stage); }
+  .drawer-settings-armed .drawer-settings-title { color: var(--warn); }
+  .drawer-settings-armed .drawer-settings-hint { color: var(--warn); }
+  .drawer-toggle { background: var(--bg-elevated); }
+  .drawer-toggle-on .drawer-toggle-knob { background: var(--bg-elevated); }
+  .drawer-tabs { background: var(--bg-stage); }
+  .msg-user .msg-body { color: var(--accent); }
+  .img-preview-backdrop { background: var(--bg-app); }
+  .img-preview-close { background: var(--bg-elevated); color: var(--text-primary); }
+  .img-preview-close:hover { background: var(--bg-panel); }
+  .drawer-composer { background: var(--bg-app); }
+  .drawer-attach-icon:hover:not(:disabled) { background: var(--bg-hover); }
+  .attachment-chip { background: var(--bg-hover); }
+  .attachment-chip-remove:hover { background: var(--bg-elevated); }
+  .attachment-chip-rejected { color: var(--danger); }
+  .attachment-chip-rejected .attachment-icon { color: var(--danger); }
+  .attachment-chip-rejected .attachment-size { color: var(--danger); }
+  .attachment-chip-sent { background: var(--bg-hover); }
+  .act-row.has-detail:hover { background: var(--bg-hover); }
+  .act-action { background: var(--bg-hover); }
+  .act-action:hover { background: var(--bg-elevated); border-color: var(--border-strong); }
+  .tb-btn-danger { color: var(--danger); }
+  .tb-leave { color: var(--text-primary); }
+  .perm-allow { color: var(--text-primary); }
+  .picker-error { color: var(--danger); }
+  .picker-btn-relaunch { color: var(--danger); }
+  .picker-item img { background: var(--bg-app); }
+  .error-banner { color: var(--danger); }
+  .error-banner__reconnect { background: var(--bg-elevated); color: var(--text-primary); }
+  .error-banner__reconnect:hover { background: var(--bg-panel); }
+  .picker-btn-primary { color: var(--text-primary); }
+  .plan-modal-backdrop { background: var(--bg-app); }
+  .plan-modal-help code { background: var(--bg-hover); }
+  .plan-modal-textarea { background: var(--bg-app); }
+  .plan-modal-preview { background: var(--bg-hover); }
+  .plan-modal-preview code { color: var(--accent); }
+  .plan-modal-error { color: var(--danger); }
+  .plan-modal-cancel:hover { background: var(--bg-hover); }
+  .plan-modal-submit { color: var(--text-primary); }
+  .tiles-bar-collapse { background: var(--bg-hover); color: var(--text-secondary); }
+  .tiles-bar-collapse:hover { background: var(--bg-elevated); color: var(--text-primary); }
+  .tiles-bar-invite-btn { background: var(--bg-hover); color: var(--text-muted); }
+  .tiles-bar-invite-btn:hover { background: var(--bg-elevated); color: var(--text-primary); border-color: var(--border-strong); }
+  .tiles-gallery-self:hover { background: var(--bg-hover); }
+  .tiles-gallery-self:active { background: var(--bg-elevated); }
+  .tiles-gallery-action-btn { background: var(--bg-app); color: var(--text-secondary); }
+  .tiles-gallery-action-btn:hover { background: var(--bg-app); color: var(--text-primary); }
+  .tiles-gallery-action-btn-active { color: var(--text-primary); }
+  .tiles-gallery-action-btn-danger:hover { color: var(--text-primary); }
+  .tiles-gallery-placeholder { background: var(--bg-hover); }
+  .tiles-gallery-placeholder:hover { background: var(--bg-hover); border-color: var(--border-soft); }
+  .tiles-gallery-placeholder-avatar { background: var(--bg-hover); }
+  .worker-card-status-badge { background: var(--bg-app); }
+  .worker-card-gallery .worker-card-avatar { color: var(--text-primary); }
+  .worker-card-footer { background: var(--bg-app); }
+  .worker-card-sidebar:hover { border-color: var(--border-soft); }
+  .worker-card-avatar-worker { color: var(--text-primary); }
+  .worker-card-pill-idle { background: var(--bg-hover); }
+  .worker-card-pill-waiting { color: var(--warn); }
+  .worker-card-pill-working { color: var(--accent); }
+  .worker-card-pill-done { color: var(--success); }
+  .worker-card-pill-failed { color: var(--danger); }
+  .worker-card-tool { background: var(--bg-app); }
+  .worker-card-dep-chip { color: var(--warn); }
+  .worker-card-activity-system { border-color: var(--border-soft); }
+  .worker-card-perm-allow { color: var(--success); }
+  .worker-card-perm-deny { color: var(--danger); }
+  .memory-chip { background: var(--bg-hover); }
+  .memory-chip:hover { background: var(--bg-elevated); }
+  .memory-chip-active { color: var(--accent); }
+  .memory-search-input { background: var(--bg-app); }
+  .memory-scope-toggle { background: var(--bg-hover); }
+  .memory-scope-on { color: var(--warn); }
+  .memory-error { color: var(--danger); }
+  .memory-row { background: var(--bg-app); }
+  .memory-tag-chip { background: var(--bg-hover); }
+  .memory-btn { background: var(--bg-hover); }
+  .memory-btn:hover { background: var(--bg-elevated); }
+  .memory-btn-primary { color: var(--accent); }
+  .memory-cat-select, .memory-textarea, .memory-tag-input { background: var(--bg-app); }
+  .skill-install-input { background: var(--bg-app); }
+  .skill-install-btn { color: var(--text-primary); }
+  .skill-install-result-dismiss:hover { background: var(--bg-elevated); }
+  .skill-error { color: var(--danger); }
+  .skill-item { background: var(--bg-hover); }
+  .skill-item-source { background: var(--bg-hover); }
+  .skill-btn { background: var(--bg-hover); }
+  .skill-btn:hover { background: var(--bg-elevated); }
+  .skill-btn-danger { color: var(--danger); }
+  .task-status-pending { color: var(--warn); }
+  .task-status-running { color: var(--accent); }
+  .task-status-done { color: var(--success); }
+  .task-status-failed { color: var(--danger); }
+  .user-tasks-owner { background: var(--bg-app); }
+  .workspace-task-pill-idle { background: var(--bg-hover); }
+  .workspace-task-pill-waiting { color: var(--warn); }
+  .workspace-task-pill-working { color: var(--accent); }
+  .workspace-task-pill-done { color: var(--success); }
+  .workspace-task-pill-failed { color: var(--danger); }
+  .workspace-feed-row-clickable:hover { background: var(--bg-app); }
+  .workspace-feed-row-open { background: var(--bg-app); }
+  .workspace-feed-task-pill-pending { color: var(--warn); }
+  .workspace-feed-task-pill-running { color: var(--accent); }
+  .workspace-feed-task-pill-done { color: var(--success); }
+  .workspace-feed-task-pill-failed { color: var(--danger); }
+  .workspace-delivery-accept-btn { color: var(--success); }
+  .tab-strip-item:hover { background: var(--bg-hover); }
+  .tab-strip-badge { color: var(--text-primary); }
+  .tab-strip-close:hover { background: var(--bg-elevated); }
+  .tab-strip-popout:hover { background: var(--bg-elevated); }
+  .tab-strip-add:hover { background: var(--bg-hover); }
+  .delivery-viewer-sidebar { background: var(--bg-hover); }
+  .delivery-viewer-file:hover { background: var(--bg-hover); }
+  .delivery-viewer-content { background: var(--bg-app); }
+  .delivery-viewer-toast { background: var(--bg-hover); }
+  .delivery-viewer-feedback-input { background: var(--bg-app); }
+  .delivery-viewer-btn-secondary { background: var(--bg-hover); }
+  .delivery-viewer-btn-secondary:hover:not(:disabled) { background: var(--bg-elevated); }
+  .file-tree-row:hover { background: var(--bg-hover); }
+  .file-viewer-close:hover { background: var(--bg-elevated); }
+  .file-viewer-iframe { background: var(--bg-elevated); }
+  .file-viewer-error { color: var(--danger); }
+  .file-viewer-md-body code { background: var(--bg-hover); }
+  .file-viewer-md-body .md-code-block { background: var(--bg-app); }
+  .file-viewer-action-btn:hover { background: var(--bg-elevated); }
+  .file-viewer-open-btn { background: var(--bg-hover); }
+  .file-viewer-open-btn:hover { background: var(--bg-elevated); }
+  .file-viewer-docx { background: var(--bg-elevated); }
+  .browser-tab-close:hover { background: var(--bg-elevated); }
+  .participant-tabs-bar::-webkit-scrollbar-thumb { background: var(--bg-panel); }
+  .participant-tab { color: var(--text-secondary); }
+  .participant-tab:hover { background: var(--bg-elevated); color: var(--text-secondary); }
+  .participant-tab-active { color: var(--accent); }
+  .participant-placeholder { color: var(--text-muted); }
+  .terminal-panel-empty { color: var(--text-muted); }
+  .terminal-block-header { color: var(--text-secondary); }
+  .terminal-block-output { color: var(--text-secondary); }
+  .review-panel-empty { color: var(--text-muted); }
+  .review-panel-summary { color: var(--accent); }
+  .review-change { background: var(--bg-hover); }
+  .review-change-header { background: var(--bg-hover); }
+  .review-change-tool { color: var(--text-secondary); }
+  .review-change-path { color: var(--text-secondary); }
+  .review-change-ts { color: var(--text-muted); }
+  .review-change-detail { color: var(--text-secondary); }
+  .review-document-title { color: var(--text-primary); }
+  .review-document-ts { color: var(--text-muted); }
+  .review-document-detail { color: var(--text-secondary); }
+  .review-document-open { color: var(--accent); }
+  .spec-panel-empty { color: var(--text-muted); }
+  .spec-panel-header h3 { color: var(--text-primary); }
+  .spec-panel-count { color: var(--text-muted); }
+  .spec-message { background: var(--bg-hover); }
+  .spec-message-meta { background: var(--bg-hover); }
+  .spec-message-role { color: var(--accent); }
+  .spec-message-ts { color: var(--text-muted); }
+  .spec-message-text { color: var(--text-secondary); }
+  .backend-card-avatar-btn { color: var(--text-primary); }
+  .backend-card-avatar-remove-btn { color: var(--text-primary); }
+  .backend-install-btn { color: var(--text-primary); }
+  .host-terminal-tab { color: var(--text-secondary); }
+  .host-terminal-tab:hover { background: var(--bg-elevated); color: var(--text-secondary); }
+  .host-terminal-tab-active { color: var(--accent); }
+  .host-terminal-collapse-btn { color: var(--text-muted); }
+  .host-terminal-collapse-btn:hover { background: var(--bg-elevated); color: var(--text-secondary); }
+  .drawer-participant-invite:hover:not(:disabled) { color: var(--text-primary); }
+  .drawer-participant-configure:hover { color: var(--text-primary); }
+
+  /* ---- Manual light mode contrast fixes ---- */
+  /* Error text on light danger-soft background */
+  .join-error { color: var(--danger); }
+  /* Keep colored-button hover tints consistent with the theme accent/danger */
+  .join-cta:hover { background: var(--accent); }
+  .mtg-leave:hover { background: var(--danger); }
+  .drawer-send-icon:hover { color: var(--accent); }
+  .mtg-multi-toggle-on:hover { color: var(--accent); }
+}

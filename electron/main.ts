@@ -1,5 +1,5 @@
-import { app, BrowserWindow, dialog, shell, nativeTheme } from 'electron';
-import { fileURLToPath } from 'node:url';
+import { app, BrowserWindow, dialog, shell, nativeTheme, net, protocol } from 'electron';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, join } from 'node:path';
 import type { AutoApproveScope } from './auto-approve-policy.js';
 import { SessionRegistry } from './sessions.js';
@@ -8,6 +8,22 @@ import { registerCustomBackends } from './backends/registry.js';
 import type { IpcContext, IpcEmittedEvent } from './ipc/context.js';
 import { BrowserTabManager } from './browser-tab-manager.js';
 import { requestMicrophoneAccess } from './microphone-access.js';
+import {
+  buildRendererSecurityHeaders,
+  resolveAppAssetPath,
+  themeBackgroundColor,
+} from './renderer-security.js';
+
+protocol.registerSchemesAsPrivileged([{
+  scheme: 'app',
+  privileges: {
+    standard: true,
+    secure: true,
+    supportFetchAPI: true,
+    stream: true,
+    codeCache: true,
+  },
+}]);
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -43,6 +59,15 @@ function awaitClaudeShadowHome(): Promise<string | null> {
 
 const isDev = !app.isPackaged && !!process.env.VITE_DEV_SERVER_URL;
 
+function registerAppProtocol(): void {
+  const bundleRoot = join(__dirname, '..', 'dist');
+  protocol.handle('app', (request) => {
+    const path = resolveAppAssetPath(bundleRoot, request.url);
+    if (!path) return new Response('Not found', { status: 404 });
+    return net.fetch(pathToFileURL(path).toString());
+  });
+}
+
 // B11/B12: a single live-window accessor. Every caller outside createWindow
 // goes through this so the "is it still there?" check is impossible to forget.
 // Anything inside createWindow is fine to touch mainWindow directly — TS
@@ -53,7 +78,7 @@ function liveWindow(): BrowserWindow | null {
 }
 
 function getThemeBackgroundColor(): string {
-  return nativeTheme.shouldUseDarkColors ? '#1c1c1e' : '#f2f2f7';
+  return themeBackgroundColor(nativeTheme.shouldUseDarkColors);
 }
 
 function createWindow() {
@@ -96,46 +121,18 @@ function createWindow() {
   // action needed from the main process side. The listeners were previously
   // no-ops and have been removed.)
 
-  // CSP injection. The packaged HTML has no <meta> CSP, so the renderer
-  // would default to "anything goes" without this. Dev mode loosens the
-  // policy enough that Vite's HMR client (ws + eval'd modules) keeps
-  // working; prod is tight: no eval, no remote scripts, no remote fetches.
-  const devOrigin = isDev ? new URL(process.env.VITE_DEV_SERVER_URL!).origin : '';
-  const devWsOrigin = isDev ? devOrigin.replace(/^http/, 'ws') : '';
-  const csp = isDev
-    ? [
-        `default-src 'self' ${devOrigin}`,
-        `script-src 'self' 'unsafe-inline' 'unsafe-eval' ${devOrigin}`,
-        `style-src 'self' 'unsafe-inline' ${devOrigin}`,
-        `img-src 'self' data: blob: ${devOrigin}`,
-        `media-src 'self' blob: data: ${devOrigin}`,
-        `font-src 'self' data: ${devOrigin}`,
-        `connect-src 'self' ${devOrigin} ${devWsOrigin}`,
-        `worker-src 'self' blob:`,
-        `frame-src blob:`,
-        `object-src 'none'`,
-        `base-uri 'self'`,
-      ].join('; ')
-    : [
-        `default-src 'self'`,
-        `script-src 'self' 'wasm-unsafe-eval'`,
-        `style-src 'self' 'unsafe-inline'`,
-        `img-src 'self' data: blob:`,
-        `media-src 'self' blob: data:`,
-        `font-src 'self' data:`,
-        `connect-src 'self'`,
-        `worker-src 'self' blob:`,
-        `frame-src blob:`,
-        `object-src 'none'`,
-        `base-uri 'self'`,
-      ].join('; ');
+  // Security headers are kept in a side-effect-free module so packaged VAD/
+  // ONNX requirements and dev HMR exceptions are contract-tested.
+  const securityHeaders = buildRendererSecurityHeaders({
+    isDev,
+    devServerUrl: process.env.VITE_DEV_SERVER_URL,
+  });
 
   mainWindow.webContents.session.webRequest.onHeadersReceived((details, callback) => {
     callback({
       responseHeaders: {
         ...details.responseHeaders,
-        'Content-Security-Policy': [csp],
-        'X-Content-Type-Options': ['nosniff'],
+        ...securityHeaders,
       },
     });
   });
@@ -144,7 +141,7 @@ function createWindow() {
     mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL!);
     mainWindow.webContents.openDevTools({ mode: 'detach' });
   } else {
-    mainWindow.loadFile(join(__dirname, '..', 'dist', 'index.html'));
+    mainWindow.loadURL('app://bundle/index.html');
     if (process.env.VIBE_MEET_DEVTOOLS === '1') {
       mainWindow.webContents.openDevTools({ mode: 'detach' });
     }
@@ -395,6 +392,7 @@ if (!hasSingleInstanceLock) {
 }
 
 if (hasSingleInstanceLock) app.whenReady().then(async () => {
+  registerAppProtocol();
   // Dynamic-import IPC modules so their transitive deps (orchestrator,
   // claude-session, whisper, etc.) don't block the app-ready event.
   // IPC handlers must be registered before createWindow() so the renderer
@@ -438,6 +436,16 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
   });
 
   createWindow();
+
+  // Keep the window chrome in sync when the user switches system light/dark
+  // mode while the app is running. The renderer CSS follows prefers-color-scheme
+  // automatically; this only updates Electron's native background color.
+  nativeTheme.on('updated', () => {
+    const win = liveWindow();
+    if (win) {
+      win.setBackgroundColor(getThemeBackgroundColor());
+    }
+  });
 
   // Wait until the first renderer is visible before asking. Calling the macOS
   // permission API earlier can leave the sheet behind the opening window and
