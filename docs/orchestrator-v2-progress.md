@@ -35,7 +35,10 @@ cross-origin isolation, and final DMG verification.
 - Final packaged app startup smoke: pass
 - DMG checksum verification: pass
 - Packaged app 10-second startup smoke: pass
-- DMG: superseded; 0.16.0 artifact and checksum are recorded after the final build
+- Final mounted-app renderer/ASR smoke: `app://bundle`, cross-origin isolated,
+  `SharedArrayBuffer` available, bundled Whisper ready, Mandarin transcription pass
+- DMG: `release/AhaMeet-0.16.0-arm64.dmg`
+- SHA-256: `2a9cf290c8c4d971e798f29b7fdbb9dfd39c54023b5920c36b01151125d6dbb7`
 
 ## Implemented
 
