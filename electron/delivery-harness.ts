@@ -97,7 +97,7 @@ export type DeliveryDecision =
 export interface DeliveryEvent {
   deliveryId: string;
   seq: number;
-  type: 'delivery.proposed' | 'delivery.status-changed' | 'delivery.failed' | 'delivery.accepted';
+  type: 'delivery.proposed' | 'delivery.spec-revised' | 'delivery.status-changed' | 'delivery.failed' | 'delivery.accepted';
   timestamp: number;
   status: DeliveryStatus;
   detail?: unknown;
@@ -182,6 +182,7 @@ export class DeliveryHarness {
           objective: `${record.view.spec.objective}\n\nRevision request: ${decision.feedback}`,
         };
         record.view.updatedAt = this.now();
+        this.append(record, 'delivery.spec-revised', { specVersion: record.view.spec.version });
         break;
       case 'accept-delivery': {
         if (record.view.status !== 'awaiting-delivery-acceptance' || !record.view.candidate) {
@@ -189,10 +190,16 @@ export class DeliveryHarness {
         }
         if (record.view.candidate.id !== decision.candidateId) throw new Error('candidate mismatch');
         this.transition(record, 'integrating');
-        record.view.integration = await this.deps.integrator.integrate(
-          cloneView(record.view), structuredClone(record.view.candidate),
-        );
-        this.transition(record, 'accepted', 'delivery.accepted');
+        try {
+          record.view.integration = await this.deps.integrator.integrate(
+            cloneView(record.view), structuredClone(record.view.candidate),
+          );
+          this.transition(record, 'accepted', 'delivery.accepted');
+        } catch (error) {
+          record.view.error = error instanceof Error ? error.message : String(error);
+          this.transition(record, 'failed', 'delivery.failed', record.view.error);
+          throw error;
+        }
         break;
       }
       case 'return-delivery':
@@ -206,8 +213,12 @@ export class DeliveryHarness {
           objective: `${record.view.spec.objective}\n\nRework feedback: ${decision.feedback}`,
         };
         record.view.candidate = undefined;
+        record.view.updatedAt = this.now();
+        this.append(record, 'delivery.spec-revised', { specVersion: record.view.spec.version });
+        this.transition(record, 'awaiting-spec-approval');
         break;
       case 'cancel':
+        if (isTerminal(record.view.status)) throw new Error(`cannot cancel ${record.view.status} delivery`);
         record.abort?.abort();
         this.transition(record, 'cancelled');
         break;

@@ -1,6 +1,6 @@
 # Qoder Agent 化方案与 AhaMeet Harness 优化研究
 
-日期：2026-07-16  
+日期：2026-07-16
 范围：Qoder Quest / Experts / CLI / Agent SDK / Cloud Agents / Repo Wiki / Context Engineering，以及 AhaMeet 面向“与 Agent 开会并交付代码项目与 work”的 Harness 设计。
 
 ## 0. 证据边界

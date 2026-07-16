@@ -141,3 +141,35 @@ test('delivery observers continue from a cursor and receive later state changes 
   });
   await waitFor(harness, proposed.id, 'awaiting-delivery-acceptance');
 });
+
+test('integration failures are terminal and accepted deliveries cannot be cancelled', async () => {
+  const makeHarness = (integrate) => new DeliveryHarness({
+    runtime: { execute: async () => ({
+      outcome: 'completed', summary: 'done', changes: [], tests: [], artifacts: [], risks: [], unresolved: [],
+    }) },
+    verifier: { verify: async () => ({ passed: true, checks: ['ok'] }) },
+    reviewer: { review: async () => ({ passed: true, findings: [] }) },
+    integrator: { integrate },
+  });
+  const proposal = {
+    meetingId: 'meeting-4', objective: 'integrate safely', workspace: '/repo',
+    sourceRevision: 'base', acceptanceCriteria: [{ id: 'done', description: 'done' }],
+  };
+
+  const failing = makeHarness(async () => { throw new Error('branch moved'); });
+  const failedRun = await failing.propose(proposal);
+  await failing.decide(failedRun.id, { kind: 'approve-spec', specVersion: 1 });
+  const candidate = await waitFor(failing, failedRun.id, 'awaiting-delivery-acceptance');
+  await assert.rejects(
+    failing.decide(failedRun.id, { kind: 'accept-delivery', candidateId: candidate.candidate.id }),
+    /branch moved/,
+  );
+  assert.equal((await failing.inspect(failedRun.id)).status, 'failed');
+
+  const successful = makeHarness(async () => ({ commit: 'abc' }));
+  const acceptedRun = await successful.propose(proposal);
+  await successful.decide(acceptedRun.id, { kind: 'approve-spec', specVersion: 1 });
+  const ready = await waitFor(successful, acceptedRun.id, 'awaiting-delivery-acceptance');
+  await successful.decide(acceptedRun.id, { kind: 'accept-delivery', candidateId: ready.candidate.id });
+  await assert.rejects(successful.decide(acceptedRun.id, { kind: 'cancel' }), /cannot cancel/);
+});

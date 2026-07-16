@@ -137,7 +137,15 @@ class QoderSdkSession implements BackendSession {
 
     const prefix = this.config.systemPrompt ? '' : 'You are a Qoder agent participating in AhaMeet.\n\n';
     this.input.push(userMessage(`${prefix}Ready. Awaiting instructions.`, 'normal'));
-    await withTimeout(query.initializationResult(), 15_000, 'Qoder SDK readiness handshake timed out');
+    try {
+      await withTimeout(query.initializationResult(), 15_000, 'Qoder SDK readiness handshake timed out');
+    } catch (error) {
+      this.closed = true;
+      this.input.close();
+      await query.close().catch(() => undefined);
+      this.query = null;
+      throw error;
+    }
   }
 
   private async consume(query: QoderQuery): Promise<void> {

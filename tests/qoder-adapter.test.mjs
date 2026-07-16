@@ -128,3 +128,19 @@ test('packaged Qoder runtime resolves to an unpacked executable', async (t) => {
   await chmod(binary, 0o755);
   assert.equal(resolveQoderRuntime(resources, () => null), await realpath(binary));
 });
+
+test('failed Qoder readiness handshake closes the spawned SDK session', async () => {
+  const query = new FakeQuery();
+  query.initializationResult = async () => { throw new Error('protocol mismatch'); };
+  const backend = new QoderBackend({
+    resolveBinary: () => '/fake/qodercli',
+    loadSdk: async () => ({
+      query: () => query,
+      qodercliAuth: () => ({ type: 'qodercli' }),
+      accessToken: (token) => ({ type: 'accessToken', accessToken: token }),
+    }),
+  });
+  const session = backend.createSession({ cwd: '/workspace' }, () => {});
+  await assert.rejects(session.start(), /protocol mismatch/);
+  assert.equal(query.closed, 1);
+});
