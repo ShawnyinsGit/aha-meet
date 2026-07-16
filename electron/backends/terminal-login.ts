@@ -3,16 +3,17 @@ import { readFile, rm } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { mergedSubprocessEnv } from '../settings-loader.js';
+import { isolatedSubprocessEnv } from './backend-environment.js';
 
 export async function runTerminalLogin(
   binary: string,
   args: string[],
   verify: () => Promise<{ loggedIn: boolean }>,
+  env: NodeJS.ProcessEnv = isolatedSubprocessEnv(),
 ): Promise<{ ok: boolean; error?: string }> {
   if (process.platform !== 'darwin') {
     const code = await new Promise<number | null>((resolve, reject) => {
-      const proc = spawn(binary, args, { env: mergedSubprocessEnv(), stdio: 'inherit' });
+      const proc = spawn(binary, args, { env, stdio: 'inherit' });
       proc.once('error', reject);
       proc.once('close', resolve);
     }).catch(() => null);
@@ -21,7 +22,13 @@ export async function runTerminalLogin(
   }
 
   const statusPath = join(tmpdir(), `ahameet-login-${randomUUID()}.status`);
-  const command = `${[binary, ...args].map(shellQuote).join(' ')}; rc=$?; printf '%s' "$rc" > ${shellQuote(statusPath)}`;
+  const envArgs = Object.entries(env)
+    .filter(([key, value]) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(key) && typeof value === 'string')
+    .map(([key, value]) => `${key}=${shellQuote(value!)}`);
+  const isolatedCommand = ['/usr/bin/env', '-i', ...envArgs, binary, ...args]
+    .map((part, index) => index < 2 ? part : (part.includes('=') && !part.startsWith('/') ? part : shellQuote(part)))
+    .join(' ');
+  const command = `${isolatedCommand}; rc=$?; printf '%s' "$rc" > ${shellQuote(statusPath)}`;
   const script = `tell application "Terminal"\nactivate\ndo script "${escapeAppleScript(command)}"\nend tell`;
   const opened = await new Promise<boolean>((resolve) => {
     const proc = spawn('osascript', ['-e', script], { stdio: 'ignore' });

@@ -806,11 +806,11 @@ export class WorkerScheduler {
       if (this.opts.workspaceManager && !this.opts.workspaceManager.canPrepare(handle.id, handle.writePaths)) {
         continue;
       }
-      this.spawnWorker(handle);
+      void this.spawnWorker(handle);
     }
   }
 
-  private spawnWorker(handle: WorkerHandle): void {
+  private async spawnWorker(handle: WorkerHandle): Promise<void> {
     const workerMcp = this.opts.buildWorkerMcp(handle.id);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const mcpServers: Record<string, any> = { 'meeting-worker': workerMcp as any };
@@ -852,7 +852,11 @@ export class WorkerScheduler {
       handle.stallNotified = false;
       handle.stallNudged = false;
       this.startStallWatch();
-      handle.session.start();
+      const session = handle.session;
+      await session.start();
+      // The meeting may have ended, the task may have been cancelled, or an
+      // auth-required event may have disposed the session during the handshake.
+      if (handle.session !== session || handle.status !== 'running') return;
 
       // First prompt mentions peer workers so the new worker knows it may be
       // touching shared code with others.
@@ -862,7 +866,7 @@ export class WorkerScheduler {
       const peerLine = peers.length > 0
         ? `\n\n（同事 worker 也在跑：${peers.map((p) => `${p.id}「${p.title}」`).join('、')}。注意可能改到同一份代码。）`
         : '';
-      handle.session.sendUserText(handle.prompt + peerLine);
+      session.sendUserText(handle.prompt + peerLine);
 
       this.opts.emit({
         source: 'talker',
@@ -876,6 +880,9 @@ export class WorkerScheduler {
       });
       this.emitPlanUpdate();
     } catch (err) {
+      // auth-required/ended may have already terminalized this worker while the
+      // awaited readiness promise was rejecting. Do not emit/cascade twice.
+      if (handle.status !== 'running' || handle.session === null) return;
       // B2: anything throwing between sessionFactory and the first
       // sendUserText would otherwise strand the handle: status='pending'
       // (factory threw — and since spawnReadyWorkers retries on pending,

@@ -20,6 +20,7 @@ import { Orchestrator } from '../orchestrator.js';
 import { mergedSubprocessEnv } from '../settings-loader.js';
 import { formatError } from '../format-error.js';
 import {
+  getBackendAuth,
   getSettings,
   pushRecentCwd,
   setOpenTabs,
@@ -27,6 +28,7 @@ import {
 import type { IpcContext } from './context.js';
 import { clearApprovedExternalDirs } from './documents.js';
 import { MeetingRepository } from '../meeting-repository.js';
+import { getBackendRegistry } from '../backends/registry.js';
 
 interface OpenPayload {
   cwd?: unknown;
@@ -81,6 +83,7 @@ export function registerSessionsIpc(ctx: IpcContext): void {
       const rawCwd = typeof payload?.cwd === 'string' ? payload.cwd : '';
       const greeting = typeof payload?.greeting === 'string' ? payload.greeting : undefined;
       const backendId = typeof payload?.backendId === 'string' ? payload.backendId : undefined;
+      const selectedBackendId = backendId ?? getSettings().defaultBackend ?? 'claude-code';
       const candidateCwd = rawCwd && rawCwd.length > 0 ? rawCwd : homedir();
 
       // S8: validate cwd before doing anything. A compromised renderer could
@@ -108,6 +111,24 @@ export function registerSessionsIpc(ctx: IpcContext): void {
       }
 
       const sessionId = randomUUID();
+      const backendAuth = getBackendAuth(selectedBackendId);
+      const probe = await getBackendRegistry().probe(selectedBackendId, backendAuth
+        ? {
+            authMode: backendAuth.authMode,
+            apiKey: backendAuth.apiKey,
+            baseUrl: backendAuth.baseUrl,
+            model: backendAuth.model,
+          }
+        : { authMode: 'none' });
+      if (!probe.capabilities.coordinate) {
+        return { ok: false, error: `backend '${selectedBackendId}' cannot coordinate` };
+      }
+      if (!probe.installed) {
+        return { ok: false, error: `backend '${selectedBackendId}' runtime is unavailable` };
+      }
+      if (probe.auth === 'required') {
+        return { ok: false, error: `backend '${selectedBackendId}' authentication is required` };
+      }
       // Wait for the launch-time shadow-home build the first time. After
       // launch+1 s this resolves immediately; on a manifest-cached relaunch
       // it's effectively instant.
@@ -131,7 +152,7 @@ export function registerSessionsIpc(ctx: IpcContext): void {
         talkerModel,
         confirmDestructive: ctx.nativeConfirmDestructive,
         browserTabManager: ctx.browserTabManager,
-        defaultBackendId: backendId,
+        defaultBackendId: selectedBackendId,
       });
 
       const result = ctx.registry.open(sessionId, resolvedCwd, orch);

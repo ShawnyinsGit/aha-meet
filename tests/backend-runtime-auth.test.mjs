@@ -5,7 +5,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 
-import { CodexBackend } from '../dist-electron/backends/codex-adapter.js';
+import { CodexBackend, codexLoginArgs } from '../dist-electron/backends/codex-adapter.js';
+import { ClaudeCodeBackend } from '../dist-electron/backends/claude-code-adapter.js';
 import { resolveBinaryFromPath } from '../dist-electron/backends/subprocess-backend.js';
 
 test('packaged runtime resolver finds the canonical Kimi Code install directory', async (t) => {
@@ -44,4 +45,24 @@ test('Codex auth status accepts a successful CLI status probe', async () => {
     execFile: () => 'Logged in using ChatGPT\n',
   });
   assert.deepEqual(await backend.checkAuthStatus(), { loggedIn: true });
+});
+
+test('Claude auth status is based on the CLI JSON probe, not binary existence', async () => {
+  const backend = new ClaudeCodeBackend({
+    resolveBinary: () => '/fake/claude',
+    execFile: () => '{"loggedIn":false,"authMethod":"none"}\n',
+  });
+  assert.deepEqual(await backend.checkAuthStatus(), { loggedIn: false });
+});
+
+test('Claude auth status accepts a successful machine-readable probe', async () => {
+  const backend = new ClaudeCodeBackend({
+    resolveBinary: () => '/fake/claude',
+    execFile: () => '{"loggedIn":true,"authMethod":"oauth"}\n',
+  });
+  assert.deepEqual(await backend.checkAuthStatus(), { loggedIn: true });
+});
+
+test('Codex OAuth uses the login subcommand supported by the locked runtime', () => {
+  assert.deepEqual(codexLoginArgs(), ['login']);
 });

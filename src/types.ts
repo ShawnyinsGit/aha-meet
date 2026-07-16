@@ -149,6 +149,8 @@ export interface BackendInfo {
   installHint: string | null;
   supportsMcp: boolean;
   supportsPermissions: boolean;
+  supportsCoordinator: boolean;
+  supportsWorkers: boolean;
   /** Custom avatar image as base64 data URL. */
   customAvatar: string | null;
 }

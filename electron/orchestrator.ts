@@ -194,6 +194,11 @@ export class Orchestrator implements OrchestratorBridge {
 
     // Create the default HostGroup. Use the user's preferred backend if specified.
     const defaultBackend = opts.defaultBackendId ?? DEFAULT_BACKEND_ID;
+    const defaultBackendAdapter = getBackendRegistry().get(defaultBackend);
+    if (!defaultBackendAdapter) throw new Error(`backend '${defaultBackend}' is not registered`);
+    if (!defaultBackendAdapter.capabilities.coordinate) {
+      throw new Error(`backend '${defaultBackend}' cannot coordinate`);
+    }
     this.createHostGroup(DEFAULT_HOST_ID, defaultBackend);
 
     Orchestrator.liveInstances.add(this);
@@ -203,20 +208,20 @@ export class Orchestrator implements OrchestratorBridge {
   // ---------------------------------------------------------------------------
   // HostGroup management
 
-  /** Build a SessionFactory for a specific backend. Falls back to ClaudeSession
-   *  when the backend is 'claude-code' or when the adapter is not found. */
-  private buildSessionFactory(backendId: string, actorHostId = DEFAULT_HOST_ID): SessionFactory {
+  /** Build a SessionFactory only after the selected backend passes its role gate. */
+  private buildSessionFactory(
+    backendId: string,
+    actorHostId = DEFAULT_HOST_ID,
+    purpose: 'host' | 'worker' = 'host',
+  ): SessionFactory {
+    const backend = getBackendRegistry().get(backendId);
+    if (!backend) throw new Error(`backend '${backendId}' is not registered`);
+    if (purpose === 'worker' && !backend.capabilities.executeTasks) {
+      throw new Error(`backend '${backendId}' cannot execute delivery tasks`);
+    }
     // If a test-injected factory is set, use it for all backends.
     if (this.sessionFactory !== Orchestrator.defaultClaudeFactory) {
       return this.sessionFactory;
-    }
-    if (backendId === DEFAULT_BACKEND_ID || backendId === 'claude-code') {
-      return Orchestrator.defaultClaudeFactory;
-    }
-    const backend = getBackendRegistry().get(backendId);
-    if (!backend) {
-      console.warn(`[orchestrator] backend '${backendId}' not found in registry, falling back to claude-code`);
-      return Orchestrator.defaultClaudeFactory;
     }
     // Wrap the adapter's createSession to accept ClaudeSession-shaped opts,
     // translating the fields that differ between the two interfaces.
@@ -247,13 +252,17 @@ export class Orchestrator implements OrchestratorBridge {
       // Every other CLI must retain the real HOME so OAuth/config locations
       // such as ~/.codex remain visible.
       const backendBaseEnv = { ...(opts.envOverride ?? {}) };
-      backendBaseEnv.HOME = homedir();
-      backendBaseEnv.USERPROFILE = homedir();
+      if (backendId !== 'claude-code') {
+        backendBaseEnv.HOME = homedir();
+        backendBaseEnv.USERPROFILE = homedir();
+      }
       const env = backend.buildEnv(auth, backendBaseEnv);
       const requestedModel = typeof so.model === 'string' ? so.model : undefined;
-      const model = requestedModel?.startsWith('claude-')
-        ? (auth.model ?? backend.capabilities.defaultModel)
-        : (auth.model ?? requestedModel ?? backend.capabilities.defaultModel);
+      const model = backendId === 'claude-code'
+        ? (auth.model ?? requestedModel ?? backend.capabilities.defaultModel)
+        : requestedModel?.startsWith('claude-')
+          ? (auth.model ?? backend.capabilities.defaultModel)
+          : (auth.model ?? requestedModel ?? backend.capabilities.defaultModel);
       return backend.createSession(
         {
           cwd: opts.cwd,
@@ -264,6 +273,7 @@ export class Orchestrator implements OrchestratorBridge {
           skills: Array.isArray(so.skills) ? so.skills : undefined,
           autoApproveScope: opts.autoApproveScope,
           extra: {
+            ...so,
             meetingCommandHandler: (raw: unknown) => this.executeMeetingCommand(actorHostId, raw),
           },
         },
@@ -294,6 +304,7 @@ export class Orchestrator implements OrchestratorBridge {
       resolveWorkerSessionFactory: (backendId) => this.buildSessionFactory(
         backendId ?? this.defaultHost().backendId,
         id,
+        'worker',
       ),
       browserTabManager: this.browserTabManager,
       bridge: this,
@@ -411,11 +422,10 @@ export class Orchestrator implements OrchestratorBridge {
   setCoordinator(hostId: string): { ok: true; coordinatorHostId: string } | { ok: false; error: string } {
     const hg = this.hostGroups.get(hostId);
     if (!hg) return { ok: false, error: `host group '${hostId}' not found` };
-    if (!hg.getHost()) return { ok: false, error: `host group '${hostId}' is not ready` };
+    if (!hg.isReady()) return { ok: false, error: `host group '${hostId}' is not ready` };
     const backend = getBackendRegistry().get(hg.backendId);
     if (!backend) return { ok: false, error: `backend '${hg.backendId}' not found` };
-    // Coordinator support is intentionally narrow for the first V2 release.
-    if (hg.backendId !== 'claude-code' && hg.backendId !== 'codex') {
+    if (!backend.capabilities.coordinate) {
       return { ok: false, error: `backend '${hg.backendId}' cannot coordinate yet` };
     }
     const previous = this.coordinatorHostId;
@@ -516,8 +526,8 @@ export class Orchestrator implements OrchestratorBridge {
     ) {
       const candidate = Array.from(this.hostGroups.entries()).find(([id, hg]) =>
         id !== hostId
-        && hg.getHost() !== null
-        && (hg.backendId === 'claude-code' || hg.backendId === 'codex'),
+        && hg.isReady()
+        && getBackendRegistry().get(hg.backendId)?.capabilities.coordinate === true,
       )?.[0] ?? null;
       this.safeEmit({
         source: 'system',
@@ -708,10 +718,14 @@ export class Orchestrator implements OrchestratorBridge {
 
   /** Manual entry point: renderer-side "Plan meeting" button. */
   async installPlan(tasks: PlanMeetingTask[]): Promise<{ ok: true } | { ok: false; error: string }> {
+    const backendError = this.validateExecutionBackends(tasks);
+    if (backendError) return { ok: false, error: backendError };
     return this.meetingScheduler.installPlan(tasks);
   }
 
   async proposePlan(tasks: PlanMeetingTask[]): Promise<{ ok: true } | { ok: false; error: string }> {
+    const backendError = this.validateExecutionBackends(tasks);
+    if (backendError) return { ok: false, error: backendError };
     if (!this.autoOrchestration) {
       this.pendingPlan = tasks.map((task) => ({ ...task, deps: [...(task.deps ?? [])] }));
       this.safeEmit({ source: 'system', event: { kind: 'plan-proposed', tasks: this.pendingPlan } });
@@ -734,6 +748,19 @@ export class Orchestrator implements OrchestratorBridge {
     return this.meetingScheduler.installPlan(tasks);
   }
 
+  private validateExecutionBackends(tasks: PlanMeetingTask[]): string | null {
+    const defaultBackendId = this.defaultHost().backendId;
+    for (const task of tasks) {
+      const backendId = task.executorBackendId ?? defaultBackendId;
+      const backend = getBackendRegistry().get(backendId);
+      if (!backend) return `backend '${backendId}' is not registered`;
+      if (!backend.capabilities.executeTasks) {
+        return `backend '${backendId}' cannot execute delivery tasks`;
+      }
+    }
+    return null;
+  }
+
   // ===========================================================================
   // OrchestratorBridge — methods called from the MCP tool factories in
   // meeting-mcp.ts. These route to the default host's scheduler. In a full
@@ -741,6 +768,12 @@ export class Orchestrator implements OrchestratorBridge {
   // host handles all MCP tool callbacks.
 
   delegateSingleTask(description: string): { workerId: string; specialty: WorkerSpecialtyKind; reused: boolean } {
+    const backendId = this.defaultHost().backendId;
+    const backend = getBackendRegistry().get(backendId);
+    if (!backend) throw new Error(`backend '${backendId}' is not registered`);
+    if (!backend.capabilities.executeTasks) {
+      throw new Error(`backend '${backendId}' cannot execute delivery tasks`);
+    }
     return this.meetingScheduler.delegateSingleTask(description);
   }
 

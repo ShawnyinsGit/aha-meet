@@ -109,9 +109,14 @@ export function Lobby({ lastError }: LobbyProps) {
   }, [openCwd]);
 
   const handleBackendChange = useCallback(async (backendId: string) => {
+    const result = await window.vibeMeet.backendAuth.setDefault(backendId);
+    if (!result.ok) {
+      setOpenError(result.error ?? 'This backend cannot coordinate');
+      await reloadBackends();
+      return;
+    }
     setSelectedBackend(backendId);
     meetingStore.defaultBackendId = backendId;
-    await window.vibeMeet.backendAuth.setDefault(backendId);
     await reloadBackends();
   }, [reloadBackends]);
 
@@ -244,8 +249,8 @@ export function Lobby({ lastError }: LobbyProps) {
                   onChange={(e) => { void handleBackendChange(e.target.value); }}
                 >
                   {backends.map((b) => (
-                    <option key={b.id} value={b.id}>
-                      {b.displayName} {b.loggedIn ? '✓' : ''} {b.isDefault ? '(default)' : ''} {!b.available ? '(not installed)' : ''}
+                    <option key={b.id} value={b.id} disabled={!b.supportsCoordinator}>
+                      {b.displayName} {b.loggedIn ? '✓' : ''} {b.isDefault ? '(default)' : ''} {!b.available ? '(not installed)' : ''} {!b.supportsCoordinator ? '(expert only)' : ''}
                     </option>
                   ))}
                 </select>

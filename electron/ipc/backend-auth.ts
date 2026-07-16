@@ -21,7 +21,7 @@ import {
 } from '../store.js';
 import { getBackendRegistry, registerCustomBackends } from '../backends/registry.js';
 import { augmentedPath } from '../backends/subprocess-backend.js';
-import { mergedSubprocessEnv } from '../settings-loader.js';
+import { isolatedSubprocessEnv } from '../backends/backend-environment.js';
 import type { BackendAuthEntry } from '../store.js';
 
 /** One install at a time — prevents double-click races from stacking npm
@@ -34,7 +34,7 @@ let activeInstall: { backendId: string; proc: ReturnType<typeof spawn> } | null 
  *  `curl | bash` subprocesses — particularly dangerous for the Kimi install
  *  which pipes a remote script into a shell. */
 function installEnv(): NodeJS.ProcessEnv {
-  const env = mergedSubprocessEnv();
+  const env = isolatedSubprocessEnv();
   // Ensure augmented PATH so npm can find node and freshly-installed
   // binaries land in a location resolveBinaryFromPath() can discover.
   env.PATH = augmentedPath();
@@ -85,8 +85,8 @@ export function registerBackendAuthIpc(): void {
 
     const result = await Promise.all(registry.listWithStatus().map(async ({ backend, available, binaryPath }) => {
       const auth = authEntries.find((e) => e.backendId === backend.id);
-      let loggedIn = Boolean(auth?.apiKey);
-      if (!loggedIn && available && backend.checkAuthStatus) {
+      let loggedIn = false;
+      if (available && backend.checkAuthStatus) {
         try { loggedIn = (await backend.checkAuthStatus()).loggedIn; } catch { loggedIn = false; }
       }
       return {
@@ -107,6 +107,8 @@ export function registerBackendAuthIpc(): void {
         installHint: backend.capabilities.installHint ?? null,
         supportsMcp: backend.capabilities.mcp,
         supportsPermissions: backend.capabilities.permissions,
+        supportsCoordinator: backend.capabilities.coordinate,
+        supportsWorkers: backend.capabilities.executeTasks,
         customAvatar: auth?.customAvatar ?? null,
       };
     }));
@@ -281,6 +283,10 @@ export function registerBackendAuthIpc(): void {
     }
     const vErr = validateBackendId(backendId);
     if (vErr) return { ok: false, error: vErr };
+    const backend = getBackendRegistry().get(backendId);
+    if (!backend?.capabilities.coordinate) {
+      return { ok: false, error: `backend '${backendId}' cannot coordinate` };
+    }
     try {
       await setDefaultBackend(backendId);
       return { ok: true };

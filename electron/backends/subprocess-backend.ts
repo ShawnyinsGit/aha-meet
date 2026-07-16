@@ -27,6 +27,7 @@ import {
   type NormalizedMessage,
   type UserContentBlock,
 } from './cli-backend.js';
+import { isolatedSubprocessEnv } from './backend-environment.js';
 
 // ── Subprocess session ────────────────────────────────────────────────────────
 // Controls a spawned CLI process. Sends prompts via stdin, reads JSONL from
@@ -69,7 +70,7 @@ export abstract class SubprocessSession implements BackendSession {
   /** Subclasses implement: format the initial prompt string. */
   protected abstract formatPrompt(config: BackendSessionConfig): string;
 
-  start(): void {
+  async start(): Promise<void> {
     if (this.process || this.closed) return;
 
     const args = this.buildArgs(this.config);
@@ -247,29 +248,8 @@ export abstract class SubprocessBackend implements CliBackend {
   }
 
   buildEnv(auth: BackendAuthConfig, extra?: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
-    // Build a minimal environment to avoid leaking Electron internals or other
-    // backend API keys to subprocess CLIs.
-    const home = process.env.HOME ?? process.env.USERPROFILE;
-    const user = process.env.USER ?? process.env.USERNAME;
-    const shell = process.platform === 'win32'
-      ? process.env.ComSpec
-      : process.env.SHELL;
-    const minimal: NodeJS.ProcessEnv = {
-      PATH: process.env.PATH,
-      HOME: home,
-      USERPROFILE: process.env.USERPROFILE,
-      USER: user,
-      USERNAME: process.env.USERNAME,
-      SHELL: shell,
-      ComSpec: process.env.ComSpec,
-      LANG: process.env.LANG ?? 'en_US.UTF-8',
-      LC_ALL: process.env.LC_ALL ?? 'en_US.UTF-8',
-      TERM: process.env.TERM ?? 'xterm-256color',
-      TMPDIR: process.env.TMPDIR,
-      TEMP: process.env.TEMP,
-      TMP: process.env.TMP,
-    };
-    return { ...minimal, ...extra };
+    void auth;
+    return isolatedSubprocessEnv(extra);
   }
 }
 

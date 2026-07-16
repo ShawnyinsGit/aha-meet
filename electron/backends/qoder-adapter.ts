@@ -11,10 +11,13 @@ import type { AutoApproveScope } from '../auto-approve-policy.js';
 import { accessSync, constants as fsConstants, existsSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import { resolveBinaryFromPath } from './subprocess-backend.js';
-import { mergedSubprocessEnv } from '../settings-loader.js';
 import { runTerminalLogin } from './terminal-login.js';
+import { isolatedSubprocessEnv } from './backend-environment.js';
 
 const QODER_CAPABILITIES: BackendCapabilities = {
+  coordinate: false,
+  // WorkReport/meeting-worker completion is not bridged through this SDK path yet.
+  executeTasks: false,
   displayName: 'Qoder',
   iconId: 'qoder',
   mcp: true,
@@ -111,7 +114,7 @@ class QoderSdkSession implements BackendSession {
   async start(): Promise<void> {
     if (this.closed || this.query) return;
     const sdk = await this.sdkLoader();
-    const env = stringEnv(this.config.env ?? mergedSubprocessEnv());
+    const env = stringEnv(this.config.env ?? isolatedSubprocessEnv());
     const token = env.QODER_PERSONAL_ACCESS_TOKEN;
     const auth = token ? sdk.accessToken(token) : sdk.qodercliAuth();
     const query = sdk.query({
@@ -317,7 +320,7 @@ export class QoderBackend {
   }
 
   buildEnv(auth: BackendAuthConfig, extra?: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
-    const env = { ...mergedSubprocessEnv(), ...extra };
+    const env = isolatedSubprocessEnv(extra);
     if (auth.apiKey) env.QODER_PERSONAL_ACCESS_TOKEN = auth.apiKey;
     if (auth.baseUrl) env.QODER_BASE_URL = auth.baseUrl;
     return env;
@@ -341,7 +344,7 @@ export class QoderBackend {
         options: {
           auth: sdk.qodercliAuth(),
           pathToQoderCLIExecutable: binary,
-          env: stringEnv(mergedSubprocessEnv()),
+          env: stringEnv(isolatedSubprocessEnv()),
         },
       });
       await withTimeout(query.initializationResult(), 10_000, 'auth probe timeout');
@@ -357,7 +360,9 @@ export class QoderBackend {
   async loginOAuth(): Promise<{ ok: boolean; error?: string }> {
     const binary = this.resolveBinary();
     if (!binary) return { ok: false, error: 'Bundled Qoder CLI is unavailable. Reinstall AhaMeet.' };
-    return runTerminalLogin(binary, ['login'], () => this.checkAuthStatus());
+    return runTerminalLogin(
+      binary, ['login'], () => this.checkAuthStatus(), isolatedSubprocessEnv(),
+    );
   }
 }
 
@@ -383,5 +388,5 @@ export function resolveQoderRuntime(
 }
 
 function noopSession(): BackendSession {
-  return { start() {}, end() {}, sendUserText() {}, sendUserContent() {}, resolvePermission() {}, async interrupt() {} };
+  return { async start() {}, end() {}, sendUserText() {}, sendUserContent() {}, resolvePermission() {}, async interrupt() {} };
 }

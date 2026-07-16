@@ -553,7 +553,7 @@ function BackendCard({
   onAvatarChange,
   onKeyDown,
 }: BackendCardProps) {
-  const hasAuth = b.loggedIn;
+  const hasAuth = b.hasApiKey || b.loggedIn;
   const avatarInputRef = useRef<HTMLInputElement>(null);
 
   const handleAvatarFile = useCallback((file: File) => {
@@ -615,7 +615,7 @@ function BackendCard({
           </div>
         </div>
         <div className="backend-card-actions">
-          {!b.isDefault && b.available && (
+          {!b.isDefault && b.available && b.supportsCoordinator && (
             <button
               type="button"
               className="backend-btn backend-btn-sm"
@@ -624,6 +624,9 @@ function BackendCard({
             >
               设为默认
             </button>
+          )}
+          {!b.supportsCoordinator && (
+            <span className="backend-unavailable-badge">仅专家</span>
           )}
         </div>
       </div>

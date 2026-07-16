@@ -35,10 +35,13 @@ import type {
   ContentBlock,
 } from './cli-backend.js';
 import { resolveBinaryFromPath } from './subprocess-backend.js';
-import { mergedSubprocessEnv } from '../settings-loader.js';
 import { runTerminalLogin } from './terminal-login.js';
+import { isolatedSubprocessEnv } from './backend-environment.js';
 
 const CODEX_CAPABILITIES: BackendCapabilities = {
+  coordinate: true,
+  // This SDK path does not yet mount meeting-worker MCP or emit WorkReport.
+  executeTasks: false,
   displayName: 'Codex',
   iconId: 'codex',
   mcp: true,
@@ -51,6 +54,11 @@ const CODEX_CAPABILITIES: BackendCapabilities = {
   npmPackage: '@openai/codex',
   installHint: 'npm install -g @openai/codex',
 };
+
+/** OAuth entry point for the bundled Codex 0.144.x command contract. */
+export function codexLoginArgs(): string[] {
+  return ['login'];
+}
 
 // ── Dynamic SDK import ─────────────────────────────────────────────────────────
 // The SDK may not be installed. Use dynamic import to avoid build failures.
@@ -134,6 +142,7 @@ class CodexSession implements BackendSession {
     binaryPath: string | null,
     config: BackendSessionConfig,
     emit: (e: BackendSessionEvent) => void,
+    private readonly sdkLoader: () => Promise<CodexSdk | null> = loadCodexSdk,
   ) {
     this.binaryPath = binaryPath;
     this.config = config;
@@ -152,7 +161,7 @@ class CodexSession implements BackendSession {
   }
 
   private async initAndRun(): Promise<void> {
-    const Codex = await loadCodexSdk();
+    const Codex = await this.sdkLoader();
     if (!Codex) {
       throw new Error('@openai/codex-sdk not installed. Run: npm install @openai/codex-sdk');
     }
@@ -199,12 +208,16 @@ class CodexSession implements BackendSession {
           this.emit({ kind: 'message', message: msg });
         }
       }
-    } catch (err: unknown) {
-      if (!this.closed) {
-        if (isCodexAuthError(String(err))) this.emitAuthRequired();
-        else this.emit({ kind: 'error', error: `Codex stream error: ${String(err)}` });
+      if (this.authRequiredEmitted) {
+        throw new Error('Codex authentication required');
       }
-      if (!this.closed && !isCodexAuthError(String(err))) throw err;
+    } catch (err: unknown) {
+      if (isCodexAuthError(String(err))) {
+        if (!this.closed) this.emitAuthRequired();
+        throw new Error('Codex authentication required', { cause: err });
+      }
+      if (!this.closed) this.emit({ kind: 'error', error: `Codex stream error: ${String(err)}` });
+      if (!this.closed) throw err;
     } finally {
       this.currentAbort = null;
     }
@@ -379,6 +392,7 @@ class CodexSession implements BackendSession {
     const thread = this.thread; // Capture thread reference before async boundary
     // Serialize turns to prevent concurrent runStreamed calls on the same thread
     this.turnQueue = this.turnQueue.then(async () => {
+      if (this.closed || this.authRequiredEmitted) return;
       try {
         const abort = new AbortController();
         this.currentAbort = abort;
@@ -446,13 +460,14 @@ export class CodexBackend implements CliBackend {
   constructor(private readonly deps: {
     resolveBinary?: () => string | null;
     execFile?: (binary: string, args: string[], options?: Record<string, unknown>) => string;
+    loadSdk?: () => Promise<CodexSdk | null>;
   } = {}) {}
 
   createSession(
     config: BackendSessionConfig,
     emit: (e: BackendSessionEvent) => void,
   ): BackendSession {
-    return new CodexSession(this.resolveBinary(), config, emit);
+    return new CodexSession(this.resolveBinary(), config, emit, this.deps.loadSdk ?? loadCodexSdk);
   }
 
   resolveBinary(): string | null {
@@ -460,7 +475,7 @@ export class CodexBackend implements CliBackend {
   }
 
   buildEnv(auth: BackendAuthConfig, extra?: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
-    const env = { ...mergedSubprocessEnv(), ...extra };
+    const env = isolatedSubprocessEnv(extra);
     if (auth.apiKey) {
       env.OPENAI_API_KEY = auth.apiKey;
     }
@@ -482,7 +497,7 @@ export class CodexBackend implements CliBackend {
     if (!binary) return { loggedIn: false };
     try {
       const run = this.deps.execFile ?? ((file: string, args: string[]) =>
-        execFileSync(file, args, { env: mergedSubprocessEnv(), encoding: 'utf8', timeout: 10_000 }));
+        execFileSync(file, args, { env: isolatedSubprocessEnv(), encoding: 'utf8', timeout: 10_000 }));
       const output = run(binary, ['login', 'status'], { encoding: 'utf8', timeout: 10_000 });
       return { loggedIn: /logged in/i.test(output) && !/not logged in/i.test(output) };
     } catch {
@@ -497,11 +512,13 @@ export class CodexBackend implements CliBackend {
     }
     // OAuth login needs an interactive terminal — launch in Terminal.app on macOS
     if (process.platform === 'darwin') {
-      return runTerminalLogin(binary, ['auth', 'login'], () => this.checkAuthStatus());
+      return runTerminalLogin(
+        binary, codexLoginArgs(), () => this.checkAuthStatus(), isolatedSubprocessEnv(),
+      );
     }
     return new Promise<{ ok: boolean; error?: string }>((resolve) => {
-      const env = mergedSubprocessEnv();
-      const proc = spawn(binary, ['auth', 'login'], {
+      const env = isolatedSubprocessEnv();
+      const proc = spawn(binary, codexLoginArgs(), {
         env,
         stdio: 'inherit',
         detached: true,

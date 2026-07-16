@@ -148,6 +148,10 @@ export interface BackendAuthConfig {
 // support it).
 
 export interface BackendCapabilities {
+  /** Whether this backend may own the meeting Coordinator role. */
+  coordinate: boolean;
+  /** Whether this backend can complete the current Delivery Worker contract. */
+  executeTasks: boolean;
   /** Display name for UI (e.g. "Claude Code", "Codex", "Kimi"). */
   displayName: string;
   /** Icon identifier for UI rendering. */
@@ -178,7 +182,7 @@ export interface BackendCapabilities {
 
 export interface BackendSession {
   /** Start the session. Begins streaming events via the emit callback. */
-  start(): void | Promise<void>;
+  start(): Promise<void>;
   /** End the session. Releases all resources. Idempotent. */
   end(): void;
   /** Send a text message from the user. */

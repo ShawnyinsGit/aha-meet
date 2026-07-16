@@ -3,18 +3,19 @@
 // the session id emitted in the stream's `session.resume_hint` meta event.
 
 import { spawn, type ChildProcess } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, delimiter, join } from 'node:path';
 import { SubprocessBackend } from './subprocess-backend.js';
-import { mergedSubprocessEnv } from '../settings-loader.js';
 import { runTerminalLogin } from './terminal-login.js';
+import { isolatedSubprocessEnv } from './backend-environment.js';
 import type {
   BackendSession, BackendSessionConfig, BackendSessionEvent, BackendAuthConfig,
   BackendCapabilities, NormalizedMessage, UserContentBlock, InputPriority,
 } from './cli-backend.js';
 
 const KIMI_CAPABILITIES: BackendCapabilities = {
+  coordinate: false, executeTasks: false,
   displayName: 'Kimi', iconId: 'kimi', mcp: false, permissions: false,
   systemPrompt: true, skills: false, interrupt: true,
   defaultModel: 'kimi-latest',
@@ -92,6 +93,8 @@ class KimiSession implements BackendSession {
   private closed = false;
   private sessionId?: string;
   private queue = Promise.resolve();
+  private firstTurn = true;
+  private authRequiredEmitted = false;
 
   constructor(
     private readonly binary: string,
@@ -100,14 +103,15 @@ class KimiSession implements BackendSession {
   ) {}
 
   async start(): Promise<void> {
-    const prefix = this.config.systemPrompt ? `${this.config.systemPrompt}\n\n---\n\n` : '';
-    await this.runTurn(`${prefix}Ready for instructions.`);
+    // One-shot prompt mode has no transport handshake. Treat construction as
+    // locally ready and defer the first paid model turn until real user input.
+    // Kimi ACP will replace this compatibility path with a protocol initialize.
   }
 
   private runTurn(prompt: string): Promise<void> {
     if (this.closed) return Promise.resolve();
     return new Promise((resolve, reject) => {
-      const env = this.config.env ?? mergedSubprocessEnv();
+      const env = { ...(this.config.env ?? isolatedSubprocessEnv()) };
       env.PATH = [dirname(this.binary), env.PATH].filter(Boolean).join(delimiter);
       const proc = spawn(this.binary, buildKimiCommandArgs({
         prompt, model: this.config.model, sessionId: this.sessionId,
@@ -118,7 +122,13 @@ class KimiSession implements BackendSession {
       const consume = (line: string) => {
         const parsed = parseKimiStreamEvent(line.trim());
         if (parsed?.sessionId) this.sessionId = parsed.sessionId;
-        if (parsed?.message && !this.closed) this.emit({ kind: 'message', message: parsed.message });
+        if (parsed?.message && !this.closed) {
+          if (isKimiAuthError(`${parsed.message.errorCode ?? ''} ${parsed.message.errorDetail ?? ''}`)) {
+            this.emitAuthRequired();
+          } else {
+            this.emit({ kind: 'message', message: parsed.message });
+          }
+        }
       };
       proc.stdout?.on('data', (chunk: Buffer) => {
         stdout += chunk.toString();
@@ -135,18 +145,29 @@ class KimiSession implements BackendSession {
       proc.once('close', (code, signal) => {
         if (stdout.trim()) consume(stdout);
         if (this.process === proc) this.process = null;
-        if (!this.closed && code !== 0 && signal !== 'SIGINT' && signal !== 'SIGTERM') {
+        if (this.authRequiredEmitted) {
+          resolve();
+        } else if (!this.closed && code !== 0 && signal !== 'SIGINT' && signal !== 'SIGTERM') {
           const detail = stderr.trim() || `exit ${code}`;
-          this.emit({ kind: 'error', error: `Kimi 执行失败：${detail}` });
-          reject(new Error(detail));
+          if (isKimiAuthError(detail)) {
+            this.emitAuthRequired();
+            resolve();
+          } else {
+            this.emit({ kind: 'error', error: `Kimi 执行失败：${detail}` });
+            reject(new Error(detail));
+          }
         } else resolve();
       });
     });
   }
 
   sendUserText(text: string, _priority?: InputPriority): void {
-    if (this.closed) return;
-    this.queue = this.queue.then(() => this.runTurn(text)).catch(() => undefined);
+    if (this.closed || this.authRequiredEmitted) return;
+    const prefix = this.firstTurn && this.config.systemPrompt
+      ? `${this.config.systemPrompt}\n\n---\n\n`
+      : '';
+    this.firstTurn = false;
+    this.queue = this.queue.then(() => this.runTurn(prefix + text)).catch(() => undefined);
   }
 
   sendUserContent(content: string | UserContentBlock[], priority?: InputPriority): void {
@@ -164,6 +185,32 @@ class KimiSession implements BackendSession {
     this.process?.kill('SIGTERM');
     this.emit({ kind: 'ended' });
     this.emit = () => undefined;
+  }
+
+  private emitAuthRequired(): void {
+    if (this.authRequiredEmitted) return;
+    this.authRequiredEmitted = true;
+    this.emit({ kind: 'auth-required', error: 'Kimi 登录已失效，请完成重新认证后重连。' });
+    this.process?.kill('SIGTERM');
+  }
+}
+
+function isKimiAuthError(message: string): boolean {
+  return /\b401\b|unauthorized|authentication[_\s-]?(?:failed|required)|token (?:expired|revoked)/i.test(message);
+}
+
+export function hasUsableKimiCredentials(path: string, nowSeconds = Date.now() / 1000): boolean {
+  try {
+    const parsed = JSON.parse(readFileSync(path, 'utf8')) as {
+      access_token?: unknown; refresh_token?: unknown; expires_at?: unknown;
+    };
+    if (typeof parsed.refresh_token === 'string' && parsed.refresh_token.length > 0) return true;
+    return typeof parsed.access_token === 'string'
+      && parsed.access_token.length > 0
+      && typeof parsed.expires_at === 'number'
+      && parsed.expires_at > nowSeconds + 60;
+  } catch {
+    return false;
   }
 }
 
@@ -200,17 +247,23 @@ export class KimiBackend extends SubprocessBackend {
 
   async checkAuthStatus(): Promise<{ loggedIn: boolean }> {
     if (!this.resolveBinary()) return { loggedIn: false };
-    return { loggedIn: existsSync(join(homedir(), '.kimi-code', 'credentials', 'kimi-code.json')) };
+    return {
+      loggedIn: hasUsableKimiCredentials(
+        join(homedir(), '.kimi-code', 'credentials', 'kimi-code.json'),
+      ),
+    };
   }
 
   async loginOAuth(): Promise<{ ok: boolean; error?: string }> {
     const binary = this.resolveBinary();
     if (!binary) return { ok: false, error: 'Kimi CLI not found. Install it first.' };
-    return runTerminalLogin(binary, ['login'], () => this.checkAuthStatus());
+    return runTerminalLogin(
+      binary, ['login'], () => this.checkAuthStatus(), isolatedSubprocessEnv(),
+    );
   }
 }
 
 
 function createNoopSession(): BackendSession {
-  return { start() {}, end() {}, sendUserText() {}, sendUserContent() {}, resolvePermission() {}, async interrupt() {} };
+  return { async start() {}, end() {}, sendUserText() {}, sendUserContent() {}, resolvePermission() {}, async interrupt() {} };
 }

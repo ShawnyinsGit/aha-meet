@@ -75,6 +75,7 @@ export class HostGroup {
   readonly backendId: string;
 
   private host: BackendSession | null = null;
+  private ready = false;
   private suppressUnexpectedHostEnd = false;
   private scheduler: WorkerScheduler;
   private emit: (e: OrchestratorEvent) => void;
@@ -155,6 +156,10 @@ export class HostGroup {
     return this.host;
   }
 
+  isReady(): boolean {
+    return this.ready && this.host !== null;
+  }
+
   getScheduler(): WorkerScheduler {
     return this.scheduler;
   }
@@ -170,6 +175,7 @@ export class HostGroup {
   }
 
   async start(greeting?: string) {
+    this.ready = false;
     const meetingMcp = buildTalkerMcp(this.bridge, this.isCoordinator, this.id);
 
     let systemPrompt: string = TALKER_PROMPT;
@@ -212,11 +218,16 @@ export class HostGroup {
 
     await this.host.start();
 
-    // The session may have been torn down (e.g. orchestrator.end() racing with
-    // a slow backend handshake). If so, skip the greeting — sending to a null
-    // host would throw a confusing TypeError.
-    if (this.host && greeting) {
+    // The session may have been torn down while its handshake promise was
+    // settling. A missing host is a failed readiness transition, never Ready.
+    if (!this.host) {
+      throw new Error(`backend '${this.backendId}' ended before readiness`);
+    }
+    if (greeting) {
+      this.ready = true;
       this.host.sendUserText(greeting, 'normal');
+    } else {
+      this.ready = true;
     }
   }
 
@@ -258,6 +269,7 @@ export class HostGroup {
     this.scheduler.endAll();
     this.host?.end();
     this.host = null;
+    this.ready = false;
     return finalLines;
   }
 
@@ -276,7 +288,10 @@ export class HostGroup {
       this.taggedEmit({ source: 'talker', event: e });
       return;
     }
-    if (e.kind === 'ended') this.host = null;
+    if (e.kind === 'ended') {
+      this.host = null;
+      this.ready = false;
+    }
     this.taggedEmit({ source: 'talker', event: e });
 
     if (e.kind === 'ended' && this.suppressUnexpectedHostEnd) {

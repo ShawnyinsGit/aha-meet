@@ -60,3 +60,33 @@ test('Codex adapter collapses an authentication failure into one auth-required e
     error: 'Codex 登录已失效，请完成重新认证后重连 Host。',
   }]);
 });
+
+test('Codex readiness rejects when the handshake reports expired authentication', async () => {
+  const events = [];
+  const thread = {
+    async runStreamed() {
+      return {
+        events: (async function* () {
+          yield {
+            type: 'turn.failed',
+            error: { message: '401 Unauthorized: token revoked' },
+          };
+        })(),
+      };
+    },
+  };
+  class FakeCodex {
+    startThread() { return thread; }
+  }
+  const backend = new CodexBackend({
+    resolveBinary: () => '/fake/codex',
+    loadSdk: async () => FakeCodex,
+  });
+  const session = backend.createSession({ cwd: process.cwd() }, (event) => events.push(event));
+
+  await assert.rejects(session.start(), /authentication required/i);
+  assert.deepEqual(events, [{
+    kind: 'auth-required',
+    error: 'Codex 登录已失效，请完成重新认证后重连 Host。',
+  }]);
+});
