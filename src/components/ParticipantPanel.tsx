@@ -1,5 +1,5 @@
 import { memo, useMemo, useState } from 'react';
-import { ChevronDown, ChevronUp, Crown, MicOff, Plus, RotateCcw, UserX } from 'lucide-react';
+import { ChevronDown, ChevronUp, Crown, ExternalLink, MicOff, Plus, RotateCcw, UserX } from 'lucide-react';
 import type { HostGroupState, WorkerState } from '../lib/meeting-store';
 import { BackendAvatar } from './BackendAvatar';
 import { WorkerCard } from './WorkerCard';
@@ -22,6 +22,8 @@ interface ParticipantPanelProps {
   onRestartHost?: (hostId: string) => void;
   /** Called when a gallery tile is clicked. 'user' for self tile, hostId for host tiles. */
   onSelectParticipant?: (id: string) => void;
+  /** Called when the user clicks "详情" on a host tile to open the IDE editor. */
+  onOpenEditor?: (backendId: string, hostId: string) => void;
 }
 
 export const ParticipantPanel = memo(function ParticipantPanel({
@@ -39,6 +41,7 @@ export const ParticipantPanel = memo(function ParticipantPanel({
   onSetCoordinator,
   onRestartHost,
   onSelectParticipant,
+  onOpenEditor,
 }: ParticipantPanelProps) {
   const [barCollapsed, setBarCollapsed] = useState(false);
 
@@ -102,6 +105,17 @@ export const ParticipantPanel = memo(function ParticipantPanel({
           const isCoordinator = hostId === coordinatorHostId;
           const actions = (
             <div className="tiles-gallery-actions">
+              {onOpenEditor && (
+                <button
+                  type="button"
+                  className="tiles-gallery-action-btn"
+                  onClick={(e) => { e.stopPropagation(); onOpenEditor(hg.backendId, hostId); }}
+                  title="打开编辑器"
+                  aria-label="Open editor"
+                >
+                  <ExternalLink size={12} />
+                </button>
+              )}
               {isCoordinator && (
                 <span className="tiles-gallery-action-btn tiles-gallery-action-btn-active" title="当前主持人" aria-label="Current coordinator">
                   <Crown size={12} />

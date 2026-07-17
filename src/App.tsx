@@ -375,6 +375,18 @@ export function App() {
     if (!result.ok) console.warn('[host] reconnect failed:', result.error);
   }, [workers]);
 
+  const handleOpenEditor = useCallback((backendId: string, hostId: string) => {
+    const sessionId = activeTab?.id ?? 'default';
+    const cwd = state.cwd || '.';
+    const title = `${backendId} - ${hostId}`;
+    void window.vibeMeet.openCodeEditor.open({
+      backendId,
+      sessionId,
+      cwd,
+      title,
+    });
+  }, [activeTab?.id, state.cwd]);
+
   const sendWithMode = useCallback(async (raw: string) => {
     const trimmed = raw.trim();
     if (!trimmed) return;
@@ -465,6 +477,7 @@ ${trimmed}`
                   setDrawerOpen(true);
                   setOpenParticipantsTab(true);
                 }}
+                onOpenEditor={handleOpenEditor}
                 selfTile={
                   <ParticipantTile
                     name="You"

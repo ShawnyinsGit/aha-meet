@@ -406,6 +406,11 @@ export interface VibeMeetApi {
     open: () => Promise<{ ok: boolean }>;
     close: () => Promise<{ ok: boolean }>;
   };
+  openCodeEditor: {
+    open: (payload: { backendId: string; sessionId: string; cwd: string; title?: string }) => Promise<{ ok: boolean; error?: string }>;
+    close: (backendId: string, sessionId: string) => Promise<{ ok: boolean; error?: string }>;
+    list: () => Promise<{ ok: true; windows: Array<{ backendId: string; sessionId: string; focused: boolean }> } | { ok: false; error: string }>;
+  };
   popoutSession: (tabId: string) => Promise<{ ok: boolean }>;
   popoutStage: (windowId: string, type: string) => Promise<{ ok: boolean }>;
   browser: BrowserApi;

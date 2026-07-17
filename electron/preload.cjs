@@ -130,6 +130,11 @@ const api = {
     open: () => ipcRenderer.invoke('settings:open-window'),
     close: () => ipcRenderer.invoke('settings:close-window'),
   },
+  openCodeEditor: {
+    open: (payload) => ipcRenderer.invoke('opencode-editor:open', payload),
+    close: (backendId, sessionId) => ipcRenderer.invoke('opencode-editor:close', { backendId, sessionId }),
+    list: () => ipcRenderer.invoke('opencode-editor:list'),
+  },
   popoutSession: (tabId) => ipcRenderer.invoke('popout:open-session', { tabId }),
   popoutStage: (windowId, type) => ipcRenderer.invoke('popout:open-stage', { windowId, type }),
   browser: {

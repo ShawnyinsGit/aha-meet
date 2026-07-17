@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { App } from './App';
 import { SettingsWindow } from './components/SettingsWindow';
 import { PopoutPlaceholder } from './components/PopoutPlaceholder';
+import { OpenCodeEditor } from './components/OpenCodeEditor';
 import { AppErrorBoundary } from './components/AppErrorBoundary';
 import './styles.css';
 
@@ -10,6 +11,7 @@ const params = new URLSearchParams(window.location.search);
 const viewParam = params.get('view');
 const isSettingsView = viewParam === 'settings';
 const isPopoutView = viewParam === 'popout';
+const isOpenCodeEditorView = viewParam === 'opencode-editor';
 
 if (isSettingsView) {
   document.documentElement.classList.add('settings-view');
@@ -22,6 +24,11 @@ if (isPopoutView) {
   document.title = `独立窗口 — ${type}`;
 }
 
+if (isOpenCodeEditorView) {
+  const backendId = params.get('backendId') ?? 'unknown';
+  document.title = `OpenCode — ${backendId}`;
+}
+
 const root = createRoot(document.getElementById('root')!);
 root.render(
   <AppErrorBoundary>
@@ -29,6 +36,12 @@ root.render(
       ? <SettingsWindow />
       : isPopoutView
         ? <PopoutPlaceholder />
-        : <App />}
+        : isOpenCodeEditorView
+          ? <OpenCodeEditor
+              backendId={params.get('backendId') ?? ''}
+              sessionId={params.get('sessionId') ?? ''}
+              cwd={params.get('cwd') ?? ''}
+            />
+          : <App />}
   </AppErrorBoundary>,
 );
