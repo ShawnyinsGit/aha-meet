@@ -239,11 +239,13 @@ class CodexAppServerSession implements BackendSession {
     switch (item.type) {
       case 'agentMessage': {
         const text = typeof item.text === 'string' ? item.text : '';
-        const { visibleText, hasSpeakCommand } = dispatchAppServerCommands(
+        const { visibleText, hasSpeakCommand, hasNonSpeakCommand } = dispatchAppServerCommands(
           text, this.meetingCommandHandler, this.emit,
         );
-        if (!visibleText || hasSpeakCommand) return null;
-        return { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: visibleText }] }, raw: item };
+        if (hasSpeakCommand) return null;
+        const chatText = visibleText || (hasNonSpeakCommand ? COMMAND_ONLY_ACK : '');
+        if (!chatText) return null;
+        return { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: chatText }] }, raw: item };
       }
       case 'reasoning': {
         const summary = Array.isArray(item.summary) ? item.summary.map(String).join('\n') : '';
@@ -483,16 +485,18 @@ class CodexSession implements BackendSession {
     switch (item.type) {
       case 'agent_message':
         {
-          const { visibleText, hasSpeakCommand } = this.dispatchMeetingCommands(item.text);
+          const { visibleText, hasSpeakCommand, hasNonSpeakCommand } = this.dispatchMeetingCommands(item.text);
           // `speak` is rendered by Orchestrator.narrateAssistantLine(). Emitting
           // the agent message as well would show the same sentence twice and
           // leak the fenced protocol payload into the chat transcript.
-          if (!visibleText || hasSpeakCommand) return null;
+          if (hasSpeakCommand) return null;
+          const chatText = visibleText || (hasNonSpeakCommand ? COMMAND_ONLY_ACK : '');
+          if (!chatText) return null;
           return {
             type: 'assistant',
             message: {
               role: 'assistant',
-              content: [{ type: 'text', text: visibleText }],
+              content: [{ type: 'text', text: chatText }],
             },
             raw: item,
           };
@@ -624,9 +628,12 @@ class CodexSession implements BackendSession {
     this.emit({ kind: 'auth-required', error: 'Codex 登录已失效，请完成重新认证后重连 Host。' });
   }
 
-  private dispatchMeetingCommands(text: string): { visibleText: string; hasSpeakCommand: boolean } {
+  private dispatchMeetingCommands(text: string): {
+    visibleText: string; hasSpeakCommand: boolean; hasNonSpeakCommand: boolean;
+  } {
     const fenced = /```meeting-command\s*([\s\S]*?)```/gi;
     let hasSpeakCommand = false;
+    let hasNonSpeakCommand = false;
     for (const match of text.matchAll(fenced)) {
       try {
         const command = JSON.parse(match[1]);
@@ -635,6 +642,7 @@ class CodexSession implements BackendSession {
           && typeof command.text === 'string'
           && command.text.trim().length > 0
         ) hasSpeakCommand = true;
+        else hasNonSpeakCommand = true;
         if (this.meetingCommandHandler) {
           void Promise.resolve(this.meetingCommandHandler(command)).catch((err) => {
             this.emit({ kind: 'error', error: `Meeting command failed: ${String(err)}` });
@@ -647,6 +655,7 @@ class CodexSession implements BackendSession {
     return {
       visibleText: text.replace(fenced, '').trim(),
       hasSpeakCommand,
+      hasNonSpeakCommand,
     };
   }
 
@@ -794,15 +803,16 @@ function dispatchAppServerCommands(
   text: string,
   handler: ((command: unknown) => Promise<unknown> | unknown) | undefined,
   emit: (event: BackendSessionEvent) => void,
-): { visibleText: string; hasSpeakCommand: boolean } {
+): { visibleText: string; hasSpeakCommand: boolean; hasNonSpeakCommand: boolean } {
   const fenced = /```meeting-command\s*([\s\S]*?)```/gi;
   let hasSpeakCommand = false;
+  let hasNonSpeakCommand = false;
   for (const match of text.matchAll(fenced)) {
     try {
       const command = JSON.parse(match[1]);
       if (command?.kind === 'speak' && typeof command.text === 'string' && command.text.trim()) {
         hasSpeakCommand = true;
-      }
+      } else hasNonSpeakCommand = true;
       if (handler) {
         void Promise.resolve(handler(command)).catch((error) => {
           emit({ kind: 'error', error: `Meeting command failed: ${String(error)}` });
@@ -812,8 +822,10 @@ function dispatchAppServerCommands(
       emit({ kind: 'error', error: `Invalid meeting-command JSON: ${String(error)}` });
     }
   }
-  return { visibleText: text.replace(fenced, '').trim(), hasSpeakCommand };
+  return { visibleText: text.replace(fenced, '').trim(), hasSpeakCommand, hasNonSpeakCommand };
 }
+
+const COMMAND_ONLY_ACK = '我正在处理，有结果会马上告诉你。';
 
 function assertNever(value: never): null {
   void value;

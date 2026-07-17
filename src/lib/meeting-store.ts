@@ -33,7 +33,6 @@ const MAX_ACTIVITY = 500;
 const ANNOUNCE_RETRY_MS = 350;
 const ANNOUNCE_MAX_QUEUE = 6;
 
-const DEFAULT_GREETING = "You're joining a live screen-share meeting with your developer. Greet them in one or two sentences, ask what they want to work on today, and remind them they can share the current screen with the snapshot button when something needs your eyes. Keep it warm and short.";
 
 function appendCapped<T>(arr: T[], items: T[], max: number): T[] {
   if (items.length === 0) return arr;
@@ -756,10 +755,10 @@ class MeetingStore {
     greeting?: string,
     recoveryMeetingId?: string,
   ): Promise<{ ok: boolean; error?: string; sessionId?: string }> {
-    // Default greeting kicks the Talker into speaking on session start so the
-    // user gets an immediate "hello, what should we work on?" instead of a
-    // dead-air tab. Without this the SDK input loop sits idle.
-    let effectiveGreeting = recoveryMeetingId ? '' : (greeting ?? DEFAULT_GREETING);
+    // Transport readiness must not spend a model turn. Startup greetings can
+    // queue ahead of real user input and surface much later as an unrelated
+    // "welcome back" response. The empty chat state shows readiness locally.
+    let effectiveGreeting = recoveryMeetingId ? '' : (greeting ?? '');
     // If a placeholder already exists for this cwd, resume it instead of
     // creating a second tab. Mirrors main-side cwd uniqueness.
     const existing = this.findByCwd(cwd);
@@ -774,7 +773,7 @@ class MeetingStore {
     // Pre-load transcript to inject resume context if there's history.
     // This gives the AI awareness of the previous conversation so it can
     // continue tasks instead of starting cold each time.
-    if (!recoveryMeetingId) {
+    if (!recoveryMeetingId && effectiveGreeting) {
       effectiveGreeting = await this.buildResumeGreeting(cwd, effectiveGreeting);
     }
 
@@ -812,8 +811,8 @@ class MeetingStore {
     const ph = this.slots.get(placeholderSlotId);
     if (!ph || !ph.placeholder) return { ok: false, error: 'not-placeholder' };
     // Pre-load transcript to inject resume context if there's history.
-    let effectiveGreeting = greeting ?? DEFAULT_GREETING;
-    effectiveGreeting = await this.buildResumeGreeting(ph.cwd, effectiveGreeting);
+    let effectiveGreeting = greeting ?? '';
+    if (effectiveGreeting) effectiveGreeting = await this.buildResumeGreeting(ph.cwd, effectiveGreeting);
 
     const res = await window.vibeMeet.sessions.open(ph.cwd, effectiveGreeting, this.defaultBackendId ?? undefined);
     if (!res.ok) {

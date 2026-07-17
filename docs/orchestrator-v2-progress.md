@@ -24,7 +24,7 @@ cross-origin isolation, and final DMG verification.
 - Renderer TypeScript: pass
 - Electron TypeScript: pass
 - Production build: pass
-- Node tests: 106/106 pass
+- Node tests: 108/108 pass
 - Packaged Codex runtime resolver regression: pass
 - MeetingCommand authorization regression: pass
 - Workspace isolation tests: Git worktree + non-Git path lock pass
@@ -37,14 +37,22 @@ cross-origin isolation, and final DMG verification.
 - Packaged app 10-second startup smoke: pass
 - Final mounted-app renderer/ASR smoke: `app://bundle`, cross-origin isolated,
   `SharedArrayBuffer` available, bundled Whisper ready, Mandarin transcription pass
-- DMG: `release/AhaMeet-0.16.1-arm64.dmg`
-- SHA-256: `815ab7bd686f185bc033e7b541734ff1be61f94eb68854da853570eed85974c2`
+- DMG: `release/AhaMeet-0.16.2-arm64.dmg`
+- SHA-256: `95b6f393877b3ba41f87a7015c02e422ed20453bdbad6bc340d0dfc66ef74ff2`
 
 ## Implemented
 
 - Packaged Codex resolves and passes a real `app.asar.unpacked` executable.
 - Codex OAuth status follows the CLI exit-code contract, including 0.144.x
   releases that write successful login status to stderr instead of stdout.
+- Chat `@backend` mentions now route to the matching ready Expert Talker;
+  Expert replies remain visible and are also forwarded to the Coordinator.
+- Host startup and reconnect perform readiness handshakes without paid greeting
+  turns, preventing delayed, out-of-context welcome messages from blocking real input.
+- Coordinator and Expert Talkers receive explicit, distinct role prompts; only
+  the Coordinator owns meeting scheduling while Experts answer direct requests.
+- Codex command-only turns receive a visible acknowledgement instead of being
+  silently swallowed after the internal protocol frame is removed.
 - Backend-specific environment/auth construction; non-Claude CLIs keep real HOME.
 - Backend-specific model selection.
 - Codex real async startup handshake and abortable turns.

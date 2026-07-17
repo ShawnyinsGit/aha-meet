@@ -36,13 +36,13 @@ test('Codex adapter preserves normal text while removing non-speak command frame
   assert.deepEqual(commands, [{ kind: 'propose-plan', tasks: [] }]);
 });
 
-test('Codex adapter does not emit an empty chat message for command-only output', () => {
+test('Codex adapter acknowledges non-speak command-only output instead of leaving chat silent', () => {
   const session = makeSession([]);
   const message = session.normalizeItem({
     type: 'agent_message',
     text: '```meeting-command\n{"kind":"broadcast-hosts","question":"status?"}\n```',
   });
-  assert.equal(message, null);
+  assert.equal(message.message.content[0].text, '我正在处理，有结果会马上告诉你。');
 });
 
 test('Codex adapter collapses an authentication failure into one auth-required event', () => {
@@ -310,6 +310,50 @@ test('Codex production app-server session becomes ready without a model turn', a
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(calls[2][0], 'turn/start');
   assert.equal(events[0].message.message.content[0].text, 'hello from app-server');
+  session.end();
+});
+
+test('Codex app-server surfaces an acknowledgement for command-only host output', async () => {
+  let notification;
+  const events = [];
+  const commands = [];
+  const transport = {
+    async start() { return { userAgent: 'Codex/0.144.1', account: { type: 'chatgpt' } }; },
+    async openThread() { return 'app-thread-command'; },
+    async resumeThread(id) { return id; },
+    async startTurn() {
+      queueMicrotask(() => {
+        notification({ method: 'item/completed', params: {
+          item: {
+            type: 'agentMessage', id: 'command-only',
+            text: '```meeting-command\n{"kind":"broadcast-hosts","question":"status?"}\n```',
+          },
+        } });
+        notification({ method: 'turn/completed', params: {
+          turn: { id: 'turn-command', status: 'completed', error: null },
+        } });
+      });
+      return 'turn-command';
+    },
+    async interruptTurn() {},
+    close() {},
+  };
+  const backend = new CodexBackend({
+    resolveBinary: () => '/fake/codex',
+    createAppServerTransport: (options) => { notification = options.onNotification; return transport; },
+  });
+  const session = backend.createSession({
+    cwd: '/workspace',
+    extra: {
+      codexTransport: 'app-server',
+      meetingCommandHandler: (command) => commands.push(command),
+    },
+  }, (event) => events.push(event));
+  await session.start();
+  session.sendUserText('ask experts');
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(commands, [{ kind: 'broadcast-hosts', question: 'status?' }]);
+  assert.equal(events[0].message.message.content[0].text, '我正在处理，有结果会马上告诉你。');
   session.end();
 });
 

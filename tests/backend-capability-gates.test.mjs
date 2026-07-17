@@ -133,3 +133,49 @@ test('host listings include the native backend session reference for recovery', 
     await orchestrator.end();
   }
 });
+
+test('a backend mention routes the user turn to the ready expert instead of the coordinator', async () => {
+  const sessions = [];
+  const prompts = [];
+  const emitted = [];
+  const orchestrator = new Orchestrator({
+    emit(event) { emitted.push(event); },
+    cwd: process.cwd(),
+    sessionFactory: (opts) => {
+      const inputs = [];
+      sessions.push({ inputs, emit: opts.emit });
+      prompts.push(String(opts.sessionOptions?.systemPrompt ?? ''));
+      return {
+        async start() {}, end() {},
+        sendUserText(text) { inputs.push(text); },
+        sendUserContent() {}, resolvePermission() {}, async interrupt() {},
+      };
+    },
+  });
+  try {
+    await orchestrator.start();
+    assert.equal(orchestrator.addHost('codex', 'codex-expert').ok, true);
+    await new Promise((resolve) => setImmediate(resolve));
+
+    orchestrator.sendUserText('排查 ASR 为什么启动失败@codex');
+
+    assert.deepEqual(sessions[0].inputs, [], 'the coordinator must not consume a directly addressed expert turn');
+    assert.equal(sessions[1].inputs.length, 1, 'the expert receives exactly the user-directed turn, not a startup greeting');
+    assert.match(sessions[1].inputs[0], /排查 ASR 为什么启动失败/);
+    assert.doesNotMatch(sessions[1].inputs[0], /@codex/);
+    assert.match(prompts[0], /Coordinator/i);
+    assert.match(prompts[1], /Expert/i);
+
+    sessions[1].emit({
+      kind: 'message',
+      message: {
+        type: 'assistant',
+        message: { role: 'assistant', content: [{ type: 'text', text: 'ASR 依赖没有加载成功。' }] },
+      },
+    });
+    assert.ok(emitted.some((event) => event.hostId === 'codex-expert' && event.event.kind === 'message'));
+    assert.match(sessions[0].inputs[0], /expert response from codex-expert.*ASR 依赖没有加载成功/s);
+  } finally {
+    await orchestrator.end();
+  }
+});

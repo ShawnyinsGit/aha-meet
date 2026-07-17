@@ -203,12 +203,13 @@ export function SideDrawer({
   }, [skills, slashFilter]);
 
   const filteredBackends = useMemo(() => {
-    if (!mentionFilter) return backends;
+    const participants = backends.filter((backend) => activeBackendIds.has(backend.id));
+    if (!mentionFilter) return participants;
     const lower = mentionFilter.toLowerCase();
-    return backends.filter((b) =>
+    return participants.filter((b) =>
       b.displayName.toLowerCase().includes(lower)
     );
-  }, [backends, mentionFilter]);
+  }, [activeBackendIds, backends, mentionFilter]);
 
   const handleSlashSelect = useCallback((skill: SkillInfo) => {
     const before = text.slice(0, slashStartRef.current);
@@ -546,7 +547,7 @@ export function SideDrawer({
         <div className="drawer-chat">
           <div className="drawer-scroll">
             {transcript.length === 0 && (
-              <div className="drawer-empty">Claude will introduce themself shortly. Speak or type to reply.</div>
+              <div className="drawer-empty">Host 已就绪。直接输入任务，或用 @ 点名已参会的 Expert。</div>
             )}
             {transcript.map((e) => {
               const timeLabel = formatMessageTime(e.ts, now);
@@ -681,7 +682,7 @@ export function SideDrawer({
               )}
               {mentionPickerOpen && filteredBackends.length === 0 && (
                 <div className="slash-picker slash-picker-empty">
-                  <span>没有找到匹配的 backend</span>
+                  <span>没有找到匹配的参会 Talker，请先在 Participants 邀请</span>
                 </div>
               )}
               <input

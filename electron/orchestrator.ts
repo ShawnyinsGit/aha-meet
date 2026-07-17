@@ -371,14 +371,12 @@ export class Orchestrator implements OrchestratorBridge {
     }
     const hg = this.createHostGroup(id, backendId);
 
-    // Fire-and-forget the talker spawn. Without this the HostGroup sits idle
-    // forever — the renderer shows "Connecting…" but no session ever starts.
+    // Fire-and-forget the talker transport handshake. Starting a Host must not
+    // spend a model turn: delayed startup greetings used to surface minutes
+    // later as unrelated "welcome back" messages in the live transcript.
     void (async () => {
       try {
-        // Send a greeting so the new host's talker has something to respond to.
-        // Without this, the session starts but receives no input and sits idle.
-        const greeting = `你好！你已加入会议作为 ${backendId} 主持。请简要介绍自己并等待任务分配。`;
-        await hg.start(greeting);
+        await hg.start();
         if (this.closed) return;
         await this.snapshotActiveMeeting();
         if (!this.closed) {
@@ -458,6 +456,11 @@ export class Orchestrator implements OrchestratorBridge {
     hg.getHost()?.sendUserText(
       `[coordinator handoff] You are now the meeting coordinator. Previous coordinator: ${previous}. `
       + `Current worker state:\n${this.describeWorkers()}`,
+      'high',
+    );
+    this.hostGroups.get(previous)?.getHost()?.sendUserText(
+      `[coordinator handoff] You are now an Expert Talker. ${hostId} is the sole Coordinator. `
+      + 'Do not schedule or speak for the meeting; answer only direct mentions or coordinator requests.',
       'high',
     );
     return { ok: true, coordinatorHostId: hostId };
@@ -565,7 +568,7 @@ export class Orchestrator implements OrchestratorBridge {
     if (!hg) return { ok: false, error: `host '${hostId}' not found` };
     if (hg.getHost()) return { ok: false, error: `host '${hostId}' is already running` };
     try {
-      await hg.start(`[recovery] Rejoin the meeting as ${hostId}. Await coordinator instructions.`);
+      await hg.start();
       this.safeEmit({ source: 'system', hostId, event: { kind: 'session-ready' } });
       return { ok: true };
     } catch (err) {
@@ -683,10 +686,37 @@ export class Orchestrator implements OrchestratorBridge {
   }
 
   sendUserText(text: string) {
-    // Single entry point reached from the renderer IPC (session:user-text).
-    // Routes to the default host. Multi-host routing (e.g. user picks a
-    // specific host) is a Phase 4 concern.
-    this.defaultHost().sendUserText(text);
+    const mention = this.resolveHostMention(text);
+    if (!mention) {
+      this.defaultHost().sendUserText(text);
+      return;
+    }
+    const addressedText = mention.text || '用户刚刚直接点名了你，请简短回应。';
+    mention.host.sendUserText(
+      `[direct user mention from meeting chat]\n${addressedText}\n\n`
+      + '直接用普通 assistant 文本回答用户；不要主持、派任务或输出 meeting-command。',
+    );
+    void this.repository.append('user-mentioned-host', {
+      hostId: mention.hostId,
+      backendId: mention.host.backendId,
+      chars: addressedText.length,
+    });
+  }
+
+  private resolveHostMention(text: string): { hostId: string; host: HostGroup; text: string } | null {
+    for (const match of text.matchAll(/@([a-zA-Z0-9._-]+)/g)) {
+      const token = match[1].toLowerCase();
+      const found = Array.from(this.hostGroups.entries()).find(([id, host]) => (
+        id.toLowerCase() === token || host.backendId.toLowerCase() === token
+      ));
+      if (!found || !found[1].isReady()) continue;
+      const start = match.index ?? 0;
+      const withoutMention = `${text.slice(0, start)}${text.slice(start + match[0].length)}`
+        .replace(/[ \t]{2,}/g, ' ')
+        .trim();
+      return { hostId: found[0], host: found[1], text: withoutMention };
+    }
+    return null;
   }
 
   sendUserImage(content: SDKUserMessage['message']['content']) {

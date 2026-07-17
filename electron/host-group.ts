@@ -24,7 +24,12 @@ import {
 import { buildComputerUseMcp, type ComputerUseBridge } from './computer-use-mcp.js';
 import { buildBrowserMcp, type BrowserMcpBridge } from './browser-mcp.js';
 import { WorkerScheduler, type SessionFactory } from './worker-scheduler.js';
-import { TALKER_PROMPT, REPORT_MODE_SUFFIX } from './orchestrator-prompts.js';
+import {
+  TALKER_PROMPT,
+  COORDINATOR_ROLE_PROMPT,
+  EXPERT_ROLE_PROMPT,
+  REPORT_MODE_SUFFIX,
+} from './orchestrator-prompts.js';
 import {
   formatForPrompt,
   selectRelevant,
@@ -178,14 +183,15 @@ export class HostGroup {
     this.ready = false;
     const meetingMcp = buildTalkerMcp(this.bridge, this.isCoordinator, this.id);
 
-    let systemPrompt: string = TALKER_PROMPT;
+    const rolePrompt = this.isCoordinator() ? COORDINATOR_ROLE_PROMPT : EXPERT_ROLE_PROMPT;
+    let systemPrompt: string = TALKER_PROMPT + rolePrompt;
     try {
       const memoryEntries = await selectRelevant(this.projectId, {
         tokenBudget: MEMORY_TOKEN_BUDGET,
       });
       const memoryBlock = formatForPrompt(memoryEntries);
       if (memoryBlock) {
-        systemPrompt = `## 历史记忆 (从过往会议沉淀)\n\n${memoryBlock}\n\n---\n\n${TALKER_PROMPT}`;
+        systemPrompt = `## 历史记忆 (从过往会议沉淀)\n\n${memoryBlock}\n\n---\n\n${TALKER_PROMPT}${rolePrompt}`;
       }
     } catch (err) {
       console.warn('[host-group] failed to load memory for system prompt:', err);

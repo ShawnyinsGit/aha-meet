@@ -226,11 +226,12 @@ export function App() {
     }
     // Fuzzy match backend names from voice input — if spoken text contains a
     // backend display name, prepend "@" to invoke it as a mention.
-    if (backends.length > 0 && !finalText.includes('@')) {
+    const mentionableBackends = backends.filter((backend) => activeBackendIds.has(backend.id));
+    if (mentionableBackends.length > 0 && !finalText.includes('@')) {
       const lower = finalText.toLowerCase();
       let bestBackend: BackendInfo | null = null;
       let bestBackendScore = 0;
-      for (const backend of backends) {
+      for (const backend of mentionableBackends) {
         const nameLower = backend.displayName.toLowerCase();
         // Check for exact substring match
         if (lower.includes(nameLower)) {
@@ -264,7 +265,7 @@ export function App() {
       }
     }
     sendWithModeRef.current(finalText);
-  }, [voicePrefs.voicePolishEnabled, skills, backends]);
+  }, [voicePrefs.voicePolishEnabled, skills, backends, activeBackendIds]);
 
   const onBargeIn = useCallback(() => {
     if (speakingRef.current) {
