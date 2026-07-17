@@ -1,73 +1,108 @@
+/* ==========================================================================
+   Design Tokens
+   Semantic naming: surface/text/border/action/state.
+   Old variables are kept as aliases for backward compatibility during migration.
+   ========================================================================== */
+
 :root {
   color-scheme: dark light;
-  --bg-app: #1c1c1e;
-  --bg-stage: #2c2c2e;
-  --bg-tile: #3a3a3c;
-  --bg-elevated: #48484a;
-  --bg-glass: rgba(44, 44, 46, 0.72);
-  --bg-panel: #2c2c2e;
-  --bg-hover: rgba(255, 255, 255, 0.08);
-  --bg-input: rgba(0, 0, 0, 0.3);
-  --border-soft: rgba(255, 255, 255, 0.1);
-  --border-strong: rgba(255, 255, 255, 0.2);
-  --text-primary: #f2f2f7;
-  --text-secondary: #ebebf0;
-  --text-muted: #8e8e93;
+
+  /* ---- Surface (backgrounds) ---- */
+  --surface-0: #1c1c1e;  /* app background */
+  --surface-1: #2c2c2e;  /* panels / cards */
+  --surface-2: #3a3a3c;  /* elevated surfaces */
+  --surface-3: #48484a;  /* hover / highlighted */
+  --surface-glass: rgba(44, 44, 46, 0.72);
+  --surface-input: rgba(0, 0, 0, 0.3);
+
+  /* ---- Text ---- */
+  --text-1: #f2f2f7;     /* primary */
+  --text-2: #ebebf0;     /* secondary */
+  --text-3: #8e8e93;     /* muted / helper */
+
+  /* ---- Border ---- */
+  --border-1: rgba(255, 255, 255, 0.1);   /* soft */
+  --border-2: rgba(255, 255, 255, 0.2);   /* strong */
+
+  /* ---- Action ---- */
   --accent: #0a84ff;
   --accent-soft: rgba(10, 132, 255, 0.18);
   --accent-glow: rgba(10, 132, 255, 0.45);
+
+  /* ---- State ---- */
   --danger: #ff453a;
   --danger-soft: rgba(255, 69, 58, 0.18);
   --warn: #ff9f0a;
   --success: #30d158;
   --success-soft: rgba(48, 209, 88, 0.12);
   --danger-result-soft: rgba(255, 69, 58, 0.12);
-  --radius-lg: 16px;
-  --radius-md: 12px;
-  --radius-sm: 8px;
+
+  /* ---- Shape ---- */
   --radius-xs: 6px;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+
+  /* ---- Shadow ---- */
   --shadow-card: 0 24px 48px -16px rgba(0, 0, 0, 0.55);
   --shadow-soft: 0 8px 24px -8px rgba(0, 0, 0, 0.45);
   --shadow-lg: 0 16px 40px -8px rgba(0, 0, 0, 0.5);
-  --bg-primary: #1c1c1e;
-  --bg-secondary: #2c2c2e;
-  --bg-tertiary: #3a3a3c;
+
+  /* ---- Motion ---- */
   --transition: 180ms cubic-bezier(0.4, 0, 0.2, 1);
+
+  /* ---- Typography ---- */
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", "PingFang SC", "Microsoft YaHei", "Noto Sans", "Ubuntu", sans-serif;
+
+  /* ---- Legacy aliases (to be removed after full migration) ---- */
+  --bg-app: var(--surface-0);
+  --bg-stage: var(--surface-1);
+  --bg-tile: var(--surface-2);
+  --bg-elevated: var(--surface-3);
+  --bg-glass: var(--surface-glass);
+  --bg-panel: var(--surface-1);
+  --bg-hover: var(--surface-3);
+  --bg-input: var(--surface-input);
+  --border-soft: var(--border-1);
+  --border-strong: var(--border-2);
+  --text-primary: var(--text-1);
+  --text-secondary: var(--text-2);
+  --text-muted: var(--text-3);
+  --bg-primary: var(--surface-0);
+  --bg-secondary: var(--surface-1);
+  --bg-tertiary: var(--surface-2);
 }
 
 @media (prefers-color-scheme: light) {
   :root {
-    /* DingTalk-style light palette: gray-white background, crisp black text,
-       and slightly warmer panels so cards/buttons don't disappear into the page. */
-    --bg-app: #f2f2f7;
-    --bg-stage: #e5e5ea;
-    --bg-tile: #f7f7f9;
-    --bg-elevated: #fbfbfd;
-    --bg-glass: rgba(255, 255, 255, 0.82);
-    --bg-panel: #ffffff;
-    --bg-hover: rgba(0, 0, 0, 0.05);
-    --bg-input: #ffffff;
-    --border-soft: rgba(0, 0, 0, 0.14);
-    --border-strong: rgba(0, 0, 0, 0.24);
-    --text-primary: #1c1c1e;
-    --text-secondary: #3a3a3c;
-    --text-muted: #6c6c70;
+    --surface-0: #f2f2f7;
+    --surface-1: #ffffff;
+    --surface-2: #f7f7f9;
+    --surface-3: #e5e5ea;
+    --surface-glass: rgba(255, 255, 255, 0.82);
+    --surface-input: #ffffff;
+
+    --text-1: #1c1c1e;
+    --text-2: #3a3a3c;
+    --text-3: #6c6c70;
+
+    --border-1: rgba(0, 0, 0, 0.14);
+    --border-2: rgba(0, 0, 0, 0.24);
+
     --accent: #007aff;
     --accent-soft: rgba(0, 122, 255, 0.12);
     --accent-glow: rgba(0, 122, 255, 0.28);
+
     --danger: #d70015;
     --danger-soft: rgba(255, 59, 48, 0.12);
     --warn: #ff9500;
     --success: #248a3d;
     --success-soft: rgba(52, 199, 89, 0.12);
     --danger-result-soft: rgba(255, 59, 48, 0.1);
+
     --shadow-card: 0 4px 24px -4px rgba(0, 0, 0, 0.1);
     --shadow-soft: 0 2px 8px -2px rgba(0, 0, 0, 0.08);
     --shadow-lg: 0 8px 24px -4px rgba(0, 0, 0, 0.14);
-    --bg-primary: #ffffff;
-    --bg-secondary: #f2f2f7;
-    --bg-tertiary: #e5e5ea;
   }
 }
 
@@ -93,6 +128,272 @@ button {
 button:disabled {
   cursor: not-allowed;
   opacity: 0.45;
+}
+
+/* ==========================================================================
+   Component Primitives
+   Reusable building blocks. All business components should compose these
+   instead of redefining buttons, cards, inputs, etc. from scratch.
+   ========================================================================== */
+
+/* ---- Button ---- */
+.ui-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 14px;
+  height: 32px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-1);
+  background: var(--surface-2);
+  color: var(--text-1);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background var(--transition), border-color var(--transition), color var(--transition);
+}
+.ui-btn:hover:not(:disabled) {
+  background: var(--surface-3);
+  border-color: var(--border-2);
+}
+.ui-btn:active:not(:disabled) {
+  transform: scale(0.98);
+}
+.ui-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.ui-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.ui-btn-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #ffffff;
+}
+.ui-btn-primary:hover:not(:disabled) {
+  background: var(--accent);
+  filter: brightness(1.1);
+}
+
+.ui-btn-danger {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: #ffffff;
+}
+.ui-btn-danger:hover:not(:disabled) {
+  background: var(--danger);
+  filter: brightness(1.1);
+}
+
+.ui-btn-ghost {
+  background: transparent;
+  border-color: transparent;
+}
+.ui-btn-ghost:hover:not(:disabled) {
+  background: var(--surface-2);
+}
+
+.ui-btn-sm {
+  height: 28px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+.ui-btn-lg {
+  height: 36px;
+  padding: 0 18px;
+  font-size: 14px;
+}
+
+/* ---- Switch ---- */
+.ui-switch {
+  position: relative;
+  width: 28px;
+  height: 16px;
+  border-radius: 999px;
+  background: var(--surface-3);
+  border: 1px solid var(--border-1);
+  cursor: pointer;
+  transition: background var(--transition), border-color var(--transition);
+  flex-shrink: 0;
+}
+.ui-switch-knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #e6ebf2;
+  transition: transform var(--transition), background var(--transition);
+}
+.ui-switch-on {
+  background: rgba(255, 138, 0, 0.85);
+  border-color: rgba(255, 138, 0, 0.9);
+}
+.ui-switch-on .ui-switch-knob {
+  transform: translateX(12px);
+  background: #ffffff;
+}
+.ui-switch:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* ---- Card ---- */
+.ui-card {
+  background: var(--surface-1);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-md);
+  padding: 16px;
+}
+.ui-card-elevated {
+  background: var(--surface-2);
+  box-shadow: var(--shadow-soft);
+}
+.ui-card-inset {
+  background: var(--surface-0);
+  border-color: var(--border-1);
+}
+
+/* ---- Modal ---- */
+.ui-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  backdrop-filter: blur(4px);
+}
+.ui-modal {
+  background: var(--surface-1);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+  max-width: 520px;
+  width: calc(100% - 48px);
+  max-height: calc(100% - 48px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.ui-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border-1);
+}
+.ui-modal-title {
+  font-size: 15px;
+  font-weight: 600;
+}
+.ui-modal-close {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  border: none;
+  color: var(--text-3);
+  cursor: pointer;
+}
+.ui-modal-close:hover {
+  background: var(--surface-2);
+  color: var(--text-1);
+}
+.ui-modal-body {
+  padding: 20px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+/* ---- Input ---- */
+.ui-input {
+  width: 100%;
+  height: 32px;
+  padding: 0 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-1);
+  background: var(--surface-input);
+  color: var(--text-1);
+  font-size: 13px;
+  transition: border-color var(--transition);
+}
+.ui-input:focus {
+  border-color: var(--accent);
+  outline: none;
+}
+.ui-input::placeholder {
+  color: var(--text-3);
+}
+
+.ui-select {
+  width: 100%;
+  height: 32px;
+  padding: 0 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-1);
+  background: var(--surface-input);
+  color: var(--text-1);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.ui-textarea {
+  width: 100%;
+  min-height: 80px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-1);
+  background: var(--surface-input);
+  color: var(--text-1);
+  font-size: 13px;
+  font-family: inherit;
+  resize: vertical;
+}
+.ui-textarea:focus {
+  border-color: var(--accent);
+  outline: none;
+}
+
+/* ---- Badge / Status Pill ---- */
+.ui-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.ui-badge-accent {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.ui-badge-success {
+  background: var(--success-soft);
+  color: var(--success);
+}
+.ui-badge-danger {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+.ui-badge-warn {
+  background: rgba(255, 149, 0, 0.12);
+  color: var(--warn);
+}
+.ui-badge-muted {
+  background: var(--surface-2);
+  color: var(--text-3);
 }
 
 /* ----- Join screen ----- */
@@ -7985,4 +8286,447 @@ html.popout-view #root {
   .mtg-leave:hover { background: var(--danger); }
   .drawer-send-icon:hover { color: var(--accent); }
   .mtg-multi-toggle-on:hover { color: var(--accent); }
+}
+
+/* ----- OpenCode Editor Window ----- */
+
+.opencode-editor {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-app);
+  color: var(--text-primary);
+}
+
+.opencode-editor-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--border-soft);
+  height: 48px;
+  flex-shrink: 0;
+}
+
+.opencode-editor-back {
+  padding: 6px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-soft);
+  color: var(--text-primary);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.opencode-editor-back:hover {
+  background: var(--bg-hover);
+}
+
+.opencode-editor-title {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.opencode-editor-backend {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.opencode-editor-session {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.opencode-editor-close {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.opencode-editor-close:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.opencode-editor-body {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+
+.opencode-editor-sidebar {
+  width: 200px;
+  flex-shrink: 0;
+  background: var(--bg-panel);
+  border-right: 1px solid var(--border-soft);
+  display: flex;
+  flex-direction: column;
+}
+
+.opencode-editor-sidebar-title {
+  padding: 12px 16px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.opencode-editor-file-tree {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px;
+}
+
+.opencode-editor-file-item {
+  padding: 6px 10px;
+  border-radius: var(--radius-xs);
+  font-size: 12px;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.opencode-editor-file-item:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.opencode-editor-content {
+  flex: 1;
+  min-width: 0;
+  background: var(--bg-app);
+  display: flex;
+  flex-direction: column;
+}
+
+.opencode-editor-code {
+  flex: 1;
+  overflow: auto;
+  padding: 20px;
+}
+
+.opencode-editor-placeholder {
+  text-align: center;
+  padding: 60px 20px;
+  color: var(--text-secondary);
+}
+
+.opencode-editor-placeholder h2 {
+  font-size: 18px;
+  margin-bottom: 16px;
+  color: var(--text-primary);
+}
+
+.opencode-editor-placeholder p {
+  font-size: 13px;
+  margin: 8px 0;
+}
+
+.opencode-editor-activity {
+  width: 240px;
+  flex-shrink: 0;
+  background: var(--bg-panel);
+  border-left: 1px solid var(--border-soft);
+  display: flex;
+  flex-direction: column;
+}
+
+.opencode-editor-activity-title {
+  padding: 12px 16px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.opencode-editor-activity-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px;
+}
+
+.opencode-editor-activity-item {
+  padding: 8px 10px;
+  border-radius: var(--radius-xs);
+  font-size: 12px;
+  color: var(--text-secondary);
+  border-left: 2px solid var(--border-soft);
+  margin-bottom: 6px;
+}
+
+.opencode-editor-terminal {
+  height: 200px;
+  flex-shrink: 0;
+  background: var(--bg-panel);
+  border-top: 1px solid var(--border-soft);
+  display: flex;
+  flex-direction: column;
+}
+
+.opencode-editor-terminal-title {
+  padding: 8px 16px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.opencode-editor-terminal-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px 16px;
+  font-family: ui-monospace, SF Mono, Menlo, monospace;
+  font-size: 12px;
+  background: var(--bg-app);
+}
+
+.opencode-editor-terminal-line {
+  color: var(--text-secondary);
+}
+
+/* ----- IDE Manager Panel ----- */
+
+.ide-manager-panel {
+  padding: 20px;
+  border-bottom: 1px solid var(--border-1);
+}
+
+.ide-manager-header {
+  margin-bottom: 20px;
+}
+
+.ide-manager-title {
+  font-size: 16px;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.ide-manager-desc {
+  font-size: 13px;
+  color: var(--text-3);
+  line-height: 1.5;
+}
+
+.ide-manager-current {
+  margin-bottom: 24px;
+}
+
+.ide-manager-current-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-3);
+  margin-bottom: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.ide-manager-section {
+  margin-bottom: 24px;
+}
+
+.ide-manager-section-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-2);
+  margin-bottom: 12px;
+}
+
+.ide-manager-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ide-manager-ide-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  background: var(--surface-1);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-md);
+}
+
+.ide-manager-ide-card-default {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.ide-manager-ide-icon {
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--text-2);
+  flex-shrink: 0;
+}
+
+.ide-manager-ide-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.ide-manager-ide-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-1);
+  margin-bottom: 2px;
+}
+
+.ide-manager-ide-desc {
+  font-size: 12px;
+  color: var(--text-3);
+}
+
+.ide-manager-ide-badge {
+  flex-shrink: 0;
+}
+
+.ide-manager-empty {
+  padding: 24px;
+  text-align: center;
+  color: var(--text-3);
+  font-size: 13px;
+  background: var(--surface-1);
+  border: 1px dashed var(--border-1);
+  border-radius: var(--radius-md);
+}
+
+.ide-manager-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  background: var(--surface-1);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-md);
+  font-size: 12px;
+  color: var(--text-3);
+}
+
+/* ----- OpenCode Editor Window (Enhanced) ----- */
+
+.opencode-editor-sidebar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border-1);
+}
+
+.opencode-editor-refresh {
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  border: none;
+  color: var(--text-3);
+  cursor: pointer;
+}
+
+.opencode-editor-refresh:hover {
+  background: var(--surface-2);
+  color: var(--text-1);
+}
+
+.opencode-editor-file-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: var(--radius-xs);
+  font-size: 12px;
+  color: var(--text-2);
+  cursor: pointer;
+  user-select: none;
+}
+
+.opencode-editor-file-item:hover {
+  background: var(--surface-2);
+  color: var(--text-1);
+}
+
+.opencode-editor-file-item-selected {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.opencode-editor-file-empty {
+  padding: 24px;
+  text-align: center;
+  color: var(--text-3);
+  font-size: 12px;
+}
+
+.opencode-editor-code-view {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.opencode-editor-code-header {
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--border-1);
+  background: var(--surface-1);
+}
+
+.opencode-editor-code-path {
+  font-size: 12px;
+  font-family: ui-monospace, SF Mono, Menlo, monospace;
+  color: var(--text-2);
+}
+
+.opencode-editor-code-content {
+  flex: 1;
+  overflow: auto;
+  padding: 16px;
+}
+
+.opencode-editor-code-text {
+  font-family: ui-monospace, SF Mono, Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-1);
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.opencode-editor-loading,
+.opencode-editor-error {
+  padding: 24px;
+  text-align: center;
+  color: var(--text-3);
+  font-size: 13px;
+}
+
+.opencode-editor-error {
+  color: var(--danger);
+}
+
+.opencode-editor-activity-time {
+  font-size: 10px;
+  color: var(--text-3);
+  margin-bottom: 2px;
+}
+
+.opencode-editor-activity-text {
+  font-size: 12px;
+  color: var(--text-2);
 }

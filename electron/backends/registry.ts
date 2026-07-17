@@ -10,6 +10,7 @@ import { CodexBackend } from './codex-adapter.js';
 import { KimiBackend } from './kimi-adapter.js';
 import { QoderBackend } from './qoder-adapter.js';
 import { CustomBackend, type CustomBackendOptions } from './custom-adapter.js';
+import { OpenCodeBackend } from './opencode-adapter.js';
 import type { ConfirmDestructive } from '../claude-session.js';
 
 export interface BackendStatus {
@@ -120,6 +121,7 @@ export function getBackendRegistry(confirmDestructive?: ConfirmDestructive): Bac
     instance.register(new CodexBackend());
     instance.register(new KimiBackend());
     instance.register(new QoderBackend());
+    instance.register(new OpenCodeBackend());
   }
   return instance;
 }

@@ -10,6 +10,7 @@ import { VoiceSelector } from './VoiceSelector';
 import { VoiceLockPanel } from './VoiceLockPanel';
 import { SkillManagerPanel } from './SkillManagerPanel';
 import { BackendSettings } from './BackendSettings';
+import { IDEManagerPanel } from './IDEManagerPanel';
 import { VoiceGuideModal } from './VoiceGuideModal';
 import { SPEAKER_MODEL_ID } from '../lib/speaker-embedding';
 
@@ -98,6 +99,7 @@ function SettingsWindowInner() {
       </header>
       <div className="settings-window-body">
         <BackendSettings />
+        <IDEManagerPanel />
         <MemoryPanel />
         <VoiceSelector
           voices={voicePrefs.voices}

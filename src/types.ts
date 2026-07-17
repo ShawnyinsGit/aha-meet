@@ -1,5 +1,19 @@
 export type AutoApproveScope = 'off' | 'read' | 'all';
 
+export interface FileEntry {
+  name: string;
+  path: string;
+  isDir: boolean;
+  size: number;
+  modifiedAt: number;
+}
+
+export interface FileContent {
+  path: string;
+  content: string;
+  truncated: boolean;
+}
+
 export type AgentSource = 'talker' | string;
 
 export type WorkerStatus = 'pending' | 'running' | 'interrupted' | 'done' | 'failed';
@@ -405,6 +419,15 @@ export interface VibeMeetApi {
   settingsWindow: {
     open: () => Promise<{ ok: boolean }>;
     close: () => Promise<{ ok: boolean }>;
+  };
+  openCodeEditor: {
+    open: (payload: { backendId: string; sessionId: string; cwd: string; title?: string }) => Promise<{ ok: boolean; error?: string }>;
+    close: (backendId: string, sessionId: string) => Promise<{ ok: boolean; error?: string }>;
+    list: () => Promise<{ ok: true; windows: Array<{ backendId: string; sessionId: string; focused: boolean }> } | { ok: false; error: string }>;
+  };
+  openCodeFiles: {
+    list: (cwd: string, path?: string) => Promise<{ ok: true; entries: FileEntry[] } | { ok: false; error: string }>;
+    read: (cwd: string, path: string) => Promise<{ ok: true; file: FileContent } | { ok: false; error: string }>;
   };
   popoutSession: (tabId: string) => Promise<{ ok: boolean }>;
   popoutStage: (windowId: string, type: string) => Promise<{ ok: boolean }>;
