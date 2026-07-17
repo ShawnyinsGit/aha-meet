@@ -24,7 +24,7 @@ cross-origin isolation, and final DMG verification.
 - Renderer TypeScript: pass
 - Electron TypeScript: pass
 - Production build: pass
-- Node tests: 108/108 pass
+- Node tests: 109/109 pass
 - Packaged Codex runtime resolver regression: pass
 - MeetingCommand authorization regression: pass
 - Workspace isolation tests: Git worktree + non-Git path lock pass
@@ -37,8 +37,8 @@ cross-origin isolation, and final DMG verification.
 - Packaged app 10-second startup smoke: pass
 - Final mounted-app renderer/ASR smoke: `app://bundle`, cross-origin isolated,
   `SharedArrayBuffer` available, bundled Whisper ready, Mandarin transcription pass
-- DMG: `release/AhaMeet-0.16.2-arm64.dmg`
-- SHA-256: `95b6f393877b3ba41f87a7015c02e422ed20453bdbad6bc340d0dfc66ef74ff2`
+- DMG: `release/AhaMeet-0.16.3-arm64.dmg`
+- SHA-256: `d708c3ce08e3ad5d7b658bdc94a818ab6320412c4e279bb4ed082dcc17985f45`
 
 ## Implemented
 
@@ -53,6 +53,9 @@ cross-origin isolation, and final DMG verification.
   the Coordinator owns meeting scheduling while Experts answer direct requests.
 - Codex command-only turns receive a visible acknowledgement instead of being
   silently swallowed after the internal protocol frame is removed.
+- Synthetic narration is now a terminal UI event and is never fed back into
+  the same Host as a new user turn, eliminating runaway speak/narrate loops
+  that also kept TTS suppression active and made microphone input appear dead.
 - Backend-specific environment/auth construction; non-Claude CLIs keep real HOME.
 - Backend-specific model selection.
 - Codex real async startup handshake and abortable turns.

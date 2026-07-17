@@ -67,7 +67,7 @@ export class CodexAppServerTransport {
     });
 
     const initialized = await this.request<Record<string, unknown>>('initialize', {
-      clientInfo: { name: 'ahameet', title: 'AhaMeet', version: '0.16.2' },
+      clientInfo: { name: 'ahameet', title: 'AhaMeet', version: '0.16.3' },
       capabilities: { experimentalApi: false, requestAttestation: false },
     });
     const userAgent = String(initialized.userAgent ?? '');

@@ -179,3 +179,37 @@ test('a backend mention routes the user turn to the ready expert instead of the 
     await orchestrator.end();
   }
 });
+
+test('narrating one assistant line does not feed a new turn back into the host', async () => {
+  const emittedLines = [];
+  const hostInputs = [];
+  let orchestrator;
+  orchestrator = new Orchestrator({
+    emit(event) {
+      const content = event.event?.message?.message?.content;
+      const text = Array.isArray(content) ? content.find((block) => block.type === 'text')?.text : '';
+      if (event.event?.kind === 'message' && text) emittedLines.push(text);
+    },
+    cwd: process.cwd(),
+    sessionFactory: () => ({
+      async start() {}, end() {},
+      sendUserText(text) {
+        hostInputs.push(text);
+        // Recreate the production failure deterministically: Codex responds to
+        // the synthetic "you just spoke" turn with another speak command.
+        if (text.startsWith('(you just spoke to the user)') && hostInputs.length < 4) {
+          orchestrator.narrateAssistantLine(`loop-${hostInputs.length}`);
+        }
+      },
+      sendUserContent() {}, resolvePermission() {}, async interrupt() {},
+    }),
+  });
+  try {
+    await orchestrator.start();
+    orchestrator.narrateAssistantLine('one intended line');
+    assert.deepEqual(emittedLines, ['one intended line']);
+    assert.deepEqual(hostInputs, []);
+  } finally {
+    await orchestrator.end();
+  }
+});
