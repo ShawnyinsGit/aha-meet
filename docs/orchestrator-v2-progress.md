@@ -1,6 +1,6 @@
 # Orchestrator V2 implementation progress
 
-Updated: 2026-07-16
+Updated: 2026-07-17
 
 ## Status
 
@@ -24,7 +24,7 @@ cross-origin isolation, and final DMG verification.
 - Renderer TypeScript: pass
 - Electron TypeScript: pass
 - Production build: pass
-- Node tests: 105/105 pass
+- Node tests: 106/106 pass
 - Packaged Codex runtime resolver regression: pass
 - MeetingCommand authorization regression: pass
 - Workspace isolation tests: Git worktree + non-Git path lock pass
@@ -37,12 +37,14 @@ cross-origin isolation, and final DMG verification.
 - Packaged app 10-second startup smoke: pass
 - Final mounted-app renderer/ASR smoke: `app://bundle`, cross-origin isolated,
   `SharedArrayBuffer` available, bundled Whisper ready, Mandarin transcription pass
-- DMG: `release/AhaMeet-0.16.0-arm64.dmg`
-- SHA-256: `2a9cf290c8c4d971e798f29b7fdbb9dfd39c54023b5920c36b01151125d6dbb7`
+- DMG: `release/AhaMeet-0.16.1-arm64.dmg`
+- SHA-256: `815ab7bd686f185bc033e7b541734ff1be61f94eb68854da853570eed85974c2`
 
 ## Implemented
 
 - Packaged Codex resolves and passes a real `app.asar.unpacked` executable.
+- Codex OAuth status follows the CLI exit-code contract, including 0.144.x
+  releases that write successful login status to stderr instead of stdout.
 - Backend-specific environment/auth construction; non-Claude CLIs keep real HOME.
 - Backend-specific model selection.
 - Codex real async startup handshake and abortable turns.

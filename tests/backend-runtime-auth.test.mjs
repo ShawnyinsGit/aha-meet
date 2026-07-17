@@ -34,7 +34,9 @@ test('packaged runtime resolver finds the canonical Kimi Code install directory'
 test('Codex auth status is based on the CLI probe, not config.toml existence', async () => {
   const backend = new CodexBackend({
     resolveBinary: () => '/fake/codex',
-    execFile: () => 'Not logged in\n',
+    execFile: () => {
+      throw Object.assign(new Error('Not logged in'), { status: 1, stderr: 'Not logged in\n' });
+    },
   });
   assert.deepEqual(await backend.checkAuthStatus(), { loggedIn: false });
 });
@@ -43,6 +45,16 @@ test('Codex auth status accepts a successful CLI status probe', async () => {
   const backend = new CodexBackend({
     resolveBinary: () => '/fake/codex',
     execFile: () => 'Logged in using ChatGPT\n',
+  });
+  assert.deepEqual(await backend.checkAuthStatus(), { loggedIn: true });
+});
+
+test('Codex auth status trusts exit zero when the CLI writes success to stderr', async () => {
+  const backend = new CodexBackend({
+    resolveBinary: () => '/fake/codex',
+    // Codex 0.144.1 writes "Logged in using ChatGPT" to stderr, so
+    // execFileSync returns an empty stdout string on a successful probe.
+    execFile: () => '',
   });
   assert.deepEqual(await backend.checkAuthStatus(), { loggedIn: true });
 });
