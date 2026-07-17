@@ -2,7 +2,7 @@
 // via ?view=settings. Opaque solid background, no glass/transparency.
 // Hosts all settings panels: Memory, Voice, VoiceLock, Skills.
 
-import { Component, useCallback, type ErrorInfo, type ReactNode } from 'react';
+import { Component, type ErrorInfo, type ReactNode } from 'react';
 import { useVoicePreferences } from '../hooks/useVoicePreferences';
 import { useVoiceLock } from '../hooks/useVoiceLock';
 import { MemoryPanel } from './MemoryPanel';
@@ -39,9 +39,6 @@ class SettingsErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryS
     if (this.state.error) {
       return (
         <div className="settings-window">
-          <header className="settings-window-header">
-            <h1 className="settings-window-title">设置</h1>
-          </header>
           <div className="settings-window-body" style={{ padding: 24, textAlign: 'center' }}>
             <div style={{ fontSize: 40, marginBottom: 16 }}>⚠️</div>
             <h2 style={{ fontSize: 16, marginBottom: 8 }}>设置加载失败</h2>
@@ -79,23 +76,8 @@ function SettingsWindowInner() {
     speakingRef: dummySpeakingRef,
   });
 
-  const handleClose = useCallback(() => {
-    void window.vibeMeet.settingsWindow.close();
-  }, []);
-
   return (
     <div className="settings-window">
-      <header className="settings-window-header">
-        <h1 className="settings-window-title">设置</h1>
-        <button
-          type="button"
-          className="settings-window-close"
-          onClick={handleClose}
-          aria-label="关闭设置"
-        >
-          ✕
-        </button>
-      </header>
       <div className="settings-window-body">
         <BackendSettings />
         <MemoryPanel />
