@@ -8617,3 +8617,116 @@ html.popout-view #root {
   font-size: 12px;
   color: var(--text-3);
 }
+
+/* ----- OpenCode Editor Window (Enhanced) ----- */
+
+.opencode-editor-sidebar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border-1);
+}
+
+.opencode-editor-refresh {
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  border: none;
+  color: var(--text-3);
+  cursor: pointer;
+}
+
+.opencode-editor-refresh:hover {
+  background: var(--surface-2);
+  color: var(--text-1);
+}
+
+.opencode-editor-file-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: var(--radius-xs);
+  font-size: 12px;
+  color: var(--text-2);
+  cursor: pointer;
+  user-select: none;
+}
+
+.opencode-editor-file-item:hover {
+  background: var(--surface-2);
+  color: var(--text-1);
+}
+
+.opencode-editor-file-item-selected {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.opencode-editor-file-empty {
+  padding: 24px;
+  text-align: center;
+  color: var(--text-3);
+  font-size: 12px;
+}
+
+.opencode-editor-code-view {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.opencode-editor-code-header {
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--border-1);
+  background: var(--surface-1);
+}
+
+.opencode-editor-code-path {
+  font-size: 12px;
+  font-family: ui-monospace, SF Mono, Menlo, monospace;
+  color: var(--text-2);
+}
+
+.opencode-editor-code-content {
+  flex: 1;
+  overflow: auto;
+  padding: 16px;
+}
+
+.opencode-editor-code-text {
+  font-family: ui-monospace, SF Mono, Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-1);
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.opencode-editor-loading,
+.opencode-editor-error {
+  padding: 24px;
+  text-align: center;
+  color: var(--text-3);
+  font-size: 13px;
+}
+
+.opencode-editor-error {
+  color: var(--danger);
+}
+
+.opencode-editor-activity-time {
+  font-size: 10px;
+  color: var(--text-3);
+  margin-bottom: 2px;
+}
+
+.opencode-editor-activity-text {
+  font-size: 12px;
+  color: var(--text-2);
+}

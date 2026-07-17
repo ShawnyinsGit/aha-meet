@@ -135,6 +135,10 @@ const api = {
     close: (backendId, sessionId) => ipcRenderer.invoke('opencode-editor:close', { backendId, sessionId }),
     list: () => ipcRenderer.invoke('opencode-editor:list'),
   },
+  openCodeFiles: {
+    list: (cwd, path) => ipcRenderer.invoke('opencode-files:list', { cwd, path }),
+    read: (cwd, path) => ipcRenderer.invoke('opencode-files:read', { cwd, path }),
+  },
   popoutSession: (tabId) => ipcRenderer.invoke('popout:open-session', { tabId }),
   popoutStage: (windowId, type) => ipcRenderer.invoke('popout:open-stage', { windowId, type }),
   browser: {
