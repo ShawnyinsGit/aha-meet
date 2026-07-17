@@ -927,7 +927,6 @@ export class Orchestrator implements OrchestratorBridge {
         } as unknown as SDKMessage,
       },
     });
-    this.defaultHost().getHost()?.sendUserText(`(you just spoke to the user) ${text}`, 'normal');
   }
 
   async createDecision(payload: CreateDecisionPayload): Promise<DecisionCreationResult> {
