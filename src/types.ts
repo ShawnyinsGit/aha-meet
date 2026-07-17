@@ -2,7 +2,7 @@ export type AutoApproveScope = 'off' | 'read' | 'all';
 
 export type AgentSource = 'talker' | string;
 
-export type WorkerStatus = 'pending' | 'running' | 'done' | 'failed';
+export type WorkerStatus = 'pending' | 'running' | 'interrupted' | 'done' | 'failed';
 
 export type WorkerSpecialty =
   | 'general'
@@ -48,6 +48,7 @@ export interface WorkerDeliveryFile {
 export type RendererEvent =
   | { kind: 'message'; message: any; source?: AgentSource; sessionId?: string; hostId?: string }
   | { kind: 'permission-request'; id: string; toolName: string; input: Record<string, unknown>; toolUseID: string; source?: AgentSource; sessionId?: string; hostId?: string }
+  | { kind: 'auth-required'; error: string; source?: AgentSource; sessionId?: string; hostId?: string }
   | { kind: 'error'; error: string; source?: AgentSource; sessionId?: string; hostId?: string }
   | { kind: 'ended'; source?: AgentSource; sessionId?: string; hostId?: string }
   | { kind: 'worker-spawned'; workerId: string; title: string; deps: string[]; specialty: WorkerSpecialty; source?: AgentSource; sessionId?: string; hostId?: string }
@@ -138,6 +139,8 @@ export interface BackendInfo {
   hasApiKey: boolean;
   /** Whether an auth entry exists for this backend at all. */
   hasAuthEntry: boolean;
+  /** Result of the backend's live credential probe. */
+  loggedIn: boolean;
   baseUrl: string | null;
   model: string | null;
   defaultModel: string | null;
@@ -146,6 +149,8 @@ export interface BackendInfo {
   installHint: string | null;
   supportsMcp: boolean;
   supportsPermissions: boolean;
+  supportsCoordinator: boolean;
+  supportsWorkers: boolean;
   /** Custom avatar image as base64 data URL. */
   customAvatar: string | null;
 }
@@ -257,8 +262,9 @@ export interface SessionsApi {
     cwd: string,
     greeting?: string,
     backendId?: string,
+    recoveryMeetingId?: string,
   ) => Promise<
-    | { ok: true; sessionId: string; cwd: string; status?: 'starting' }
+    | { ok: true; sessionId: string; cwd: string; backendId?: string; recovered?: boolean; status?: 'starting' }
     | { ok: false; error: 'duplicate'; sessionId: string; cwd?: string }
     | { ok: false; error: string }
   >;
@@ -271,7 +277,12 @@ export interface SessionsApi {
     recentCwds: RecentCwdMeta[];
     lastActiveCwd: string | null;
   }>;
-  listRecoverable: () => Promise<{ ok: true; meetings: Array<{ meetingId: string; state: Record<string, unknown> }> }>;
+  listRecoverable: () => Promise<{ ok: true; meetings: Array<{ meetingId: string; seq: number; state: Record<string, unknown> }> }>;
+  resolveRecoveredTask: (
+    sessionId: string | null,
+    taskId: string,
+    action: 'continue' | 'retry' | 'complete' | 'abandon',
+  ) => Promise<{ ok: true } | { ok: false; error: string }>;
   addHost: (
     sessionId: string | null,
     backendId: string,

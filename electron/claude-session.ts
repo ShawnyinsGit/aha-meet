@@ -8,6 +8,22 @@ import { createRequire } from 'node:module';
 
 const require_ = createRequire(import.meta.url);
 
+function isClaudeAuthError(message: string): boolean {
+  return /authentication[_\s-]?failed|unauthorized|\b401\b|please (?:log|sign) in|auth(?:entication)? required/i.test(message);
+}
+
+async function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error(message)), ms); }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 function unpackify(p: string): string {
   return p.replace(/[\\/]app\.asar[\\/]/, (_, sep) => `${sep}app.asar.unpacked${sep}`);
 }
@@ -52,6 +68,7 @@ type PermissionPending = {
 export type SessionEvent =
   | { kind: 'message'; message: SDKMessage }
   | { kind: 'permission-request'; id: string; toolName: string; input: Record<string, unknown>; toolUseID: string }
+  | { kind: 'auth-required'; error: string }
   | { kind: 'error'; error: string }
   | { kind: 'ended' };
 
@@ -99,6 +116,9 @@ export class ClaudeSession {
   // appears on the subprocess stderr, which we capture here so it can be
   // attached to the failing assistant message and shown in the renderer.
   private stderrRing: string[] = [];
+  private authRequiredEmitted = false;
+  private queryFactory: typeof query;
+  private sessionId: string | null = null;
 
   constructor(opts: {
     emit: (e: SessionEvent) => void;
@@ -115,6 +135,8 @@ export class ClaudeSession {
      *  destructive tools under auto-approve fall back to the renderer
      *  permission-request path. */
     confirmDestructive?: ConfirmDestructive;
+    /** Test/runtime seam for the official SDK query constructor. */
+    queryFactory?: typeof query;
   }) {
     this.emit = opts.emit;
     this.cwd = opts.cwd;
@@ -122,6 +144,7 @@ export class ClaudeSession {
     this.autoApproveScope = opts.autoApproveScope ?? 'off';
     this.envOverride = opts.envOverride;
     this.confirmDestructive = opts.confirmDestructive;
+    this.queryFactory = opts.queryFactory ?? query;
   }
 
   /** Toggle auto-approve scope live. Affects subsequent canUseTool calls only. */
@@ -129,7 +152,7 @@ export class ClaudeSession {
     this.autoApproveScope = scope;
   }
 
-  start() {
+  async start(): Promise<void> {
     if (this.q) return;
     const canUseTool: CanUseTool = async (toolName, input, options) => {
       if (this.closed) {
@@ -176,12 +199,13 @@ export class ClaudeSession {
 
     const binPath = resolveClaudeBinary();
     if (!binPath) {
-      this.emit({ kind: 'error', error: 'Claude CLI binary not found inside the app bundle. Check app.asar.unpacked.' });
+      const error = new Error('Claude CLI binary not found inside the app bundle. Check app.asar.unpacked.');
+      this.emit({ kind: 'error', error: error.message });
       this.emit({ kind: 'ended' });
-      return;
+      throw error;
     }
     try {
-      this.q = query({
+      this.q = this.queryFactory({
         prompt: this.createInputIterable(),
         options: {
           cwd: this.cwd,
@@ -213,15 +237,21 @@ export class ClaudeSession {
         },
       });
     } catch (err: unknown) {
-      this.emit({ kind: 'error', error: `query() init failed: ${errorMessage(err)} (bin=${binPath})` });
+      const detail = errorMessage(err);
+      if (isClaudeAuthError(detail)) this.emitAuthRequired();
+      else this.emit({ kind: 'error', error: `query() init failed: ${detail} (bin=${binPath})` });
       this.emit({ kind: 'ended' });
-      return;
+      throw err;
     }
 
     (async () => {
       try {
         for await (const msg of this.q!) {
           if (this.closed) break;
+          const nativeSessionId = (msg as { session_id?: unknown }).session_id;
+          if (typeof nativeSessionId === 'string' && nativeSessionId.length > 0) {
+            this.sessionId = nativeSessionId;
+          }
           // Surface API-level failures the SDK couldn't classify ('unknown' et
           // al.). The renderer only gets the short code; the real cause lives in
           // request_id + message content, which we log here so a terminal-
@@ -240,11 +270,19 @@ export class ClaudeSession {
             if (detail.length > 0) {
               (msg as { errorDetail?: string }).errorDetail = detail;
             }
+            if (isClaudeAuthError(`${errCode} ${detail}`)) {
+              this.emitAuthRequired();
+              break;
+            }
           }
           this.emit({ kind: 'message', message: msg });
         }
       } catch (err: unknown) {
-        if (!this.closed) this.emit({ kind: 'error', error: errorMessage(err) });
+        if (!this.closed) {
+          const detail = errorMessage(err);
+          if (isClaudeAuthError(detail)) this.emitAuthRequired();
+          else this.emit({ kind: 'error', error: detail });
+        }
       } finally {
         // Deny all pending permissions so workers don't hang waiting for a
         // response that will never come (e.g. if the SDK stream crashed).
@@ -258,6 +296,35 @@ export class ClaudeSession {
         this.emit = () => {};
       }
     })();
+
+    try {
+      const initialization = await withTimeout(
+        this.q.initializationResult(), 15_000, 'Claude SDK readiness handshake timed out',
+      );
+      const account = initialization.account;
+      if (
+        account?.apiProvider === 'firstParty'
+        && (account.tokenSource === 'none' || account.tokenSource === undefined)
+        && !account.apiKeySource
+        && !account.email
+        && !account.subscriptionType
+      ) {
+        this.emitAuthRequired();
+        throw new Error('Claude authentication required');
+      }
+    } catch (err) {
+      const detail = errorMessage(err);
+      if (isClaudeAuthError(detail)) this.emitAuthRequired();
+      else if (!this.closed) this.emit({ kind: 'error', error: detail });
+      await this.q?.interrupt().catch(() => undefined);
+      throw err;
+    }
+  }
+
+  private emitAuthRequired(): void {
+    if (this.authRequiredEmitted) return;
+    this.authRequiredEmitted = true;
+    this.emit({ kind: 'auth-required', error: 'Claude 登录已失效，请完成重新认证后重连 Host。' });
   }
 
   sendUserText(text: string, priority: InputPriority = 'normal') {
@@ -327,6 +394,12 @@ export class ClaudeSession {
     if (this.q) {
       this.q.interrupt().catch(() => { /* ignore */ });
     }
+  }
+
+  snapshot(): { protocol: string; sessionId: string } | null {
+    return this.sessionId
+      ? { protocol: 'claude-agent-sdk', sessionId: this.sessionId }
+      : null;
   }
 
   private pushInput(m: SDKUserMessage, priority: InputPriority) {

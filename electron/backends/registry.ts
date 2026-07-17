@@ -18,6 +18,15 @@ export interface BackendStatus {
   binaryPath: string | null;
 }
 
+export interface BackendProbe {
+  backendId: string;
+  installed: boolean;
+  runtimePath: string | null;
+  auth: 'ready' | 'configured' | 'required';
+  capabilities: { coordinate: boolean; executeTasks: boolean };
+  blockers: Array<'runtime-unavailable' | 'authentication-required'>;
+}
+
 export class BackendRegistry {
   private backends = new Map<string, CliBackend>();
 
@@ -59,6 +68,38 @@ export class BackendRegistry {
   isAvailable(id: string): boolean {
     const backend = this.backends.get(id);
     return backend !== undefined && backend.resolveBinary() !== null;
+  }
+
+  async probe(id: string, auth: BackendAuthConfig): Promise<BackendProbe> {
+    const backend = this.backends.get(id);
+    if (!backend) throw new Error(`backend '${id}' is not registered`);
+    const runtimePath = backend.resolveBinary();
+    const installed = runtimePath !== null;
+    let authState: BackendProbe['auth'] = 'required';
+    if (auth.authMode === 'apikey' && auth.apiKey) {
+      const validation = await backend.validateAuth?.(auth);
+      if (validation?.ok !== false) authState = 'configured';
+    } else if (installed && backend.checkAuthStatus) {
+      try {
+        if ((await backend.checkAuthStatus()).loggedIn) authState = 'ready';
+      } catch { /* remain required */ }
+    } else if (auth.authMode === 'none' && !backend.checkAuthStatus) {
+      authState = 'ready';
+    }
+    const blockers: BackendProbe['blockers'] = [];
+    if (!installed) blockers.push('runtime-unavailable');
+    if (authState === 'required') blockers.push('authentication-required');
+    return {
+      backendId: id,
+      installed,
+      runtimePath,
+      auth: authState,
+      capabilities: {
+        coordinate: backend.capabilities.coordinate,
+        executeTasks: backend.capabilities.executeTasks,
+      },
+      blockers,
+    };
   }
 
   /** Register a custom backend from user-provided options. */

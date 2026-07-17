@@ -16,6 +16,8 @@
     "**/node_modules/@openai/codex-darwin-*/**/*",
     "**/node_modules/@openai/codex-linux-*/**/*",
     "**/node_modules/@openai/codex-win32-*/**/*",
+    "**/node_modules/@qoder-ai/qodercli/**/*",
+    "**/node_modules/@lydell/node-pty-*/**/*",
     "dist/vad/**/*",
     "dist/voice-id/**/*"
   ],
@@ -33,7 +35,10 @@
     "gatekeeperAssess": false,
     "identity": null,
     "entitlements": "build/entitlements.mac.plist",
-    "entitlementsInherit": "build/entitlements.mac.plist"
+    "entitlementsInherit": "build/entitlements.mac.plist",
+    "extendInfo": {
+      "NSMicrophoneUsageDescription": "AhaMeet 需要使用麦克风进行语音输入、转写和会议交互。"
+    }
   },
   "dmg": {
     "icon": null,

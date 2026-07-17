@@ -254,13 +254,9 @@ function copyOneBinary(srcBin, destDir, name) {
     if (!existsSync(abs)) continue;
     const libName = abs.split('/').pop();
     const out = join(destDir, libName);
-    if (!existsSync(out)) {
-      copyFileSync(abs, out);
-      chmodSync(out, 0o644);
-      log(`copied dep ${libName}`);
-    } else {
-      log(`dep ${libName} already present — skip`);
-    }
+    copyFileSync(abs, out);
+    chmodSync(out, 0o644);
+    log(`refreshed dep ${libName}`);
 
     // Recursively copy that dylib's deps too (one level deep is usually enough).
     const sub = spawnSync('otool', ['-L', abs], { encoding: 'utf8' });
@@ -273,11 +269,9 @@ function copyOneBinary(srcBin, destDir, name) {
         if (existsSync(pAbs) && (p.startsWith('@rpath/') || p.startsWith('/opt/homebrew/'))) {
           const pn = pAbs.split('/').pop();
           const outP = join(destDir, pn);
-          if (!existsSync(outP)) {
-            copyFileSync(pAbs, outP);
-            chmodSync(outP, 0o644);
-            log(`copied transitive dep ${pn}`);
-          }
+          copyFileSync(pAbs, outP);
+          chmodSync(outP, 0o644);
+          log(`refreshed transitive dep ${pn}`);
         }
       }
     }
@@ -296,11 +290,9 @@ function copyGgmlBackends(destDir) {
       if (!so.endsWith('.so')) continue;
       const src = join(ggmlLibexec, so);
       const dst = join(destDir, so);
-      if (!existsSync(dst)) {
-        copyFileSync(src, dst);
-        chmodSync(dst, 0o755);
-        log(`copied backend ${so}`);
-      }
+      copyFileSync(src, dst);
+      chmodSync(dst, 0o755);
+      log(`refreshed backend ${so}`);
     }
   } else {
     log('warn: ggml libexec dir not found; backends will not be bundled');
@@ -387,11 +379,6 @@ async function ensureBinary() {
   // macOS: use Homebrew or build from source
   for (const name of targets) {
     const destBin = join(outDir, name);
-    if (existsSync(destBin)) {
-      log(`${name} already present — skip`);
-      copied.push(name);
-      continue;
-    }
     const src = findInstalledBinary(name);
     if (!src) {
       if (name === 'whisper-server') {
@@ -418,13 +405,11 @@ async function ensureBinary() {
     anyCopied = true;
   }
 
-  // Backends + relink + sign only need running when at least one binary was
-  // freshly placed (otherwise everything is already in @loader_path form and
-  // re-signing is harmless but wastes a few seconds).
-  if (anyCopied) {
-    copyGgmlBackends(outDir);
-    relinkAndSign(outDir, copied);
-  }
+  // Refresh the entire native closure on every macOS build. Skipping existing
+  // files can combine a newly upgraded whisper binary with stale ggml dylibs,
+  // an ABI mismatch that tends to appear only on machines without Homebrew.
+  copyGgmlBackends(outDir);
+  relinkAndSign(outDir, copied);
 }
 
 async function main() {

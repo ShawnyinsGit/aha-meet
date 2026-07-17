@@ -13,7 +13,7 @@ import type { TaskWorkspace } from './task-workspace.js';
 
 export type OrchestratorSource = 'talker' | string;
 
-export type WorkerStatusKind = 'pending' | 'running' | 'done' | 'failed';
+export type WorkerStatusKind = 'pending' | 'running' | 'interrupted' | 'done' | 'failed';
 
 export type WorkerSpecialtyKind =
   | 'general'

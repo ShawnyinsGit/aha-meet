@@ -63,6 +63,7 @@ const dotColor: Record<ActivityEntry['kind'], string> = {
 const taskStatusTone: Record<CurrentTaskStatus, 'idle' | 'waiting' | 'working' | 'done' | 'failed' | 'speaking'> = {
   idle: 'idle',
   pending: 'waiting',
+  interrupted: 'waiting',
   running: 'working',
   done: 'done',
   failed: 'failed',
@@ -72,6 +73,7 @@ const taskStatusTone: Record<CurrentTaskStatus, 'idle' | 'waiting' | 'working' |
 const taskStatusLabel: Record<CurrentTaskStatus, string> = {
   idle: 'Idle',
   pending: 'Pending',
+  interrupted: 'Interrupted',
   running: 'Running',
   done: 'Done',
   failed: 'Failed',

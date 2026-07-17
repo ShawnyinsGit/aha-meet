@@ -109,3 +109,28 @@ test('disposeWorker is idempotent (double end() does not throw)', async () => {
   assert.equal(sessions[0].ended, true);
   orch.end();
 });
+
+test('worker receives its first task only after backend readiness resolves', async () => {
+  let releaseReady;
+  const ready = new Promise((resolve) => { releaseReady = resolve; });
+  const sessions = [];
+  const orch = new Orchestrator({
+    emit() {},
+    cwd: '/tmp',
+    sessionFactory: () => {
+      const session = new FakeSession();
+      session.start = () => ready.then(() => { session.started = true; });
+      sessions.push(session);
+      return session;
+    },
+  });
+
+  await orch.installPlan([{ id: 'ready-gate', title: 'Ready', prompt: 'do work', deps: [] }]);
+  assert.equal(sessions.length, 1);
+  assert.deepEqual(sessions[0].inputs, [], 'task is not sent during backend handshake');
+
+  releaseReady();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(sessions[0].inputs[0]?.text, 'do work');
+  await orch.end();
+});

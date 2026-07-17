@@ -20,6 +20,7 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { existsSync, statSync } from 'node:fs';
 import * as net from 'node:net';
+import { join } from 'node:path';
 import { encodeWavPcm16, resolveWhisperPaths } from './whisper.js';
 
 const DEFAULT_PORT = 8723;
@@ -169,7 +170,16 @@ function spawnOnce(
       '--inference-path', '/inference',
     ];
 
-    const child = spawn(serverBin, args, { cwd, stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(serverBin, args, {
+      cwd,
+      // Homebrew-built ggml embeds its Cellar libexec as a default search
+      // path. GGML_BACKEND_PATH accepts one explicit plugin (not a directory),
+      // so provide the baseline Apple Silicon CPU backend shipped beside the
+      // server. Machines with the original Cellar can still add Metal/BLAS;
+      // clean Macs always retain a self-contained CPU path.
+      env: whisperServerEnv(cwd),
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
     let resolved = false;
     let stderrBuf = '';
     let probeTimer: NodeJS.Timeout | null = null;
@@ -265,6 +275,10 @@ function spawnOnce(
       }
     }, BOOT_TIMEOUT_MS);
   });
+}
+
+export function whisperServerEnv(cwd: string): NodeJS.ProcessEnv {
+  return { ...process.env, GGML_BACKEND_PATH: join(cwd, 'libggml-cpu-apple_m1.so') };
 }
 
 function attachExitHandler(child: ChildProcess, serverBin: string, modelPath: string, cwd: string): void {

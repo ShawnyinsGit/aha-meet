@@ -11,6 +11,7 @@
 
 import { existsSync } from 'node:fs';
 import { createRequire } from 'node:module';
+import { execFileSync } from 'node:child_process';
 import { ClaudeSession, type SessionEvent, type InputPriority as CSInputPriority } from '../claude-session.js';
 import { mergedSubprocessEnv } from '../settings-loader.js';
 import type {
@@ -25,6 +26,8 @@ import type {
 } from './cli-backend.js';
 import type { AutoApproveScope } from '../auto-approve-policy.js';
 import type { ConfirmDestructive } from '../claude-session.js';
+import { runTerminalLogin } from './terminal-login.js';
+import { isolatedSubprocessEnv } from './backend-environment.js';
 
 const require_ = createRequire(import.meta.url);
 
@@ -73,6 +76,7 @@ class ClaudeCodeSession implements BackendSession {
     config: BackendSessionConfig,
     emit: (e: BackendSessionEvent) => void,
     confirmDestructive?: ConfirmDestructive,
+    queryFactory?: typeof import('@anthropic-ai/claude-agent-sdk').query,
   ) {
     // Translate BackendSessionConfig → ClaudeSession constructor options.
     // The NormalizedMessage shape is SDKMessage-compatible, so we can pass
@@ -84,15 +88,16 @@ class ClaudeCodeSession implements BackendSession {
         emit(event as BackendSessionEvent);
       },
       cwd: config.cwd,
-      sessionOptions: config.extra as Record<string, unknown> | undefined,
+      sessionOptions: buildClaudeSessionOptions(config),
       autoApproveScope: config.autoApproveScope ?? 'off',
       envOverride: config.env,
       confirmDestructive,
+      queryFactory,
     });
   }
 
-  start(): void {
-    this.inner.start();
+  start(): Promise<void> {
+    return this.inner.start();
   }
 
   end(): void {
@@ -129,11 +134,30 @@ class ClaudeCodeSession implements BackendSession {
       mode as Parameters<ClaudeSession['setPermissionMode']>[0],
     );
   }
+
+  snapshot(): { protocol: string; sessionId: string } | null {
+    return this.inner.snapshot();
+  }
+}
+
+function buildClaudeSessionOptions(config: BackendSessionConfig): Record<string, unknown> {
+  const extra = { ...(config.extra ?? {}) };
+  delete extra.meetingCommandHandler;
+  if (config.systemPrompt !== undefined && extra.systemPrompt === undefined) {
+    extra.systemPrompt = config.systemPrompt;
+  }
+  if (config.model !== undefined) extra.model = config.model;
+  if (config.mcpServers !== undefined) extra.mcpServers = config.mcpServers;
+  if (config.skills !== undefined) extra.skills = config.skills;
+  if (config.resumeSessionId !== undefined) extra.resume = config.resumeSessionId;
+  return extra;
 }
 
 // ── Backend implementation ─────────────────────────────────────────────────────
 
 const CLAUDE_CODE_CAPABILITIES: BackendCapabilities = {
+  coordinate: true,
+  executeTasks: true,
   displayName: 'Claude Code',
   iconId: 'claude',
   mcp: true,
@@ -155,25 +179,41 @@ export class ClaudeCodeBackend implements CliBackend {
   readonly id = 'claude-code';
   readonly capabilities = CLAUDE_CODE_CAPABILITIES;
   private confirmDestructive?: ConfirmDestructive;
+  private readonly deps: {
+    resolveBinary?: () => string | null;
+    execFile?: (binary: string, args: string[], options?: Record<string, unknown>) => string;
+    queryFactory?: typeof import('@anthropic-ai/claude-agent-sdk').query;
+  };
 
-  constructor(opts?: { confirmDestructive?: ConfirmDestructive }) {
+  constructor(opts: {
+    confirmDestructive?: ConfirmDestructive;
+    resolveBinary?: () => string | null;
+    execFile?: (binary: string, args: string[], options?: Record<string, unknown>) => string;
+  } = {}) {
     this.confirmDestructive = opts?.confirmDestructive;
+    this.deps = opts;
   }
 
   createSession(
     config: BackendSessionConfig,
     emit: (e: BackendSessionEvent) => void,
   ): BackendSession {
-    return new ClaudeCodeSession(config, emit, this.confirmDestructive);
+    return new ClaudeCodeSession(config, emit, this.confirmDestructive, this.deps.queryFactory);
   }
 
   resolveBinary(): string | null {
-    return resolveClaudeBinary() ?? null;
+    return this.deps.resolveBinary?.() ?? resolveClaudeBinary() ?? null;
   }
 
   buildEnv(auth: BackendAuthConfig, extra?: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
     const base = mergedSubprocessEnv();
-    const env: NodeJS.ProcessEnv = { ...base, ...extra };
+    const env: NodeJS.ProcessEnv = { ...base, ...isolatedSubprocessEnv(extra) };
+    for (const [key, value] of Object.entries(extra ?? {})) {
+      if (
+        typeof value === 'string'
+        && (key.startsWith('ANTHROPIC_') || key.startsWith('CLAUDE_') || key.startsWith('XDG_'))
+      ) env[key] = value;
+    }
 
     if (auth.apiKey) {
       env.ANTHROPIC_API_KEY = auth.apiKey;
@@ -196,16 +236,28 @@ export class ClaudeCodeBackend implements CliBackend {
   }
 
   async loginOAuth(): Promise<{ ok: boolean; error?: string }> {
-    // Delegate to the CLI's built-in auth login command.
-    // The orchestrator handles this via `claude auth login` in a terminal.
-    return { ok: false, error: 'OAuth login is handled by the Claude CLI directly. Run "claude auth login" in a terminal.' };
+    const binary = this.resolveBinary();
+    if (!binary) return { ok: false, error: 'Claude CLI runtime is unavailable.' };
+    return runTerminalLogin(
+      binary, ['auth', 'login'], () => this.checkAuthStatus(), isolatedSubprocessEnv(),
+    );
   }
 
   async checkAuthStatus(): Promise<{ loggedIn: boolean }> {
-    // Check if the Claude CLI has valid OAuth credentials.
-    // This is a simplified check — the real implementation would query
-    // the CLI's auth status.
     const binary = this.resolveBinary();
-    return { loggedIn: binary !== null };
+    if (!binary) return { loggedIn: false };
+    try {
+      const run = this.deps.execFile ?? ((file: string, args: string[]) =>
+        execFileSync(file, args, {
+          env: mergedSubprocessEnv(), encoding: 'utf8', timeout: 10_000,
+        }));
+      const output = run(binary, ['auth', 'status', '--json'], {
+        encoding: 'utf8', timeout: 10_000,
+      });
+      const parsed = JSON.parse(output.trim()) as { loggedIn?: unknown };
+      return { loggedIn: parsed.loggedIn === true };
+    } catch {
+      return { loggedIn: false };
+    }
   }
 }

@@ -20,6 +20,7 @@ import { Orchestrator } from '../orchestrator.js';
 import { mergedSubprocessEnv } from '../settings-loader.js';
 import { formatError } from '../format-error.js';
 import {
+  getBackendAuth,
   getSettings,
   pushRecentCwd,
   setOpenTabs,
@@ -27,11 +28,13 @@ import {
 import type { IpcContext } from './context.js';
 import { clearApprovedExternalDirs } from './documents.js';
 import { MeetingRepository } from '../meeting-repository.js';
+import { getBackendRegistry } from '../backends/registry.js';
 
 interface OpenPayload {
   cwd?: unknown;
   greeting?: unknown;
   backendId?: unknown;
+  recoveryMeetingId?: unknown;
 }
 
 // Coalesce rapid-fire `setOpenTabs` writes (lobby-restore can fire 5+
@@ -81,6 +84,10 @@ export function registerSessionsIpc(ctx: IpcContext): void {
       const rawCwd = typeof payload?.cwd === 'string' ? payload.cwd : '';
       const greeting = typeof payload?.greeting === 'string' ? payload.greeting : undefined;
       const backendId = typeof payload?.backendId === 'string' ? payload.backendId : undefined;
+      let selectedBackendId = backendId ?? getSettings().defaultBackend ?? 'claude-code';
+      const recoveryMeetingId = typeof payload?.recoveryMeetingId === 'string'
+        ? payload.recoveryMeetingId
+        : undefined;
       const candidateCwd = rawCwd && rawCwd.length > 0 ? rawCwd : homedir();
 
       // S8: validate cwd before doing anything. A compromised renderer could
@@ -99,6 +106,24 @@ export function registerSessionsIpc(ctx: IpcContext): void {
         return { ok: false, error: `Invalid cwd: ${msg}` };
       }
 
+      let recovery: { meetingId: string; seq: number; state: Record<string, unknown> } | undefined;
+      if (recoveryMeetingId) {
+        if (!/^[a-zA-Z0-9-]{1,64}$/.test(recoveryMeetingId)) {
+          return { ok: false, error: 'Invalid recovery meeting id' };
+        }
+        recovery = (await MeetingRepository.listRecoverable())
+          .find((entry) => entry.meetingId === recoveryMeetingId);
+        if (!recovery) return { ok: false, error: 'Recoverable meeting not found' };
+        if (path.resolve(String(recovery.state.cwd ?? '')) !== resolvedCwd) {
+          return { ok: false, error: 'Recovery workspace does not match the selected folder' };
+        }
+        const hosts = Array.isArray(recovery.state.hosts) ? recovery.state.hosts : [];
+        const defaultHost = hosts.find((host) => (
+          typeof host === 'object' && host !== null && (host as { id?: unknown }).id === 'default'
+        )) as { backendId?: unknown } | undefined;
+        if (typeof defaultHost?.backendId === 'string') selectedBackendId = defaultHost.backendId;
+      }
+
       // cwd uniqueness — bail before constructing an Orchestrator.
       const existing = ctx.registry.findByCwd(resolvedCwd);
       if (existing) {
@@ -108,6 +133,24 @@ export function registerSessionsIpc(ctx: IpcContext): void {
       }
 
       const sessionId = randomUUID();
+      const backendAuth = getBackendAuth(selectedBackendId);
+      const probe = await getBackendRegistry().probe(selectedBackendId, backendAuth
+        ? {
+            authMode: backendAuth.authMode,
+            apiKey: backendAuth.apiKey,
+            baseUrl: backendAuth.baseUrl,
+            model: backendAuth.model,
+          }
+        : { authMode: 'none' });
+      if (!probe.capabilities.coordinate) {
+        return { ok: false, error: `backend '${selectedBackendId}' cannot coordinate` };
+      }
+      if (!probe.installed) {
+        return { ok: false, error: `backend '${selectedBackendId}' runtime is unavailable` };
+      }
+      if (probe.auth === 'required') {
+        return { ok: false, error: `backend '${selectedBackendId}' authentication is required` };
+      }
       // Wait for the launch-time shadow-home build the first time. After
       // launch+1 s this resolves immediately; on a manifest-cached relaunch
       // it's effectively instant.
@@ -131,7 +174,25 @@ export function registerSessionsIpc(ctx: IpcContext): void {
         talkerModel,
         confirmDestructive: ctx.nativeConfirmDestructive,
         browserTabManager: ctx.browserTabManager,
-        defaultBackendId: backendId,
+        defaultBackendId: selectedBackendId,
+        meetingId: recovery?.meetingId,
+        recoverySeq: recovery?.seq,
+        resumeBackendSessions: recovery
+          ? Object.fromEntries((Array.isArray(recovery.state.hosts) ? recovery.state.hosts : [])
+              .filter((host): host is Record<string, unknown> => typeof host === 'object' && host !== null)
+              .flatMap((host) => {
+                const native = host.backendSession;
+                return typeof host.id === 'string'
+                  && typeof native === 'object' && native !== null
+                  && typeof (native as Record<string, unknown>).sessionId === 'string'
+                  && typeof (native as Record<string, unknown>).protocol === 'string'
+                  ? [[host.id, native as import('../backends/cli-backend.js').BackendSessionSnapshot]]
+                  : [];
+              }))
+          : undefined,
+        recoveredTasks: recovery && Array.isArray(recovery.state.tasks)
+          ? recovery.state.tasks.filter((task): task is Record<string, unknown> => typeof task === 'object' && task !== null)
+          : undefined,
       });
 
       const result = ctx.registry.open(sessionId, resolvedCwd, orch);
@@ -197,7 +258,14 @@ export function registerSessionsIpc(ctx: IpcContext): void {
         }
       })();
 
-      return { ok: true, sessionId, cwd: resolvedCwd, status: 'starting' as const };
+      return {
+        ok: true,
+        sessionId,
+        cwd: resolvedCwd,
+        backendId: selectedBackendId,
+        recovered: Boolean(recovery),
+        status: 'starting' as const,
+      };
     } catch (err: unknown) {
       const msg = formatError(err);
       return { ok: false, error: msg };
@@ -248,6 +316,20 @@ export function registerSessionsIpc(ctx: IpcContext): void {
     ok: true,
     meetings: await MeetingRepository.listRecoverable(),
   }));
+
+  ipcMain.handle('sessions:resolve-recovered-task', async (_e, payload: unknown) => {
+    if (!payload || typeof payload !== 'object') return { ok: false, error: 'payload must be an object' };
+    const { sessionId, taskId, action } = payload as Record<string, unknown>;
+    if (typeof taskId !== 'string' || !/^[a-zA-Z0-9._-]{1,128}$/.test(taskId)) {
+      return { ok: false, error: 'invalid task id' };
+    }
+    if (action !== 'continue' && action !== 'retry' && action !== 'complete' && action !== 'abandon') {
+      return { ok: false, error: 'invalid recovery action' };
+    }
+    const orch = ctx.getOrchestrator(typeof sessionId === 'string' ? sessionId : null);
+    if (!orch) return { ok: false, error: 'session not found' };
+    return orch.resolveRecoveredTask(taskId, action);
+  });
 
   // ---- Multi-host management -----------------------------------------------
 

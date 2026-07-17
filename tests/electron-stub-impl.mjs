@@ -7,11 +7,16 @@ export const app = {
   isPackaged: false,
 };
 export const ipcMain = { handle: () => {}, on: () => {} };
-export const dialog = {};
 export const desktopCapturer = {};
-export const systemPreferences = { getMediaAccessStatus: () => 'granted' };
-export const shell = {};
-export const BrowserWindow = class {};
+export const systemPreferences = {
+  getMediaAccessStatus: () => 'granted',
+  askForMediaAccess: async () => true,
+};
+export const shell = { openExternal: async () => {} };
+export const dialog = { showMessageBox: async () => ({ response: 1 }) };
+export const BrowserWindow = class {
+  static getFocusedWindow() { return null; }
+};
 export const safeStorage = { encryptString: () => Buffer.alloc(0), decryptString: () => '' };
 export const screen = { getPrimaryDisplay: () => ({ workAreaSize: { width: 1920, height: 1080 } }) };
 

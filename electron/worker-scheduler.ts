@@ -210,17 +210,21 @@ export class WorkerScheduler {
   snapshot(): Array<{
     id: string;
     title: string;
+    prompt: string;
     status: WorkerStatusKind | 'interrupted';
     deps: string[];
     executorBackendId?: string;
+    writePaths?: string[];
     workspace?: { kind: string; cwd: string; branch?: string };
   }> {
     return Array.from(this.workers.values()).map((handle) => ({
       id: handle.id,
       title: handle.title,
+      prompt: handle.prompt,
       status: handle.status,
       deps: [...handle.deps],
       executorBackendId: handle.executorBackendId,
+      writePaths: handle.writePaths ? [...handle.writePaths] : undefined,
       workspace: handle.workspace
         ? { kind: handle.workspace.kind, cwd: handle.workspace.cwd, branch: handle.workspace.branch }
         : undefined,
@@ -636,6 +640,15 @@ export class WorkerScheduler {
           // about it.
           this.queueWorkerUpdate(handle, `[${handle.id}] turn complete`);
         }
+      } else if (e.kind === 'auth-required') {
+        this.opts.emit({
+          source: 'talker',
+          event: { kind: 'worker-ended', workerId, status: 'failed', summary: e.error },
+        });
+        this.harvestUnresolvedAddenda(handle);
+        this.disposeWorker(handle, 'failed', e.error);
+        this.emitPlanUpdate();
+        this.cascadeFailure(workerId);
       } else if (e.kind === 'ended') {
         // SDK stream ended. Two paths land here:
         //   1. Worker reported task_done → markTaskDone already disposed the
@@ -797,11 +810,11 @@ export class WorkerScheduler {
       if (this.opts.workspaceManager && !this.opts.workspaceManager.canPrepare(handle.id, handle.writePaths)) {
         continue;
       }
-      this.spawnWorker(handle);
+      void this.spawnWorker(handle);
     }
   }
 
-  private spawnWorker(handle: WorkerHandle): void {
+  private async spawnWorker(handle: WorkerHandle): Promise<void> {
     const workerMcp = this.opts.buildWorkerMcp(handle.id);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const mcpServers: Record<string, any> = { 'meeting-worker': workerMcp as any };
@@ -843,7 +856,11 @@ export class WorkerScheduler {
       handle.stallNotified = false;
       handle.stallNudged = false;
       this.startStallWatch();
-      handle.session.start();
+      const session = handle.session;
+      await session.start();
+      // The meeting may have ended, the task may have been cancelled, or an
+      // auth-required event may have disposed the session during the handshake.
+      if (handle.session !== session || handle.status !== 'running') return;
 
       // First prompt mentions peer workers so the new worker knows it may be
       // touching shared code with others.
@@ -853,7 +870,7 @@ export class WorkerScheduler {
       const peerLine = peers.length > 0
         ? `\n\n（同事 worker 也在跑：${peers.map((p) => `${p.id}「${p.title}」`).join('、')}。注意可能改到同一份代码。）`
         : '';
-      handle.session.sendUserText(handle.prompt + peerLine);
+      session.sendUserText(handle.prompt + peerLine);
 
       this.opts.emit({
         source: 'talker',
@@ -867,6 +884,9 @@ export class WorkerScheduler {
       });
       this.emitPlanUpdate();
     } catch (err) {
+      // auth-required/ended may have already terminalized this worker while the
+      // awaited readiness promise was rejecting. Do not emit/cascade twice.
+      if (handle.status !== 'running' || handle.session === null) return;
       // B2: anything throwing between sessionFactory and the first
       // sendUserText would otherwise strand the handle: status='pending'
       // (factory threw — and since spawnReadyWorkers retries on pending,
@@ -920,12 +940,16 @@ export class WorkerScheduler {
       handle.flushTimer = null;
     }
     if (handle.session) {
+      // Clear the reference before end(): some adapters emit `ended`
+      // synchronously, which would otherwise re-enter disposeWorker and call
+      // end repeatedly on the same session.
+      const session = handle.session;
+      handle.session = null;
       try {
-        handle.session.end();
+        session.end();
       } catch (err) {
         console.warn(`[scheduler] worker.end() threw for ${handle.id}:`, err);
       }
-      handle.session = null;
     }
     handle.bufferedUpdates = [];
     handle.queuedAddenda = [];

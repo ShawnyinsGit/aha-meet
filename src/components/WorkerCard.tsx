@@ -22,6 +22,7 @@ interface WorkerCardProps {
 const statusTone: Record<WorkerState['status'], 'idle' | 'waiting' | 'working' | 'done' | 'failed'> = {
   idle: 'idle',
   pending: 'waiting',
+  interrupted: 'waiting',
   running: 'working',
   done: 'done',
   failed: 'failed',
@@ -41,6 +42,7 @@ function statusLabel(worker: WorkerState, speaking: boolean): string {
   switch (worker.status) {
     case 'running': return 'Running';
     case 'pending': return 'Pending';
+    case 'interrupted': return 'Interrupted';
     case 'done':    return 'Done';
     case 'failed':  return 'Failed';
     default:        return 'Idle';

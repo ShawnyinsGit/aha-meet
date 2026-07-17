@@ -33,7 +33,6 @@ const MAX_ACTIVITY = 500;
 const ANNOUNCE_RETRY_MS = 350;
 const ANNOUNCE_MAX_QUEUE = 6;
 
-const DEFAULT_GREETING = "You're joining a live screen-share meeting with your developer. Greet them in one or two sentences, ask what they want to work on today, and remind them they can share the current screen with the snapshot button when something needs your eyes. Keep it warm and short.";
 
 function appendCapped<T>(arr: T[], items: T[], max: number): T[] {
   if (items.length === 0) return arr;
@@ -751,11 +750,15 @@ class MeetingStore {
     return null;
   }
 
-  async openSession(cwd: string, greeting?: string): Promise<{ ok: boolean; error?: string; sessionId?: string }> {
-    // Default greeting kicks the Talker into speaking on session start so the
-    // user gets an immediate "hello, what should we work on?" instead of a
-    // dead-air tab. Without this the SDK input loop sits idle.
-    let effectiveGreeting = greeting ?? DEFAULT_GREETING;
+  async openSession(
+    cwd: string,
+    greeting?: string,
+    recoveryMeetingId?: string,
+  ): Promise<{ ok: boolean; error?: string; sessionId?: string }> {
+    // Transport readiness must not spend a model turn. Startup greetings can
+    // queue ahead of real user input and surface much later as an unrelated
+    // "welcome back" response. The empty chat state shows readiness locally.
+    let effectiveGreeting = recoveryMeetingId ? '' : (greeting ?? '');
     // If a placeholder already exists for this cwd, resume it instead of
     // creating a second tab. Mirrors main-side cwd uniqueness.
     const existing = this.findByCwd(cwd);
@@ -770,9 +773,16 @@ class MeetingStore {
     // Pre-load transcript to inject resume context if there's history.
     // This gives the AI awareness of the previous conversation so it can
     // continue tasks instead of starting cold each time.
-    effectiveGreeting = await this.buildResumeGreeting(cwd, effectiveGreeting);
+    if (!recoveryMeetingId && effectiveGreeting) {
+      effectiveGreeting = await this.buildResumeGreeting(cwd, effectiveGreeting);
+    }
 
-    const res = await window.vibeMeet.sessions.open(cwd, effectiveGreeting, this.defaultBackendId ?? undefined);
+    const res = await window.vibeMeet.sessions.open(
+      cwd,
+      effectiveGreeting,
+      this.defaultBackendId ?? undefined,
+      recoveryMeetingId,
+    );
     if (!res.ok) {
       if (res.error === 'duplicate' && 'sessionId' in res && res.sessionId) {
         await this.setActive(res.sessionId);
@@ -780,7 +790,7 @@ class MeetingStore {
       }
       return { ok: false, error: res.error };
     }
-    const slot = emptySlot(res.sessionId, res.cwd, this.defaultBackendId ?? 'claude-code');
+    const slot = emptySlot(res.sessionId, res.cwd, res.backendId ?? this.defaultBackendId ?? 'claude-code');
     slot.greeting = effectiveGreeting;
     slot.state = { ...slot.state, running: true };
     this.slots.set(res.sessionId, slot);
@@ -801,8 +811,8 @@ class MeetingStore {
     const ph = this.slots.get(placeholderSlotId);
     if (!ph || !ph.placeholder) return { ok: false, error: 'not-placeholder' };
     // Pre-load transcript to inject resume context if there's history.
-    let effectiveGreeting = greeting ?? DEFAULT_GREETING;
-    effectiveGreeting = await this.buildResumeGreeting(ph.cwd, effectiveGreeting);
+    let effectiveGreeting = greeting ?? '';
+    if (effectiveGreeting) effectiveGreeting = await this.buildResumeGreeting(ph.cwd, effectiveGreeting);
 
     const res = await window.vibeMeet.sessions.open(ph.cwd, effectiveGreeting, this.defaultBackendId ?? undefined);
     if (!res.ok) {
@@ -1146,6 +1156,21 @@ class MeetingStore {
           this.mutateSlot(slot.id, (s) => ({ ...s, lastError: result.error ?? 'Plan approval failed' }));
         }
       });
+      return;
+    }
+    if (e.kind === 'auth-required') {
+      this.updateWorker(slot, source, (w) => ({
+        ...w,
+        status: 'idle',
+        endedAt: Date.now(),
+        activity: appendCapped(
+          w.activity,
+          [{ id: uid(), kind: 'error', title: '需要重新登录', detail: e.error, ts: Date.now(), source }],
+          MAX_ACTIVITY,
+        ),
+      }), e.hostId);
+      this.mutateSlot(slot.id, (s) => ({ ...s, running: false, lastError: e.error }));
+      this.bumpUnread(slot);
       return;
     }
     if (e.kind === 'error') {

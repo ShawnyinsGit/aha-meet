@@ -7,6 +7,12 @@ interface LobbyProps {
   lastError?: string | null;
 }
 
+interface RecoverableMeeting {
+  meetingId: string;
+  seq: number;
+  state: Record<string, unknown>;
+}
+
 function formatRelative(ts: number): string {
   const diff = Date.now() - ts;
   const min = Math.floor(diff / 60_000);
@@ -28,7 +34,7 @@ function shortPath(cwd: string): { label: string; parent: string } {
 
 /** Get auth status label for a backend. */
 function backendAuthLabel(b: BackendInfo): string {
-  if (b.hasApiKey || b.authMode !== 'none') return '✓';
+  if (b.loggedIn) return '✓';
   return '';
 }
 
@@ -51,6 +57,7 @@ export function Lobby({ lastError }: LobbyProps) {
 
   const [opening, setOpening] = useState(false);
   const [openError, setOpenError] = useState<string | null>(null);
+  const [recoverable, setRecoverable] = useState<RecoverableMeeting[]>([]);
 
   // Install state — one backend at a time; log accumulates streamed output.
   const [installing, setInstalling] = useState<string | null>(null);
@@ -74,6 +81,9 @@ export function Lobby({ lastError }: LobbyProps) {
 
   useEffect(() => {
     void reloadBackends();
+    void window.vibeMeet.sessions.listRecoverable()
+      .then((result) => setRecoverable(result.meetings))
+      .catch((error) => console.warn('[Lobby] failed to load recoverable meetings:', error));
   }, [reloadBackends]);
 
   // When selected backend changes, prefill inputs from its config
@@ -108,10 +118,30 @@ export function Lobby({ lastError }: LobbyProps) {
     await openCwd(dir);
   }, [openCwd]);
 
+  const recoverMeeting = useCallback(async (meeting: RecoverableMeeting) => {
+    if (opening) return;
+    const cwd = typeof meeting.state.cwd === 'string' ? meeting.state.cwd : '';
+    if (!cwd) return;
+    setOpening(true);
+    setOpenError(null);
+    try {
+      const result = await meetingStore.openSession(cwd, '', meeting.meetingId);
+      if (!result.ok) setOpenError(result.error ?? 'Failed to recover meeting');
+      else setRecoverable((items) => items.filter((item) => item.meetingId !== meeting.meetingId));
+    } finally {
+      setOpening(false);
+    }
+  }, [opening]);
+
   const handleBackendChange = useCallback(async (backendId: string) => {
+    const result = await window.vibeMeet.backendAuth.setDefault(backendId);
+    if (!result.ok) {
+      setOpenError(result.error ?? 'This backend cannot coordinate');
+      await reloadBackends();
+      return;
+    }
     setSelectedBackend(backendId);
     meetingStore.defaultBackendId = backendId;
-    await window.vibeMeet.backendAuth.setDefault(backendId);
     await reloadBackends();
   }, [reloadBackends]);
 
@@ -244,8 +274,8 @@ export function Lobby({ lastError }: LobbyProps) {
                   onChange={(e) => { void handleBackendChange(e.target.value); }}
                 >
                   {backends.map((b) => (
-                    <option key={b.id} value={b.id}>
-                      {b.displayName} {b.hasApiKey || b.authMode !== 'none' ? '✓' : ''} {b.isDefault ? '(default)' : ''} {!b.available ? '(not installed)' : ''}
+                    <option key={b.id} value={b.id} disabled={!b.supportsCoordinator}>
+                      {b.displayName} {b.loggedIn ? '✓' : ''} {b.isDefault ? '(default)' : ''} {!b.available ? '(not installed)' : ''} {!b.supportsCoordinator ? '(expert only)' : ''}
                     </option>
                   ))}
                 </select>
@@ -257,7 +287,7 @@ export function Lobby({ lastError }: LobbyProps) {
                   <div className="join-auth-block">
                     <div className="join-auth-block-title">
                       <KeyRound size={13} aria-hidden="true" /> API Key
-                      {(currentBackend.hasApiKey || currentBackend.authMode !== 'none') && (
+                      {currentBackend.loggedIn && (
                         <span className="join-auth-badge active">Active</span>
                       )}
                     </div>
@@ -343,7 +373,7 @@ export function Lobby({ lastError }: LobbyProps) {
                     <div className="join-auth-block">
                       <div className="join-auth-block-title">
                         <LogIn size={13} aria-hidden="true" /> {currentBackend.displayName} Account
-                        {currentBackend.authMode === 'oauth' && (
+                        {currentBackend.loggedIn && (
                           <span className="join-auth-badge active">Active</span>
                         )}
                       </div>
@@ -361,7 +391,7 @@ export function Lobby({ lastError }: LobbyProps) {
                       >
                         {loginStatus === 'pending' ? 'Opening browser…'
                           : loginStatus === 'done' ? 'Logged in ✓'
-                          : currentBackend.authMode === 'oauth' ? 'Re-authenticate'
+                          : currentBackend.loggedIn ? 'Re-authenticate'
                           : `Log in with ${currentBackend.displayName}`}
                       </button>
                       {loginStatus === 'error' && (
@@ -403,6 +433,40 @@ export function Lobby({ lastError }: LobbyProps) {
             </div>
           )}
         </div>
+
+        {recoverable.length > 0 && (
+          <section className="lobby-section">
+            <div className="lobby-section-title">
+              <Clock size={13} aria-hidden="true" />
+              <span>Interrupted meetings — confirm to resume</span>
+            </div>
+            <ul className="lobby-list">
+              {recoverable.slice(0, 3).map((meeting) => {
+                const cwd = typeof meeting.state.cwd === 'string' ? meeting.state.cwd : '';
+                const { label, parent } = shortPath(cwd);
+                const tasks = Array.isArray(meeting.state.tasks) ? meeting.state.tasks.length : 0;
+                return (
+                  <li key={meeting.meetingId}>
+                    <button
+                      type="button"
+                      className="lobby-row"
+                      onClick={() => { void recoverMeeting(meeting); }}
+                      disabled={opening || !cwd}
+                      title="Resume Host context; running tasks stay interrupted"
+                    >
+                      <span className="lobby-row-icon" aria-hidden="true"><Clock size={16} /></span>
+                      <span className="lobby-row-main">
+                        <span className="lobby-row-name">Resume {label}</span>
+                        <span className="lobby-row-path">{parent} · {tasks} saved tasks</span>
+                      </span>
+                      <span className="lobby-row-meta">Confirm</span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          </section>
+        )}
 
         {lobby.recent.length > 0 && (
           <section className="lobby-section">

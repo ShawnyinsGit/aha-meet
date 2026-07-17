@@ -170,6 +170,8 @@ export class CustomBackend extends SubprocessBackend {
     this.baseUrlEnv = options.baseUrlEnv ?? 'BASE_URL';
 
     this.capabilities = {
+      coordinate: false,
+      executeTasks: false,
       displayName: options.displayName,
       iconId: 'custom',
       mcp: false,
@@ -195,7 +197,7 @@ export class CustomBackend extends SubprocessBackend {
       });
       emit({ kind: 'ended' });
       return {
-        start() {},
+        async start() {},
         end() {},
         sendUserText() {},
         sendUserContent() {},

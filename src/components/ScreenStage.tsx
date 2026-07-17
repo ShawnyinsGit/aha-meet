@@ -188,7 +188,8 @@ export function ScreenStage({
                 onResolvePermission={onResolvePermission}
                 selectedId={selectedParticipantId}
                 onOpenInTerminal={(workerId) => onCreateWindow('terminal', { workerId })}
-                customAvatars={customAvatars}
+          customAvatars={customAvatars}
+          sessionId={sessionId}
               />
             )}
 

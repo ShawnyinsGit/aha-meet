@@ -94,6 +94,7 @@ export interface NormalizedMessage {
 export type BackendSessionEvent =
   | { kind: 'message'; message: NormalizedMessage }
   | { kind: 'permission-request'; id: string; toolName: string; input: Record<string, unknown>; toolUseID: string }
+  | { kind: 'auth-required'; error: string }
   | { kind: 'error'; error: string }
   | { kind: 'ended' };
 
@@ -125,6 +126,17 @@ export interface BackendSessionConfig {
   autoApproveScope?: AutoApproveScope;
   /** Backend-specific opaque options. */
   extra?: Record<string, unknown>;
+  /** Native backend session/thread id restored from a Meeting snapshot. */
+  resumeSessionId?: string;
+  /** Least-privilege execution profile selected by the meeting scheduler. */
+  executionRole?: 'host' | 'worker';
+}
+
+export interface BackendSessionSnapshot {
+  protocol: string;
+  sessionId: string;
+  protocolVersion?: string;
+  backendVersion?: string;
 }
 
 // ── Auth configuration ────────────────────────────────────────────────────────
@@ -147,6 +159,10 @@ export interface BackendAuthConfig {
 // support it).
 
 export interface BackendCapabilities {
+  /** Whether this backend may own the meeting Coordinator role. */
+  coordinate: boolean;
+  /** Whether this backend can complete the current Delivery Worker contract. */
+  executeTasks: boolean;
   /** Display name for UI (e.g. "Claude Code", "Codex", "Kimi"). */
   displayName: string;
   /** Icon identifier for UI rendering. */
@@ -177,7 +193,7 @@ export interface BackendCapabilities {
 
 export interface BackendSession {
   /** Start the session. Begins streaming events via the emit callback. */
-  start(): void | Promise<void>;
+  start(): Promise<void>;
   /** End the session. Releases all resources. Idempotent. */
   end(): void;
   /** Send a text message from the user. */
@@ -192,6 +208,8 @@ export interface BackendSession {
   setAutoApproveScope?(scope: AutoApproveScope): void;
   /** Set the permission mode (backend-specific). */
   setPermissionMode?(mode: string): Promise<void>;
+  /** Durable native handle used for interrupted recovery. */
+  snapshot?(): BackendSessionSnapshot | null;
 }
 
 // ── CLI backend factory ────────────────────────────────────────────────────────

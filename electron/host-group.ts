@@ -24,7 +24,12 @@ import {
 import { buildComputerUseMcp, type ComputerUseBridge } from './computer-use-mcp.js';
 import { buildBrowserMcp, type BrowserMcpBridge } from './browser-mcp.js';
 import { WorkerScheduler, type SessionFactory } from './worker-scheduler.js';
-import { TALKER_PROMPT, REPORT_MODE_SUFFIX } from './orchestrator-prompts.js';
+import {
+  TALKER_PROMPT,
+  COORDINATOR_ROLE_PROMPT,
+  EXPERT_ROLE_PROMPT,
+  REPORT_MODE_SUFFIX,
+} from './orchestrator-prompts.js';
 import {
   formatForPrompt,
   selectRelevant,
@@ -75,6 +80,8 @@ export class HostGroup {
   readonly backendId: string;
 
   private host: BackendSession | null = null;
+  private ready = false;
+  private suppressUnexpectedHostEnd = false;
   private scheduler: WorkerScheduler;
   private emit: (e: OrchestratorEvent) => void;
   private cwd: string;
@@ -154,6 +161,10 @@ export class HostGroup {
     return this.host;
   }
 
+  isReady(): boolean {
+    return this.ready && this.host !== null;
+  }
+
   getScheduler(): WorkerScheduler {
     return this.scheduler;
   }
@@ -169,16 +180,18 @@ export class HostGroup {
   }
 
   async start(greeting?: string) {
+    this.ready = false;
     const meetingMcp = buildTalkerMcp(this.bridge, this.isCoordinator, this.id);
 
-    let systemPrompt: string = TALKER_PROMPT;
+    const rolePrompt = this.isCoordinator() ? COORDINATOR_ROLE_PROMPT : EXPERT_ROLE_PROMPT;
+    let systemPrompt: string = TALKER_PROMPT + rolePrompt;
     try {
       const memoryEntries = await selectRelevant(this.projectId, {
         tokenBudget: MEMORY_TOKEN_BUDGET,
       });
       const memoryBlock = formatForPrompt(memoryEntries);
       if (memoryBlock) {
-        systemPrompt = `## 历史记忆 (从过往会议沉淀)\n\n${memoryBlock}\n\n---\n\n${TALKER_PROMPT}`;
+        systemPrompt = `## 历史记忆 (从过往会议沉淀)\n\n${memoryBlock}\n\n---\n\n${TALKER_PROMPT}${rolePrompt}`;
       }
     } catch (err) {
       console.warn('[host-group] failed to load memory for system prompt:', err);
@@ -211,8 +224,16 @@ export class HostGroup {
 
     await this.host.start();
 
+    // The session may have been torn down while its handshake promise was
+    // settling. A missing host is a failed readiness transition, never Ready.
+    if (!this.host) {
+      throw new Error(`backend '${this.backendId}' ended before readiness`);
+    }
     if (greeting) {
+      this.ready = true;
       this.host.sendUserText(greeting, 'normal');
+    } else {
+      this.ready = true;
     }
   }
 
@@ -254,6 +275,7 @@ export class HostGroup {
     this.scheduler.endAll();
     this.host?.end();
     this.host = null;
+    this.ready = false;
     return finalLines;
   }
 
@@ -263,8 +285,25 @@ export class HostGroup {
   }
 
   private onHostEvent(e: SessionEvent) {
-    if (e.kind === 'ended') this.host = null;
+    if (e.kind === 'auth-required') {
+      // Authentication failure is an intentional circuit-breaker, not a
+      // subprocess crash. Stop routing new turns and preserve existing workers.
+      this.suppressUnexpectedHostEnd = true;
+      this.host?.end();
+      this.host = null;
+      this.taggedEmit({ source: 'talker', event: e });
+      return;
+    }
+    if (e.kind === 'ended') {
+      this.host = null;
+      this.ready = false;
+    }
     this.taggedEmit({ source: 'talker', event: e });
+
+    if (e.kind === 'ended' && this.suppressUnexpectedHostEnd) {
+      this.suppressUnexpectedHostEnd = false;
+      return;
+    }
 
     if (e.kind === 'ended' && !this.isClosed()) {
       this.taggedEmit({

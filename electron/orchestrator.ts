@@ -21,7 +21,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { ClaudeSession, type SessionEvent } from './claude-session.js';
-import type { BackendSession } from './backends/cli-backend.js';
+import type { BackendSession, BackendSessionSnapshot } from './backends/cli-backend.js';
 import { getBackendRegistry } from './backends/registry.js';
 import type { AutoApproveScope } from './auto-approve-policy.js';
 import type { PlanMeetingTask } from './meeting-tools.js';
@@ -105,6 +105,11 @@ interface OrchestratorOpts {
   browserTabManager?: BrowserTabManager;
   /** Backend ID for the default host group. Defaults to 'claude-code'. */
   defaultBackendId?: string;
+  /** Existing Meeting identity and native Host handles selected by the user for recovery. */
+  meetingId?: string;
+  recoverySeq?: number;
+  resumeBackendSessions?: Record<string, BackendSessionSnapshot>;
+  recoveredTasks?: Array<Record<string, unknown>>;
 }
 
 export class Orchestrator implements OrchestratorBridge {
@@ -127,6 +132,8 @@ export class Orchestrator implements OrchestratorBridge {
   private repository: MeetingRepository;
   private workspaceManager: TaskWorkspaceManager;
   private diagnostics: DiagnosticLogger;
+  private resumeBackendSessions: Record<string, BackendSessionSnapshot>;
+  private recoveredTasks: Array<Record<string, unknown>>;
   private saveMemoryCallsThisSession = 0;
   private autoOrchestration = false;
   private pendingPlan: PlanMeetingTask[] | null = null;
@@ -185,15 +192,22 @@ export class Orchestrator implements OrchestratorBridge {
     this.confirmDestructive = opts.confirmDestructive;
     this.browserTabManager = opts.browserTabManager;
     this.projectId = computeProjectId(this.cwd);
-    this.meetingId = randomUUID();
-    this.repository = new MeetingRepository(this.meetingId);
+    this.meetingId = opts.meetingId ?? randomUUID();
+    this.resumeBackendSessions = opts.resumeBackendSessions ?? {};
+    this.recoveredTasks = opts.recoveredTasks ?? [];
+    this.repository = new MeetingRepository(this.meetingId, opts.recoverySeq);
     this.workspaceManager = new TaskWorkspaceManager(this.meetingId, this.cwd);
     this.diagnostics = new DiagnosticLogger(this.meetingId);
-    void this.repository.append('meeting-created', { cwd: this.cwd });
+    void this.repository.append(opts.meetingId ? 'meeting-recovered' : 'meeting-created', { cwd: this.cwd });
     this.sessionFactory = opts.sessionFactory ?? Orchestrator.defaultClaudeFactory;
 
     // Create the default HostGroup. Use the user's preferred backend if specified.
     const defaultBackend = opts.defaultBackendId ?? DEFAULT_BACKEND_ID;
+    const defaultBackendAdapter = getBackendRegistry().get(defaultBackend);
+    if (!defaultBackendAdapter) throw new Error(`backend '${defaultBackend}' is not registered`);
+    if (!defaultBackendAdapter.capabilities.coordinate) {
+      throw new Error(`backend '${defaultBackend}' cannot coordinate`);
+    }
     this.createHostGroup(DEFAULT_HOST_ID, defaultBackend);
 
     Orchestrator.liveInstances.add(this);
@@ -203,20 +217,20 @@ export class Orchestrator implements OrchestratorBridge {
   // ---------------------------------------------------------------------------
   // HostGroup management
 
-  /** Build a SessionFactory for a specific backend. Falls back to ClaudeSession
-   *  when the backend is 'claude-code' or when the adapter is not found. */
-  private buildSessionFactory(backendId: string, actorHostId = DEFAULT_HOST_ID): SessionFactory {
+  /** Build a SessionFactory only after the selected backend passes its role gate. */
+  private buildSessionFactory(
+    backendId: string,
+    actorHostId = DEFAULT_HOST_ID,
+    purpose: 'host' | 'worker' = 'host',
+  ): SessionFactory {
+    const backend = getBackendRegistry().get(backendId);
+    if (!backend) throw new Error(`backend '${backendId}' is not registered`);
+    if (purpose === 'worker' && !backend.capabilities.executeTasks) {
+      throw new Error(`backend '${backendId}' cannot execute delivery tasks`);
+    }
     // If a test-injected factory is set, use it for all backends.
     if (this.sessionFactory !== Orchestrator.defaultClaudeFactory) {
       return this.sessionFactory;
-    }
-    if (backendId === DEFAULT_BACKEND_ID || backendId === 'claude-code') {
-      return Orchestrator.defaultClaudeFactory;
-    }
-    const backend = getBackendRegistry().get(backendId);
-    if (!backend) {
-      console.warn(`[orchestrator] backend '${backendId}' not found in registry, falling back to claude-code`);
-      return Orchestrator.defaultClaudeFactory;
     }
     // Wrap the adapter's createSession to accept ClaudeSession-shaped opts,
     // translating the fields that differ between the two interfaces.
@@ -247,13 +261,17 @@ export class Orchestrator implements OrchestratorBridge {
       // Every other CLI must retain the real HOME so OAuth/config locations
       // such as ~/.codex remain visible.
       const backendBaseEnv = { ...(opts.envOverride ?? {}) };
-      backendBaseEnv.HOME = homedir();
-      backendBaseEnv.USERPROFILE = homedir();
+      if (backendId !== 'claude-code') {
+        backendBaseEnv.HOME = homedir();
+        backendBaseEnv.USERPROFILE = homedir();
+      }
       const env = backend.buildEnv(auth, backendBaseEnv);
       const requestedModel = typeof so.model === 'string' ? so.model : undefined;
-      const model = requestedModel?.startsWith('claude-')
-        ? (auth.model ?? backend.capabilities.defaultModel)
-        : (auth.model ?? requestedModel ?? backend.capabilities.defaultModel);
+      const model = backendId === 'claude-code'
+        ? (auth.model ?? requestedModel ?? backend.capabilities.defaultModel)
+        : requestedModel?.startsWith('claude-')
+          ? (auth.model ?? backend.capabilities.defaultModel)
+          : (auth.model ?? requestedModel ?? backend.capabilities.defaultModel);
       return backend.createSession(
         {
           cwd: opts.cwd,
@@ -263,7 +281,14 @@ export class Orchestrator implements OrchestratorBridge {
           mcpServers: so.mcpServers as Record<string, unknown> | undefined,
           skills: Array.isArray(so.skills) ? so.skills : undefined,
           autoApproveScope: opts.autoApproveScope,
+          resumeSessionId: purpose === 'host'
+            ? this.resumeBackendSessions[actorHostId]?.sessionId
+            : undefined,
+          executionRole: purpose,
           extra: {
+            ...so,
+            ...(backendId === 'codex' ? { codexTransport: 'app-server' } : {}),
+            ...(backendId === 'kimi' ? { kimiTransport: 'acp' } : {}),
             meetingCommandHandler: (raw: unknown) => this.executeMeetingCommand(actorHostId, raw),
           },
         },
@@ -294,6 +319,7 @@ export class Orchestrator implements OrchestratorBridge {
       resolveWorkerSessionFactory: (backendId) => this.buildSessionFactory(
         backendId ?? this.defaultHost().backendId,
         id,
+        'worker',
       ),
       browserTabManager: this.browserTabManager,
       bridge: this,
@@ -345,14 +371,14 @@ export class Orchestrator implements OrchestratorBridge {
     }
     const hg = this.createHostGroup(id, backendId);
 
-    // Fire-and-forget the talker spawn. Without this the HostGroup sits idle
-    // forever — the renderer shows "Connecting…" but no session ever starts.
+    // Fire-and-forget the talker transport handshake. Starting a Host must not
+    // spend a model turn: delayed startup greetings used to surface minutes
+    // later as unrelated "welcome back" messages in the live transcript.
     void (async () => {
       try {
-        // Send a greeting so the new host's talker has something to respond to.
-        // Without this, the session starts but receives no input and sits idle.
-        const greeting = `你好！你已加入会议作为 ${backendId} 主持。请简要介绍自己并等待任务分配。`;
-        await hg.start(greeting);
+        await hg.start();
+        if (this.closed) return;
+        await this.snapshotActiveMeeting();
         if (!this.closed) {
           this.safeEmit({
             source: 'system',
@@ -400,22 +426,27 @@ export class Orchestrator implements OrchestratorBridge {
   }
 
   /** List all host groups with their ids and backend ids. */
-  listHosts(): Array<{ id: string; backendId: string; role: 'coordinator' | 'expert' }> {
+  listHosts(): Array<{
+    id: string;
+    backendId: string;
+    role: 'coordinator' | 'expert';
+    backendSession?: BackendSessionSnapshot;
+  }> {
     return Array.from(this.hostGroups.entries()).map(([id, hg]) => ({
       id,
       backendId: hg.backendId,
       role: id === this.coordinatorHostId ? 'coordinator' : 'expert',
+      backendSession: hg.getHost()?.snapshot?.() ?? undefined,
     }));
   }
 
   setCoordinator(hostId: string): { ok: true; coordinatorHostId: string } | { ok: false; error: string } {
     const hg = this.hostGroups.get(hostId);
     if (!hg) return { ok: false, error: `host group '${hostId}' not found` };
-    if (!hg.getHost()) return { ok: false, error: `host group '${hostId}' is not ready` };
+    if (!hg.isReady()) return { ok: false, error: `host group '${hostId}' is not ready` };
     const backend = getBackendRegistry().get(hg.backendId);
     if (!backend) return { ok: false, error: `backend '${hg.backendId}' not found` };
-    // Coordinator support is intentionally narrow for the first V2 release.
-    if (hg.backendId !== 'claude-code' && hg.backendId !== 'codex') {
+    if (!backend.capabilities.coordinate) {
       return { ok: false, error: `backend '${hg.backendId}' cannot coordinate yet` };
     }
     const previous = this.coordinatorHostId;
@@ -425,6 +456,11 @@ export class Orchestrator implements OrchestratorBridge {
     hg.getHost()?.sendUserText(
       `[coordinator handoff] You are now the meeting coordinator. Previous coordinator: ${previous}. `
       + `Current worker state:\n${this.describeWorkers()}`,
+      'high',
+    );
+    this.hostGroups.get(previous)?.getHost()?.sendUserText(
+      `[coordinator handoff] You are now an Expert Talker. ${hostId} is the sole Coordinator. `
+      + 'Do not schedule or speak for the meeting; answer only direct mentions or coordinator requests.',
       'high',
     );
     return { ok: true, coordinatorHostId: hostId };
@@ -516,8 +552,8 @@ export class Orchestrator implements OrchestratorBridge {
     ) {
       const candidate = Array.from(this.hostGroups.entries()).find(([id, hg]) =>
         id !== hostId
-        && hg.getHost() !== null
-        && (hg.backendId === 'claude-code' || hg.backendId === 'codex'),
+        && hg.isReady()
+        && getBackendRegistry().get(hg.backendId)?.capabilities.coordinate === true,
       )?.[0] ?? null;
       this.safeEmit({
         source: 'system',
@@ -532,7 +568,7 @@ export class Orchestrator implements OrchestratorBridge {
     if (!hg) return { ok: false, error: `host '${hostId}' not found` };
     if (hg.getHost()) return { ok: false, error: `host '${hostId}' is already running` };
     try {
-      await hg.start(`[recovery] Rejoin the meeting as ${hostId}. Await coordinator instructions.`);
+      await hg.start();
       this.safeEmit({ source: 'system', hostId, event: { kind: 'session-ready' } });
       return { ok: true };
     } catch (err) {
@@ -566,27 +602,121 @@ export class Orchestrator implements OrchestratorBridge {
       || e.event.kind === 'worker-ended'
       || e.event.kind === 'coordinator-failed'
     ) {
-      void this.repository.snapshot({
-        status: 'active',
-        cwd: this.cwd,
-        coordinatorHostId: this.coordinatorHostId,
-        hosts: this.listHosts(),
-        tasks: this.meetingScheduler.snapshot(),
-        autoOrchestration: this.autoOrchestration,
-      });
+      void this.snapshotActiveMeeting();
     }
     this.emit(e);
   }
 
   async start(greeting?: string) {
     await this.defaultHost().start(greeting);
+    if (this.recoveredTasks.length > 0) {
+      this.emitRecoveredPlan();
+    }
+    // Persist the native backend handle before the renderer is told the Host
+    // is ready. A crash after readiness can then recover the exact thread.
+    await this.snapshotActiveMeeting();
+  }
+
+  async resolveRecoveredTask(
+    taskId: string,
+    action: 'continue' | 'retry' | 'complete' | 'abandon',
+  ): Promise<{ ok: true } | { ok: false; error: string }> {
+    const index = this.recoveredTasks.findIndex((task) => task.id === taskId);
+    if (index < 0) return { ok: false, error: 'interrupted task not found' };
+    const current = this.recoveredTasks[index];
+    if (current.status !== 'interrupted' && current.status !== 'running') {
+      return { ok: false, error: `task is already ${String(current.status)}` };
+    }
+
+    if (action === 'complete' || action === 'abandon') {
+      this.recoveredTasks[index] = {
+        ...current,
+        status: action === 'complete' ? 'done' : 'failed',
+      };
+      await this.repository.append('recovered-task-resolved', { taskId, action });
+      this.emitRecoveredPlan();
+      await this.snapshotActiveMeeting();
+      return { ok: true };
+    }
+
+    const task: PlanMeetingTask = {
+      id: String(current.id ?? ''),
+      title: String(current.title ?? current.id ?? 'Recovered task'),
+      prompt: String(current.prompt ?? ''),
+      // An interrupted dependency graph is not silently replayed. A user
+      // explicitly resumes each side-effecting task, so this retry is a new
+      // independent execution at the same durable task identity.
+      deps: [],
+      executorBackendId: typeof current.executorBackendId === 'string'
+        ? current.executorBackendId
+        : undefined,
+      writePaths: Array.isArray(current.writePaths) ? current.writePaths.map(String) : undefined,
+    };
+    if (!task.id || !task.prompt) return { ok: false, error: 'recovered task is missing its id or prompt' };
+    const backendError = this.validateExecutionBackends([task]);
+    if (backendError) return { ok: false, error: backendError };
+    const result = this.meetingScheduler.installPlan([task]);
+    if (!result.ok) return result;
+    this.recoveredTasks.splice(index, 1);
+    await this.repository.append('recovered-task-resolved', { taskId, action });
+    await this.snapshotActiveMeeting();
+    return { ok: true };
+  }
+
+  private emitRecoveredPlan(): void {
+    const nodes = this.recoveredTasks.map((task) => ({
+      id: String(task.id ?? ''),
+      title: String(task.title ?? task.id ?? 'Interrupted task'),
+      status: task.status === 'running' ? 'interrupted' : task.status,
+      deps: Array.isArray(task.deps) ? task.deps.map(String) : [],
+    })).filter((node) => node.id) as MeetingPlanNode[];
+    this.safeEmit({ source: 'system', event: { kind: 'plan-updated', plan: { nodes } } });
+  }
+
+  private snapshotActiveMeeting(): Promise<void> {
+    const liveTasks = this.meetingScheduler.snapshot();
+    return this.repository.snapshot({
+      status: 'active',
+      cwd: this.cwd,
+      coordinatorHostId: this.coordinatorHostId,
+      hosts: this.listHosts(),
+      tasks: liveTasks.length > 0 ? liveTasks : this.recoveredTasks,
+      autoOrchestration: this.autoOrchestration,
+    });
   }
 
   sendUserText(text: string) {
-    // Single entry point reached from the renderer IPC (session:user-text).
-    // Routes to the default host. Multi-host routing (e.g. user picks a
-    // specific host) is a Phase 4 concern.
-    this.defaultHost().sendUserText(text);
+    const mention = this.resolveHostMention(text);
+    if (!mention) {
+      this.defaultHost().sendUserText(text);
+      return;
+    }
+    const addressedText = mention.text || '用户刚刚直接点名了你，请简短回应。';
+    mention.host.sendUserText(
+      `[direct user mention from meeting chat]\n${addressedText}\n\n`
+      + '直接用普通 assistant 文本回答用户；不要主持、派任务或输出 meeting-command。',
+    );
+    void this.repository.append('user-mentioned-host', {
+      hostId: mention.hostId,
+      backendId: mention.host.backendId,
+      chars: addressedText.length,
+    });
+  }
+
+  private resolveHostMention(text: string): { hostId: string; host: HostGroup; text: string } | null {
+    for (const match of text.matchAll(/@([a-zA-Z0-9._-]+)/g)) {
+      const token = match[1].toLowerCase();
+      const found = Array.from(this.hostGroups.entries()).find(([id, host]) => (
+        id.toLowerCase() === token || host.backendId.toLowerCase() === token
+      ));
+      if (!found || !found[1].isReady()) continue;
+      const start = match.index ?? 0;
+      const withoutMention = `${text.slice(0, start)}${text.slice(start + match[0].length)}`
+        .replace(/[ \t]{2,}/g, ' ')
+        .trim();
+      return { hostId: found[0], host: found[1], text: withoutMention };
+    }
+    return null;
   }
 
   sendUserImage(content: SDKUserMessage['message']['content']) {
@@ -708,10 +838,14 @@ export class Orchestrator implements OrchestratorBridge {
 
   /** Manual entry point: renderer-side "Plan meeting" button. */
   async installPlan(tasks: PlanMeetingTask[]): Promise<{ ok: true } | { ok: false; error: string }> {
+    const backendError = this.validateExecutionBackends(tasks);
+    if (backendError) return { ok: false, error: backendError };
     return this.meetingScheduler.installPlan(tasks);
   }
 
   async proposePlan(tasks: PlanMeetingTask[]): Promise<{ ok: true } | { ok: false; error: string }> {
+    const backendError = this.validateExecutionBackends(tasks);
+    if (backendError) return { ok: false, error: backendError };
     if (!this.autoOrchestration) {
       this.pendingPlan = tasks.map((task) => ({ ...task, deps: [...(task.deps ?? [])] }));
       this.safeEmit({ source: 'system', event: { kind: 'plan-proposed', tasks: this.pendingPlan } });
@@ -734,6 +868,19 @@ export class Orchestrator implements OrchestratorBridge {
     return this.meetingScheduler.installPlan(tasks);
   }
 
+  private validateExecutionBackends(tasks: PlanMeetingTask[]): string | null {
+    const defaultBackendId = this.defaultHost().backendId;
+    for (const task of tasks) {
+      const backendId = task.executorBackendId ?? defaultBackendId;
+      const backend = getBackendRegistry().get(backendId);
+      if (!backend) return `backend '${backendId}' is not registered`;
+      if (!backend.capabilities.executeTasks) {
+        return `backend '${backendId}' cannot execute delivery tasks`;
+      }
+    }
+    return null;
+  }
+
   // ===========================================================================
   // OrchestratorBridge — methods called from the MCP tool factories in
   // meeting-mcp.ts. These route to the default host's scheduler. In a full
@@ -741,6 +888,12 @@ export class Orchestrator implements OrchestratorBridge {
   // host handles all MCP tool callbacks.
 
   delegateSingleTask(description: string): { workerId: string; specialty: WorkerSpecialtyKind; reused: boolean } {
+    const backendId = this.defaultHost().backendId;
+    const backend = getBackendRegistry().get(backendId);
+    if (!backend) throw new Error(`backend '${backendId}' is not registered`);
+    if (!backend.capabilities.executeTasks) {
+      throw new Error(`backend '${backendId}' cannot execute delivery tasks`);
+    }
     return this.meetingScheduler.delegateSingleTask(description);
   }
 
