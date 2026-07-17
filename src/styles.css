@@ -8494,3 +8494,126 @@ html.popout-view #root {
 .opencode-editor-terminal-line {
   color: var(--text-secondary);
 }
+
+/* ----- IDE Manager Panel ----- */
+
+.ide-manager-panel {
+  padding: 20px;
+  border-bottom: 1px solid var(--border-1);
+}
+
+.ide-manager-header {
+  margin-bottom: 20px;
+}
+
+.ide-manager-title {
+  font-size: 16px;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.ide-manager-desc {
+  font-size: 13px;
+  color: var(--text-3);
+  line-height: 1.5;
+}
+
+.ide-manager-current {
+  margin-bottom: 24px;
+}
+
+.ide-manager-current-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-3);
+  margin-bottom: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.ide-manager-section {
+  margin-bottom: 24px;
+}
+
+.ide-manager-section-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-2);
+  margin-bottom: 12px;
+}
+
+.ide-manager-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ide-manager-ide-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  background: var(--surface-1);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-md);
+}
+
+.ide-manager-ide-card-default {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.ide-manager-ide-icon {
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--text-2);
+  flex-shrink: 0;
+}
+
+.ide-manager-ide-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.ide-manager-ide-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-1);
+  margin-bottom: 2px;
+}
+
+.ide-manager-ide-desc {
+  font-size: 12px;
+  color: var(--text-3);
+}
+
+.ide-manager-ide-badge {
+  flex-shrink: 0;
+}
+
+.ide-manager-empty {
+  padding: 24px;
+  text-align: center;
+  color: var(--text-3);
+  font-size: 13px;
+  background: var(--surface-1);
+  border: 1px dashed var(--border-1);
+  border-radius: var(--radius-md);
+}
+
+.ide-manager-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  background: var(--surface-1);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-md);
+  font-size: 12px;
+  color: var(--text-3);
+}
