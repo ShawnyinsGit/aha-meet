@@ -453,16 +453,28 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
     }
   });
 
-  // Wait until the first renderer is visible before asking. Calling the macOS
-  // permission API earlier can leave the sheet behind the opening window and
-  // makes a first install look as if no native prompt was shown.
-  mainWindow?.webContents.once('did-finish-load', () => {
-    void requestMicrophoneAccess(false).then((granted) => {
-      console.log('[mic-permission] first-window request result:', granted);
-    }).catch((err) => {
-      console.warn('[mic-permission] first-window request failed:', err);
-    });
-  });
+  // Wait until the first window is actually visible before asking for mic.
+  // Calling the macOS permission API while the window is still hidden can
+  // leave the consent sheet behind other apps and makes a first install look
+  // as if no native prompt was shown.
+  const requestMicWhenVisible = () => {
+    // Small delay so the window has time to come to the front on macOS.
+    setTimeout(() => {
+      void requestMicrophoneAccess(false).then((granted) => {
+        console.log('[mic-permission] first-window request result:', granted);
+      }).catch((err) => {
+        console.warn('[mic-permission] first-window request failed:', err);
+      });
+    }, 300);
+  };
+
+  if (mainWindow) {
+    if (mainWindow.isVisible()) {
+      requestMicWhenVisible();
+    } else {
+      mainWindow.once('show', requestMicWhenVisible);
+    }
+  }
 
   // Kick the whisper.cpp HTTP server off the launch critical path.
   import('./whisper-server.js').then(({ startWhisperServer }) => {
