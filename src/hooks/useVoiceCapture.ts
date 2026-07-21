@@ -5,6 +5,10 @@ import {
   serializeMicrophoneOperation,
   type MicrophoneCaptureStatus,
 } from '../lib/microphone-ui-state';
+import {
+  serializeOnnxSessionInitialization,
+  withTimeout,
+} from '../lib/onnx-session-init';
 
 // Below this many samples (~0.3s @ 16 kHz) we skip the voice-lock gate
 // entirely — embeddings on very short clips are unreliable and we'd rather
@@ -22,6 +26,7 @@ const MIN_SAMPLES_FOR_BARGE_IN = 3200;
 // 0.45 accepts real speech while still rejecting pure-echo blips (which sit
 // around 0.3-0.4 after AEC).
 const MIN_AVG_PROB_FOR_BARGE_IN = 0.45;
+const VAD_INITIALIZATION_TIMEOUT_MS = 20_000;
 
 async function releaseCapture(vad: MicVAD | null, stream: MediaStream | null): Promise<void> {
   try {
@@ -243,10 +248,14 @@ export function useVoiceCapture({
         setPermissionDenied(false);
         setStatus('initializing');
         const { MicVAD } = await import('@ricky0123/vad-web');
-        const vad = await MicVAD.new({
+        const vadInitialization = serializeOnnxSessionInitialization(() => MicVAD.new({
           model: 'v5',
           baseAssetPath: VAD_ASSET_BASE,
           onnxWASMBasePath: VAD_ASSET_BASE,
+          ortConfig: (ort) => {
+            ort.env.wasm.numThreads = 1;
+            ort.env.logLevel = 'error';
+          },
           // Explicit AEC/NS/AGC so the speaker→mic loop is dampened. Browsers
           // default these on for `{audio: true}`, but the lib's default
           // getStream doesn't pass them through, and without AEC the VAD
@@ -503,7 +512,12 @@ export function useVoiceCapture({
             segmentFrameCountRef.current += 1;
             segmentProbSumRef.current += probs.isSpeech;
           },
-        });
+        }));
+        const vad = await withTimeout(
+          vadInitialization,
+          VAD_INITIALIZATION_TIMEOUT_MS,
+          'VAD model initialization timed out',
+        );
         if (cancelled) {
           const stream = micStreamRef.current;
           micStreamRef.current = null;

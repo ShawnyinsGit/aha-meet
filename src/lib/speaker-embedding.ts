@@ -13,7 +13,8 @@
 // main bundle — the ~400 KB ORT JS bindings + fft.js only load when voice-lock
 // is actually used.
 
-import type { InferenceSession } from 'onnxruntime-web';
+import type { InferenceSession } from 'onnxruntime-web/wasm';
+import { serializeOnnxSessionInitialization } from './onnx-session-init';
 
 export const SPEAKER_MODEL_ID = '3dspeaker-campplus-v1';
 const MODEL_URL = new URL('voice-id/3dspeaker_campplus_sv_zh_en_16k.onnx', document.baseURI).href;
@@ -21,10 +22,10 @@ const WASM_BASE = new URL('vad/', document.baseURI).href;
 
 const MIN_FRAMES_FOR_EMBEDDING = 50; // 0.5s
 
-let ortModule: typeof import('onnxruntime-web') | null = null;
+let ortModule: typeof import('onnxruntime-web/wasm') | null = null;
 
-async function getOrt(): Promise<typeof import('onnxruntime-web')> {
-  if (!ortModule) ortModule = await import('onnxruntime-web');
+async function getOrt(): Promise<typeof import('onnxruntime-web/wasm')> {
+  if (!ortModule) ortModule = await import('onnxruntime-web/wasm');
   return ortModule;
 }
 
@@ -35,10 +36,12 @@ async function getSession(): Promise<InferenceSession> {
   const ort = await getOrt();
   ort.env.wasm.wasmPaths = WASM_BASE;
   ort.env.wasm.numThreads = 1;
-  sessionPromise = ort.InferenceSession.create(MODEL_URL, {
-    executionProviders: ['wasm'],
-    graphOptimizationLevel: 'all',
-  });
+  sessionPromise = serializeOnnxSessionInitialization(() =>
+    ort.InferenceSession.create(MODEL_URL, {
+      executionProviders: ['wasm'],
+      graphOptimizationLevel: 'all',
+    }),
+  );
   return sessionPromise;
 }
 

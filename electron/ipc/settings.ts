@@ -1,5 +1,18 @@
-import { ipcMain, shell } from 'electron';
+import { BrowserWindow, ipcMain, shell } from 'electron';
 import { getSettings, updateSettings, clearVoicePrint, type VoicePrint } from '../store.js';
+
+function broadcastVoiceConfig(): void {
+  const settings = getSettings();
+  const config = {
+    enabled: Boolean(settings.voiceLockEnabled),
+    voicePrint: settings.voicePrint ?? null,
+  };
+  for (const window of BrowserWindow.getAllWindows()) {
+    if (!window.isDestroyed()) {
+      window.webContents.send('settings:voice-config-changed', config);
+    }
+  }
+}
 
 export function registerSettingsIpc(): void {
   ipcMain.handle('settings:get-voice-config', async () => {
@@ -12,6 +25,7 @@ export function registerSettingsIpc(): void {
 
   ipcMain.handle('settings:set-voice-lock-enabled', async (_e, enabled: boolean) => {
     await updateSettings({ voiceLockEnabled: !!enabled });
+    broadcastVoiceConfig();
     return { ok: true };
   });
 
@@ -21,6 +35,7 @@ export function registerSettingsIpc(): void {
     } else {
       await updateSettings({ voicePrint: vp });
     }
+    broadcastVoiceConfig();
     return { ok: true };
   });
 

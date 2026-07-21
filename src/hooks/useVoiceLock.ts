@@ -4,7 +4,6 @@ import { cancelSpeech } from './useSpeech';
 import {
   averageEmbeddings,
   embedSpeaker,
-  prewarmSpeakerModel,
   SPEAKER_MODEL_ID,
 } from '../lib/speaker-embedding';
 import type { VoicePrint } from '../types';
@@ -39,22 +38,30 @@ export function useVoiceLock({ muted, setMuted, setAiSpeaking, speakingRef }: Us
 
   useEffect(() => {
     let cancelled = false;
-    window.vibeMeet.getVoiceConfig().then(({ enabled, voicePrint: vp }) => {
-      if (cancelled) return;
+    let updateVersion = 0;
+    const applyConfig = ({ enabled, voicePrint: vp }: Awaited<ReturnType<typeof window.vibeMeet.getVoiceConfig>>) => {
       setVoiceLockEnabled(enabled);
-      if (vp) {
-        setVoicePrint(vp);
-        if (vp.model === SPEAKER_MODEL_ID) {
-          setVoicePrintEmbedding(new Float32Array(vp.embedding));
-        }
-      }
-      if (enabled) void prewarmSpeakerModel().catch((err) => {
-        console.warn('[voiceLock] prewarmSpeakerModel failed:', err);
-      });
+      setVoicePrint(vp);
+      setVoicePrintEmbedding(
+        vp?.model === SPEAKER_MODEL_ID ? new Float32Array(vp.embedding) : null,
+      );
+    };
+    const unsubscribe = window.vibeMeet.onVoiceConfigChanged((config) => {
+      if (cancelled) return;
+      updateVersion += 1;
+      applyConfig(config);
+    });
+    const requestVersion = updateVersion;
+    window.vibeMeet.getVoiceConfig().then(({ enabled, voicePrint: vp }) => {
+      if (cancelled || updateVersion !== requestVersion) return;
+      applyConfig({ enabled, voicePrint: vp });
     }).catch((err) => {
       console.error('[voiceLock] getVoiceConfig failed:', err);
     });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
   }, []);
 
   useEffect(() => () => {

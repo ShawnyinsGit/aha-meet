@@ -45,6 +45,11 @@ const api = {
   getVoiceConfig: () => ipcRenderer.invoke('settings:get-voice-config'),
   setVoiceLockEnabled: (on) => ipcRenderer.invoke('settings:set-voice-lock-enabled', on),
   setVoicePrint: (vp) => ipcRenderer.invoke('settings:set-voice-print', vp),
+  onVoiceConfigChanged: (cb) => {
+    const listener = (_event, config) => cb(config);
+    ipcRenderer.on('settings:voice-config-changed', listener);
+    return () => ipcRenderer.removeListener('settings:voice-config-changed', listener);
+  },
   getVoicePref: () => ipcRenderer.invoke('settings:get-voice-pref'),
   setVoicePref: (patch) => ipcRenderer.invoke('settings:set-voice-pref', patch),
   openVoiceSettings: () => ipcRenderer.invoke('system:open-voice-settings'),
