@@ -282,6 +282,9 @@ export function App() {
     supported: micSupported,
     speechLevel,
     lastError: micError,
+    status: micStatus,
+    retryable: micRetryable,
+    retry: retryMic,
   } = useAsr({
     enabled: micEnabled,
     onTranscript: onVoiceFinal,
@@ -292,7 +295,6 @@ export function App() {
     voicePrintEmbedding: voiceLock.voicePrintEmbedding,
     onVoiceLockReject: voiceLock.handleVoiceLockReject,
     tapSegment: voiceLock.enrollmentActive ? voiceLock.handleEnrollmentSegment : undefined,
-    muted,
   });
 
   useEffect(() => {
@@ -560,6 +562,9 @@ ${trimmed}`
         listening={effectiveListening}
         speechLevel={speechLevel}
         asrMode={asrMode}
+        micStatus={micStatus}
+        micRetryable={micRetryable}
+        onRetryMic={retryMic}
         ttsOn={ttsOn}
         onToggleTts={() => setTtsOn((v) => !v)}
         sharing={share.active}
@@ -594,6 +599,15 @@ ${trimmed}`
               onClick={() => { void restartSession(); }}
             >
               Reconnect
+            </button>
+          )}
+          {!state.lastError && micError && micRetryable && (
+            <button
+              type="button"
+              className="error-banner__reconnect"
+              onClick={retryMic}
+            >
+              Retry microphone
             </button>
           )}
         </div>

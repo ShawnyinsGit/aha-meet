@@ -3,6 +3,7 @@ import {
   Mic,
   MicOff,
   AudioLines,
+  RefreshCw,
   Volume2,
   VolumeX,
   Monitor,
@@ -12,6 +13,7 @@ import {
   MessageSquare,
   X,
 } from 'lucide-react';
+import type { MicrophoneCaptureStatus } from '../lib/microphone-ui-state';
 
 interface BottomToolbarProps {
   muted: boolean;
@@ -20,6 +22,9 @@ interface BottomToolbarProps {
   listening: boolean;
   speechLevel?: number;
   asrMode?: 'whisper' | 'browser' | 'probing';
+  micStatus: MicrophoneCaptureStatus;
+  micRetryable: boolean;
+  onRetryMic: () => void;
   ttsOn: boolean;
   onToggleTts: () => void;
   sharing: boolean;
@@ -40,11 +45,12 @@ interface ToolbarButtonProps {
   danger?: boolean;
   disabled?: boolean;
   warning?: boolean;
+  title?: string;
 }
 
 const ICON_SIZE = 20;
 
-function ToolbarButton({ icon, label, onClick, active, danger, disabled, warning }: ToolbarButtonProps) {
+function ToolbarButton({ icon, label, onClick, active, danger, disabled, warning, title }: ToolbarButtonProps) {
   const cls = [
     'tb-btn',
     active && 'tb-btn-active',
@@ -53,7 +59,7 @@ function ToolbarButton({ icon, label, onClick, active, danger, disabled, warning
     disabled && 'tb-btn-disabled',
   ].filter(Boolean).join(' ');
   return (
-    <button className={cls} onClick={onClick} disabled={disabled}>
+    <button className={cls} onClick={onClick} disabled={disabled} title={title}>
       <span className="tb-btn-icon" aria-hidden="true">{icon}</span>
       <span className="tb-btn-label">{label}</span>
     </button>
@@ -67,6 +73,9 @@ export function BottomToolbar({
   listening,
   speechLevel = 0,
   asrMode = 'probing',
+  micStatus,
+  micRetryable,
+  onRetryMic,
   ttsOn,
   onToggleTts,
   sharing,
@@ -80,18 +89,35 @@ export function BottomToolbar({
 }: BottomToolbarProps) {
   const meterWidth = Math.max(0, Math.min(1, speechLevel)) * 100;
   const asrBadge = asrMode === 'whisper' ? 'Whisper' : asrMode === 'browser' ? 'Browser SR' : '…';
-  const micIcon = muted ? <MicOff size={ICON_SIZE} /> : listening ? <AudioLines size={ICON_SIZE} /> : <Mic size={ICON_SIZE} />;
+  const micBusy = micStatus === 'requesting-permission' || micStatus === 'initializing';
+  const micIcon = micRetryable
+    ? <RefreshCw size={ICON_SIZE} />
+    : muted
+      ? <MicOff size={ICON_SIZE} />
+      : listening
+        ? <AudioLines size={ICON_SIZE} />
+        : <Mic size={ICON_SIZE} />;
+  const micLabel = micRetryable
+    ? 'Retry mic'
+    : micBusy
+      ? 'Starting…'
+      : muted
+        ? 'Unmute'
+        : listening
+          ? 'Listening'
+          : 'Mic';
   return (
     <div className="toolbar">
       <div className="toolbar-group">
         <div className="tb-mic-cluster">
           <ToolbarButton
             icon={micIcon}
-            label={muted ? 'Unmute' : listening ? 'Listening' : 'Mic'}
-            onClick={onToggleMute}
+            label={micLabel}
+            onClick={micRetryable ? onRetryMic : onToggleMute}
             active={!muted && listening}
-            warning={muted}
+            warning={muted || micRetryable}
             disabled={!micSupported}
+            title={micRetryable ? 'Microphone failed to start. Click to retry.' : undefined}
           />
           <div className="tb-mic-meter" aria-hidden="true">
             <div

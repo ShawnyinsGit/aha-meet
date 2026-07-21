@@ -1,6 +1,11 @@
 import { useEffect, useState } from 'react';
 import { useVoiceCapture } from './useVoiceCapture';
 import { useContinuousSpeech } from './useSpeech';
+import {
+  deriveMicrophoneUiState,
+  type AsrMode,
+  type MicrophoneCaptureStatus,
+} from '../lib/microphone-ui-state';
 
 // Whisper is the primary ASR path; browser webkitSpeechRecognition is the
 // fallback when whisper-cli isn't bundled (dev tree without
@@ -9,8 +14,6 @@ import { useContinuousSpeech } from './useSpeech';
 // App doesn't have to manage two parallel ASR sources — and crucially keeps
 // `supported: true` while the probe is in flight, so the mic button doesn't
 // briefly render as disabled on startup.
-
-type AsrMode = 'whisper' | 'browser' | 'probing';
 
 interface UseAsrOptions {
   enabled: boolean;
@@ -25,10 +28,6 @@ interface UseAsrOptions {
   voicePrintEmbedding?: Float32Array | null;
   onVoiceLockReject?: () => void;
   tapSegment?: (samples: Float32Array) => void;
-  // When the underlying mic backend is muted by the user we still want the
-  // mic button to remain enabled (so they can toggle back). Whisper teardown
-  // sets active=false; surface this so `supported` doesn't go false-y.
-  muted?: boolean;
 }
 
 interface UseAsrResult {
@@ -37,6 +36,9 @@ interface UseAsrResult {
   supported: boolean;
   speechLevel: number;
   lastError: string | null;
+  status: MicrophoneCaptureStatus;
+  retryable: boolean;
+  retry: () => void;
 }
 
 export function useAsr({
@@ -50,7 +52,6 @@ export function useAsr({
   voicePrintEmbedding,
   onVoiceLockReject,
   tapSegment,
-  muted = false,
 }: UseAsrOptions): UseAsrResult {
   const [asrAvailable, setAsrAvailable] = useState<boolean | null>(null);
 
@@ -107,7 +108,7 @@ export function useAsr({
   });
 
   const browser = useContinuousSpeech({
-    enabled: enabled && mode === 'browser' && !enrollmentActive,
+    enabled: enabled && mode === 'browser' && !enrollmentActive && !paused,
     onFinal: onTranscript,
     onInterim: (t: string) => {
       if (t.length >= 2) onBargeIn?.();
@@ -119,19 +120,36 @@ export function useAsr({
   // back to whichever backend is mounted for that mode.
   const usingWhisperPath = mode === 'whisper' || (mode === 'browser' && enrollmentActive);
 
-  // Treat probing as supported so the mic button doesn't flicker disabled
-  // on startup. Once probed: whisper considers `active || muted` supported
-  // (teardown on mute is normal); browser uses its own `supported` flag.
-  const supported =
-    mode === 'probing'
-      ? true
-      : usingWhisperPath
-        ? whisper.active || muted
-        : browser.supported;
+  const uiMode: AsrMode = usingWhisperPath ? 'whisper' : mode;
+  const { supported, retryable } = deriveMicrophoneUiState({
+    mode: uiMode,
+    captureStatus: whisper.status,
+    browserSupported: browser.supported,
+    browserFailed: browser.error != null,
+  });
 
   const listening = usingWhisperPath ? whisper.listening : browser.listening;
-  const speechLevel = usingWhisperPath ? whisper.speechLevel : 0;
-  const lastError = usingWhisperPath ? whisper.lastError : null;
+  const speechLevel = usingWhisperPath ? whisper.speechLevel : browser.speechLevel;
+  const browserError = browser.error ?? (
+    browser.supported === false
+      ? 'Speech recognition is unavailable — Whisper is not bundled and Browser Speech Recognition is unsupported'
+      : null
+  );
+  const lastError = usingWhisperPath ? whisper.lastError : browserError;
+  const status: MicrophoneCaptureStatus =
+    mode === 'probing'
+      ? 'initializing'
+      : usingWhisperPath
+        ? whisper.status
+        : browser.supported === null
+          ? 'initializing'
+          : browser.supported === false
+            ? 'unavailable'
+            : browserError
+              ? 'failed'
+              : 'ready';
 
-  return { mode, listening, supported, speechLevel, lastError };
+  const retry = usingWhisperPath ? whisper.retry : browser.retry;
+
+  return { mode, listening, supported, speechLevel, lastError, status, retryable, retry };
 }

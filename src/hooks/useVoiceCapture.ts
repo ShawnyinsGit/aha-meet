@@ -1,6 +1,10 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { MicVAD } from '@ricky0123/vad-web';
 import { cosineSimilarity, embedSpeaker } from '../lib/speaker-embedding';
+import {
+  serializeMicrophoneOperation,
+  type MicrophoneCaptureStatus,
+} from '../lib/microphone-ui-state';
 
 // Below this many samples (~0.3s @ 16 kHz) we skip the voice-lock gate
 // entirely — embeddings on very short clips are unreliable and we'd rather
@@ -18,6 +22,20 @@ const MIN_SAMPLES_FOR_BARGE_IN = 3200;
 // 0.45 accepts real speech while still rejecting pure-echo blips (which sit
 // around 0.3-0.4 after AEC).
 const MIN_AVG_PROB_FOR_BARGE_IN = 0.45;
+
+async function releaseCapture(vad: MicVAD | null, stream: MediaStream | null): Promise<void> {
+  try {
+    await vad?.destroy();
+  } catch {
+    // Device release must continue even if the VAD graph is already torn down.
+  } finally {
+    if (stream) {
+      for (const track of stream.getTracks()) {
+        try { track.stop(); } catch { /* ignore */ }
+      }
+    }
+  }
+}
 
 interface UseVoiceCaptureOptions {
   enabled: boolean;
@@ -52,6 +70,8 @@ interface UseVoiceCaptureResult {
   permissionDenied: boolean;
   speechLevel: number;
   asrAvailable: boolean | null;
+  status: MicrophoneCaptureStatus;
+  retry: () => void;
 }
 
 // Use a document-relative path so it works under both the Vite dev server
@@ -76,6 +96,8 @@ export function useVoiceCapture({
   const [permissionDenied, setPermissionDenied] = useState(false);
   const [speechLevel, setSpeechLevel] = useState(0);
   const [asrAvailable, setAsrAvailable] = useState<boolean | null>(null);
+  const [status, setStatus] = useState<MicrophoneCaptureStatus>('idle');
+  const [retryVersion, setRetryVersion] = useState(0);
 
   const vadRef = useRef<MicVAD | null>(null);
   // Hold the MediaStream the VAD's getStream callback produced so we can
@@ -85,6 +107,8 @@ export function useVoiceCapture({
   // "device busy" state until the page is reloaded. Walking getTracks() and
   // calling stop() after destroy() resolves is what actually frees the device.
   const micStreamRef = useRef<MediaStream | null>(null);
+  const teardownRef = useRef<Promise<void>>(Promise.resolve());
+  const initializationRef = useRef<Promise<void>>(Promise.resolve());
   const onTranscriptRef = useRef(onTranscript);
   const onBargeInRef = useRef(onBargeIn);
   const onVoiceLockRejectRef = useRef(onVoiceLockReject);
@@ -109,6 +133,13 @@ export function useVoiceCapture({
   // gate barge-in by average confidence (a single high spike isn't enough).
   const segmentFrameCountRef = useRef(0);
   const segmentProbSumRef = useRef(0);
+
+  const queueRelease = useCallback((vad: MicVAD | null, stream: MediaStream | null) => {
+    const previous = teardownRef.current;
+    const release = serializeMicrophoneOperation(previous, () => releaseCapture(vad, stream));
+    teardownRef.current = release;
+    return release;
+  }, []);
 
   useEffect(() => {
     onTranscriptRef.current = onTranscript;
@@ -146,6 +177,12 @@ export function useVoiceCapture({
     langRef.current = lang;
   }, [lang]);
 
+  const retry = useCallback(() => {
+    setLastError(null);
+    setPermissionDenied(false);
+    setRetryVersion((version) => version + 1);
+  }, []);
+
   // Check whisper availability once on mount.
   useEffect(() => {
     let cancelled = false;
@@ -169,47 +206,42 @@ export function useVoiceCapture({
       const stream = micStreamRef.current;
       vadRef.current = null;
       micStreamRef.current = null;
-      if (v) {
-        v.destroy()
-          .catch(() => {})
-          .finally(() => {
-            // Explicitly stop every mic track AFTER destroy() resolves so the
-            // OS mic indicator turns off and the device is freed for the next
-            // getUserMedia call. See micStreamRef comment for rationale.
-            if (stream) {
-              for (const t of stream.getTracks()) {
-                try { t.stop(); } catch { /* ignore */ }
-              }
-            }
-          });
-      } else if (stream) {
-        for (const t of stream.getTracks()) {
-          try { t.stop(); } catch { /* ignore */ }
-        }
-      }
+      void queueRelease(v, stream);
       setActive(false);
       setListening(false);
+      setSpeechLevel(0);
+      setStatus('idle');
       return;
     }
 
     let cancelled = false;
     let createdVad: MicVAD | null = null;
 
-    (async () => {
+    const previousInitialization = initializationRef.current;
+    const initialization = (async () => {
+      await previousInitialization.catch(() => {});
+      await teardownRef.current.catch(() => {});
+      if (cancelled) return;
       try {
+        setStatus('requesting-permission');
+        setLastError(null);
         // Ask the OS for microphone access via the native system dialog before
         // attempting getUserMedia. On macOS this shows the native permission
         // popup when status is 'not-determined'; returns false immediately if
         // the user previously denied (they must re-enable in System Settings).
         // On non-macOS the IPC handler returns true unconditionally.
         const granted = await window.vibeMeet.requestMicPermission();
+        if (cancelled) return;
         if (!granted) {
           setPermissionDenied(true);
           setLastError('Microphone permission denied — please enable in System Settings');
           setActive(false);
+          setStatus('permission-denied');
           return;
         }
 
+        setPermissionDenied(false);
+        setStatus('initializing');
         const { MicVAD } = await import('@ricky0123/vad-web');
         const vad = await MicVAD.new({
           model: 'v5',
@@ -475,22 +507,16 @@ export function useVoiceCapture({
         if (cancelled) {
           const stream = micStreamRef.current;
           micStreamRef.current = null;
-          vad.destroy()
-            .catch(() => {})
-            .finally(() => {
-              if (stream) {
-                for (const t of stream.getTracks()) {
-                  try { t.stop(); } catch { /* ignore */ }
-                }
-              }
-            });
+          await queueRelease(vad, stream);
           return;
         }
         createdVad = vad;
         vadRef.current = vad;
         await vad.start();
+        if (cancelled) return;
         setActive(true);
         setLastError(null);
+        setStatus('ready');
       } catch (e) {
         // Init failed after getStream may have already resolved (e.g. MicVAD
         // worklet load threw). Release the mic track we grabbed so the OS
@@ -498,49 +524,32 @@ export function useVoiceCapture({
         // session.
         const stream = micStreamRef.current;
         micStreamRef.current = null;
-        if (stream) {
-          for (const t of stream.getTracks()) {
-            try { t.stop(); } catch { /* ignore */ }
-          }
-        }
+        await queueRelease(createdVad, stream);
         const msg = String((e as Error)?.message ?? e);
         // B18: detect permission denial so the UI can show a targeted guide
         // instead of a generic error string.
         const isPerm = e instanceof DOMException && (
           e.name === 'NotAllowedError' || e.name === 'PermissionDeniedError'
         );
+        if (cancelled) return;
         setPermissionDenied(isPerm);
         setLastError(isPerm ? 'Microphone permission denied — please enable in System Settings' : `Mic init failed: ${msg}`);
         setActive(false);
+        setStatus(isPerm ? 'permission-denied' : 'failed');
       }
     })();
+    initializationRef.current = initialization;
 
     return () => {
       cancelled = true;
       const stream = micStreamRef.current;
       micStreamRef.current = null;
-      if (createdVad) {
-        createdVad.destroy()
-          .catch(() => {})
-          .finally(() => {
-            // Free the mic device after the VAD's audio graph is torn down.
-            // See micStreamRef comment for rationale.
-            if (stream) {
-              for (const t of stream.getTracks()) {
-                try { t.stop(); } catch { /* ignore */ }
-              }
-            }
-          });
-      } else if (stream) {
-        for (const t of stream.getTracks()) {
-          try { t.stop(); } catch { /* ignore */ }
-        }
-      }
+      void queueRelease(createdVad, stream);
       if (vadRef.current === createdVad) vadRef.current = null;
       setActive(false);
       setListening(false);
     };
-  }, [enabled]);
+  }, [enabled, retryVersion, queueRelease]);
 
-  return { active, listening, lastError, permissionDenied, speechLevel, asrAvailable };
+  return { active, listening, lastError, permissionDenied, speechLevel, asrAvailable, status, retry };
 }

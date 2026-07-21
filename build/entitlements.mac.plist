@@ -9,7 +9,7 @@
   <key>com.apple.security.cs.disable-library-validation</key>
   <true/>
   <!-- Microphone access for Whisper audio transcription -->
-  <key>com.apple.security.device.microphone</key>
+  <key>com.apple.security.device.audio-input</key>
   <true/>
   <!-- Outbound network for Claude API -->
   <key>com.apple.security.network.client</key>

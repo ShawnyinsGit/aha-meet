@@ -24,8 +24,8 @@
     "prebuild:whisper": "node scripts/fetch-whisper.mjs",
     "prebuild:claude-defaults": "node scripts/bundle-claude-defaults.mjs",
     "prebuild:speaker": "node scripts/fetch-speaker-model.mjs",
-    "dist": "npm run prebuild:whisper && npm run prebuild:speaker && npm run prebuild:claude-defaults && npm run build && electron-builder --mac --arm64",
-    "dist:dmg": "npm run prebuild:whisper && npm run prebuild:speaker && npm run prebuild:claude-defaults && npm run build && electron-builder --mac --arm64 --publish never",
+    "dist": "npm run prebuild:whisper && npm run prebuild:speaker && npm run prebuild:claude-defaults && npm run build && electron-builder --mac --arm64 && node scripts/verify-macos-signing.mjs",
+    "dist:dmg": "npm run prebuild:whisper && npm run prebuild:speaker && npm run prebuild:claude-defaults && npm run build && electron-builder --mac --arm64 --publish never && node scripts/verify-macos-signing.mjs",
     "dist:win": "npm run prebuild:whisper && npm run prebuild:speaker && npm run prebuild:claude-defaults && npm run build && electron-builder --win --publish never",
     "dist:linux": "npm run prebuild:whisper && npm run prebuild:speaker && npm run prebuild:claude-defaults && npm run build && electron-builder --linux --publish never",
     "dist:all": "npm run dist:dmg && npm run dist:win && npm run dist:linux"

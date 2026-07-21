@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { loadVoices } from '../lib/voice-registry';
+import { computeAudioLevel } from '../lib/microphone-ui-state';
 
 export { setSelectedVoiceName } from '../lib/voice-registry';
 export {
@@ -33,8 +34,10 @@ interface ContinuousOptions {
 // voice flow uses useVoiceCapture instead; this hook is only the safety net.
 export function useContinuousSpeech({ onFinal, onInterim, enabled }: ContinuousOptions) {
   const [listening, setListening] = useState(false);
-  const [supported, setSupported] = useState(false);
+  const [supported, setSupported] = useState<boolean | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [speechLevel, setSpeechLevel] = useState(0);
+  const [restartVersion, setRestartVersion] = useState(0);
   const recRef = useRef<SR | null>(null);
   const enabledRef = useRef(enabled);
   const finalRef = useRef(onFinal);
@@ -97,33 +100,40 @@ export function useContinuousSpeech({ onFinal, onInterim, enabled }: ContinuousO
     rec.interimResults = true;
 
     rec.onresult = (ev: any) => {
+      if (recRef.current !== rec) return;
       for (let i = ev.resultIndex; i < ev.results.length; i++) {
         const r = ev.results[i];
         const text = (r[0]?.transcript ?? '').trim();
         if (!text) continue;
+        consecutiveErrorsRef.current = 0;
         if (r.isFinal) finalRef.current(text);
         else interimRef.current?.(text);
       }
     };
     rec.onstart = () => {
+      if (recRef.current !== rec) return;
       stopAfterCycleRef.current = false;
-      consecutiveErrorsRef.current = 0; // B14: reset on success
       setError(null);
       markListening(true);
     };
     rec.onend = () => {
+      if (recRef.current !== rec) return;
       recRef.current = null;
       if (enabledRef.current && !stopAfterCycleRef.current) {
-        restartTimer.current = window.setTimeout(() => startRec(), 250);
+        restartTimer.current = window.setTimeout(() => {
+          if (enabledRef.current && !stopAfterCycleRef.current) startRec();
+        }, 250);
       } else {
         markListening(false);
       }
     };
     rec.onerror = (ev: any) => {
+      if (recRef.current !== rec) return;
       const err = String(ev?.error ?? '');
       recRef.current = null;
       if (err === 'not-allowed' || err === 'service-not-allowed') {
         // B14/B18: surface permission denial to the user.
+        stopAfterCycleRef.current = true;
         setError('Microphone permission denied');
         markListening(false);
         return;
@@ -131,13 +141,16 @@ export function useContinuousSpeech({ onFinal, onInterim, enabled }: ContinuousO
       // B14: exponential backoff + maxRetries to prevent retry storms.
       consecutiveErrorsRef.current += 1;
       if (consecutiveErrorsRef.current > MAX_RETRIES) {
+        stopAfterCycleRef.current = true;
         setError(`Speech recognition failed after ${MAX_RETRIES} retries: ${err}`);
         markListening(false);
         return;
       }
       if (enabledRef.current) {
         const delay = Math.min(700 * Math.pow(2, consecutiveErrorsRef.current - 1), 10000);
-        restartTimer.current = window.setTimeout(() => startRec(), delay);
+        restartTimer.current = window.setTimeout(() => {
+          if (enabledRef.current && !stopAfterCycleRef.current) startRec();
+        }, delay);
       } else {
         markListening(false);
       }
@@ -151,13 +164,68 @@ export function useContinuousSpeech({ onFinal, onInterim, enabled }: ContinuousO
     }
   }, [markListening]);
 
+  const retry = useCallback(() => {
+    consecutiveErrorsRef.current = 0;
+    setError(null);
+    stopRec();
+    setRestartVersion((version) => version + 1);
+  }, [stopRec]);
+
   useEffect(() => {
     if (enabled) startRec();
     else stopRec();
     return () => stopRec();
-  }, [enabled, startRec, stopRec]);
+  }, [enabled, restartVersion, startRec, stopRec]);
 
-  return { listening, supported, error };
+  useEffect(() => {
+    const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!enabled || !Recognition || !navigator.mediaDevices?.getUserMedia) {
+      setSpeechLevel(0);
+      return;
+    }
+
+    let cancelled = false;
+    let frame = 0;
+    let stream: MediaStream | null = null;
+    let context: AudioContext | null = null;
+
+    void navigator.mediaDevices.getUserMedia({ audio: true }).then((nextStream) => {
+      if (cancelled) {
+        for (const track of nextStream.getTracks()) track.stop();
+        return;
+      }
+      stream = nextStream;
+      context = new AudioContext();
+      const analyser = context.createAnalyser();
+      analyser.fftSize = 256;
+      context.createMediaStreamSource(nextStream).connect(analyser);
+      const samples = new Uint8Array(analyser.frequencyBinCount);
+      const updateLevel = () => {
+        analyser.getByteTimeDomainData(samples);
+        const nextLevel = computeAudioLevel(samples);
+        setSpeechLevel((previous) => previous * 0.6 + nextLevel * 0.4);
+        frame = window.requestAnimationFrame(updateLevel);
+      };
+      updateLevel();
+    }).catch((reason: unknown) => {
+      if (cancelled) return;
+      const name = reason instanceof DOMException ? reason.name : '';
+      if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
+        setError('Microphone permission denied');
+      }
+      setSpeechLevel(0);
+    });
+
+    return () => {
+      cancelled = true;
+      if (frame) window.cancelAnimationFrame(frame);
+      for (const track of stream?.getTracks() ?? []) track.stop();
+      if (context) void context.close().catch(() => {});
+      setSpeechLevel(0);
+    };
+  }, [enabled, restartVersion]);
+
+  return { listening, supported, error, speechLevel, retry };
 }
 
 // ---------------------------------------------------------------------------
