@@ -18,6 +18,8 @@ interface ParticipantPanelProps {
   onToggleMuteHost?: (hostId: string) => void;
   onRemoveHost?: (hostId: string) => void;
   coordinatorHostId?: string;
+  /** Backend ids whose capabilities allow the coordinator role. */
+  coordinatorCapableBackends?: Set<string>;
   onSetCoordinator?: (hostId: string) => void;
   onRestartHost?: (hostId: string) => void;
   /** Called when a gallery tile is clicked. 'user' for self tile, hostId for host tiles. */
@@ -38,6 +40,7 @@ export const ParticipantPanel = memo(function ParticipantPanel({
   onToggleMuteHost,
   onRemoveHost,
   coordinatorHostId = 'default',
+  coordinatorCapableBackends,
   onSetCoordinator,
   onRestartHost,
   onSelectParticipant,
@@ -121,7 +124,9 @@ export const ParticipantPanel = memo(function ParticipantPanel({
                   <Crown size={12} />
                 </span>
               )}
-              {!isCoordinator && onSetCoordinator && (hg.backendId === 'claude-code' || hg.backendId === 'codex') && (
+              {!isCoordinator && onSetCoordinator && (coordinatorCapableBackends
+                ? coordinatorCapableBackends.has(hg.backendId)
+                : hg.backendId === 'claude-code' || hg.backendId === 'codex') && (
                 <button
                   type="button"
                   className="tiles-gallery-action-btn"

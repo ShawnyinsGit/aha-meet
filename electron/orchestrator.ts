@@ -1,12 +1,12 @@
 // orchestrator.ts — coordinates M HostGroups (each: 1 Host + N Workers).
 //
-//   HostGroup "default" (Claude Code, always present)
-//     ├── Host (Talker — Haiku-class, meeting-MCP tools, faces the user)
-//     └── Workers (0..4, Sonnet-class, full Claude Code preset)
+//   HostGroup "default" (coordinator; backend selected at session start)
+//     ├── Host (Talker — meeting-MCP tools or fenced command blocks, faces the user)
+//     └── Workers (0..4, task-executor backend sessions)
 //
-//   HostGroup "codex-host" (added via addHost)
-//     ├── Host (Codex agent)
-//     └── Workers (0..4, Codex sessions)
+//   HostGroup "kimi-host-1" (added via addHost)
+//     ├── Host (Kimi/Qoder/Codex agent — Expert unless promoted to coordinator)
+//     └── Workers (0..4, task-executor backend sessions)
 //
 // When only the default HostGroup exists, behavior is identical to the
 // pre-multi-host architecture. The public API is unchanged.
@@ -82,6 +82,12 @@ export type {
 /** Default host group id. Always present in every meeting. */
 const DEFAULT_HOST_ID = 'default';
 const DEFAULT_BACKEND_ID = 'claude-code';
+// Backends without in-process meeting-MCP support coordinate by emitting
+// fenced ```meeting-command blocks that their adapter parses and dispatches.
+const COMMAND_BLOCK_BACKENDS = new Set(['codex', 'kimi', 'qoder']);
+// Each host group spawns a CLI subprocess; bound the blast radius of a
+// compromised renderer looping sessions:add-host.
+const MAX_HOST_GROUPS = 8;
 
 interface OrchestratorOpts {
   emit: (e: OrchestratorEvent) => void;
@@ -242,10 +248,16 @@ export class Orchestrator implements OrchestratorBridge {
       } else if (so.systemPrompt && typeof so.systemPrompt === 'object' && 'append' in so.systemPrompt) {
         systemPrompt = (so.systemPrompt as { append?: string }).append;
       }
-      if (backendId === 'codex') {
+      // Backends that cannot mount the in-process meeting MCP server
+      // coordinate through fenced command blocks parsed by their adapter.
+      if (COMMAND_BLOCK_BACKENDS.has(backendId)) {
         systemPrompt = `${systemPrompt ?? ''}\n\n## AhaMeet command protocol\n`
-          + 'When you need to coordinate, emit exactly one fenced JSON block using ```meeting-command. '
-          + 'Supported kinds are propose-plan, ask-host, broadcast-hosts, steer-worker, and speak. '
+          + 'You have NO meeting MCP tools: the tool names mentioned elsewhere in these instructions '
+          + '(plan_meeting, delegate_task, delegate_to, update_task, ask_worker_status) are unavailable to you. '
+          + 'When you need to coordinate, emit exactly one fenced JSON block using ```meeting-command instead. '
+          + 'Supported kinds are propose-plan (creates the task DAG), steer-worker, speak, ask-host, '
+          + 'and broadcast-hosts. If you are an Expert rather than the Coordinator, only ask-host and '
+          + 'broadcast-hosts are allowed. '
           + 'Do not claim a command succeeded until the application returns its result.';
       }
       const authEntry = getBackendAuth(backendId);
@@ -317,7 +329,7 @@ export class Orchestrator implements OrchestratorBridge {
       confirmDestructive: this.confirmDestructive,
       sessionFactory: factory,
       resolveWorkerSessionFactory: (backendId) => this.buildSessionFactory(
-        backendId ?? this.defaultHost().backendId,
+        backendId ?? this.defaultExecutorBackendId(),
         id,
         'worker',
       ),
@@ -352,6 +364,9 @@ export class Orchestrator implements OrchestratorBridge {
    *  a "Connecting…" placeholder until the session-ready event arrives. */
   addHost(backendId: string, hostId?: string): { ok: true; hostId: string } | { ok: false; error: string } {
     if (this.closed) return { ok: false, error: 'orchestrator is closed' };
+    if (this.hostGroups.size >= MAX_HOST_GROUPS) {
+      return { ok: false, error: `host group limit reached (${MAX_HOST_GROUPS})` };
+    }
     if (hostId && !/^[a-zA-Z0-9._-]{1,64}$/.test(hostId)) {
       return { ok: false, error: 'hostId must be alphanumeric with dots/hyphens/underscores, max 64 chars' };
     }
@@ -511,7 +526,7 @@ export class Orchestrator implements OrchestratorBridge {
           return result.ok ? { ok: true, value: result } : { ok: false, code: 'execution-failed', error: result.reason };
         }
         case 'speak':
-          this.narrateAssistantLine(command.text);
+          this.narrateAssistantLine(command.text, hostId);
           return { ok: true };
       }
       return { ok: false, code: 'invalid-command', error: 'unsupported command' };
@@ -868,8 +883,20 @@ export class Orchestrator implements OrchestratorBridge {
     return this.meetingScheduler.installPlan(tasks);
   }
 
+  /** Backend that runs delivery tasks when a plan or delegation does not name
+   *  one. The coordinator's own backend may be talk-only (codex/kimi/qoder),
+   *  so fall back to the first registered backend that can execute and has an
+   *  installed runtime — claude-code in every default install. */
+  private defaultExecutorBackendId(): string {
+    const registry = getBackendRegistry();
+    const capable = registry.list().find(
+      (b) => b.capabilities.executeTasks && b.resolveBinary() !== null,
+    );
+    return (capable ?? registry.get(DEFAULT_BACKEND_ID) ?? registry.list()[0]).id;
+  }
+
   private validateExecutionBackends(tasks: PlanMeetingTask[]): string | null {
-    const defaultBackendId = this.defaultHost().backendId;
+    const defaultBackendId = this.defaultExecutorBackendId();
     for (const task of tasks) {
       const backendId = task.executorBackendId ?? defaultBackendId;
       const backend = getBackendRegistry().get(backendId);
@@ -888,7 +915,7 @@ export class Orchestrator implements OrchestratorBridge {
   // host handles all MCP tool callbacks.
 
   delegateSingleTask(description: string): { workerId: string; specialty: WorkerSpecialtyKind; reused: boolean } {
-    const backendId = this.defaultHost().backendId;
+    const backendId = this.defaultExecutorBackendId();
     const backend = getBackendRegistry().get(backendId);
     if (!backend) throw new Error(`backend '${backendId}' is not registered`);
     if (!backend.capabilities.executeTasks) {
@@ -914,9 +941,10 @@ export class Orchestrator implements OrchestratorBridge {
     return this.meetingScheduler.describeWorkers(workerId);
   }
 
-  narrateAssistantLine(text: string): void {
+  narrateAssistantLine(text: string, hostId?: string): void {
     this.safeEmit({
       source: 'talker',
+      hostId,
       event: {
         kind: 'message',
         message: {

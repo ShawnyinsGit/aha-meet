@@ -15,9 +15,15 @@ import type {
   BackendCapabilities, NormalizedMessage, UserContentBlock, InputPriority,
 } from './cli-backend.js';
 import { KimiAcpTransport, type KimiAcpNotification, type KimiAcpRequest } from './kimi-acp-transport.js';
+import {
+  COMMAND_ONLY_ACK,
+  dispatchMeetingCommandBlocks,
+  meetingCommandHandlerFrom,
+  type MeetingCommandHandler,
+} from './meeting-command-blocks.js';
 
 const KIMI_CAPABILITIES: BackendCapabilities = {
-  coordinate: false, executeTasks: false,
+  coordinate: true, executeTasks: false,
   displayName: 'Kimi', iconId: 'kimi', mcp: false, permissions: false,
   systemPrompt: true, skills: false, interrupt: true,
   defaultModel: 'kimi-latest',
@@ -26,6 +32,20 @@ const KIMI_CAPABILITIES: BackendCapabilities = {
     : 'curl -LsSf https://code.kimi.com/install.sh | bash',
 };
 const SUPPORTED_KIMI_ACP_VERSION = '0.24.1';
+
+/** The ACP handshake already negotiates protocolVersion; pinning one exact
+ *  CLI release would break every routine `kimi` upgrade. Accept any runtime
+ *  at or above the verified floor instead. */
+export function isSupportedKimiVersion(version: string | undefined): boolean {
+  if (!version) return false;
+  const parse = (v: string): number[] => v.split('.').map((part) => Number.parseInt(part, 10));
+  const [major, minor, patch] = parse(version);
+  const [minMajor, minMinor, minPatch] = parse(SUPPORTED_KIMI_ACP_VERSION);
+  if ([major, minor, patch].some((n) => Number.isNaN(n))) return false;
+  if (major !== minMajor) return major > minMajor;
+  if (minor !== minMinor) return minor > minMinor;
+  return patch >= minPatch;
+}
 
 interface KimiStreamEvent {
   role?: string;
@@ -100,6 +120,7 @@ class KimiAcpSession implements BackendSession {
   private currentText = '';
   private authRequiredEmitted = false;
   private backendVersion: string | undefined;
+  private readonly meetingCommandHandler: MeetingCommandHandler | undefined;
   private permissionResolvers = new Map<string, {
     options: Array<Record<string, unknown>>;
     resolve: (result: unknown) => void;
@@ -109,7 +130,9 @@ class KimiAcpSession implements BackendSession {
     private readonly binary: string,
     private readonly config: BackendSessionConfig,
     private emit: (event: BackendSessionEvent) => void,
-  ) {}
+  ) {
+    this.meetingCommandHandler = meetingCommandHandlerFrom(config.extra);
+  }
 
   async start(): Promise<void> {
     this.transport = new KimiAcpTransport({
@@ -128,18 +151,19 @@ class KimiAcpSession implements BackendSession {
       if (protocolVersion !== 1) throw new Error(`Unsupported Kimi ACP protocol: ${String(protocolVersion)}`);
       const agentInfo = isRecord(initialized.agentInfo) ? initialized.agentInfo : {};
       this.backendVersion = typeof agentInfo.version === 'string' ? agentInfo.version : undefined;
-      if (this.backendVersion !== SUPPORTED_KIMI_ACP_VERSION) {
+      if (!isSupportedKimiVersion(this.backendVersion)) {
         throw new Error(
           `Unsupported Kimi Code runtime ${this.backendVersion ?? 'unknown'}; `
-          + `AhaMeet requires ${SUPPORTED_KIMI_ACP_VERSION}`,
+          + `AhaMeet requires >= ${SUPPORTED_KIMI_ACP_VERSION}`,
         );
       }
       await this.transport.authenticate();
       this.sessionId = this.config.resumeSessionId
         ? await this.transport.resumeSession(this.config.resumeSessionId, this.config.cwd)
         : await this.transport.newSession(this.config.cwd);
-      // Kimi remains Expert-only in phase one. Enforce its native read-only
-      // plan mode in addition to the scheduler capability gate.
+      // Meeting talkers never edit files themselves — they speak and delegate
+      // through fenced meeting-command blocks — so Kimi stays in its native
+      // read-only plan mode for both Host and Expert roles.
       await this.transport.setMode(this.sessionId, 'plan');
     } catch (error) {
       if (isKimiAuthError(String(error))) this.emitAuthRequired();
@@ -177,10 +201,19 @@ class KimiAcpSession implements BackendSession {
       try {
         await this.transport.prompt(this.sessionId, prompt);
         const text = this.currentText.trim();
-        if (text && !this.closed) {
+        if (!text || this.closed) return;
+        // Host turns may carry fenced meeting-command blocks. Dispatch them to
+        // the orchestrator and only surface the remaining visible text; speak
+        // commands are narrated via TTS, so their carrier message is dropped.
+        const { visibleText, hasSpeakCommand, hasNonSpeakCommand } = dispatchMeetingCommandBlocks(
+          text, this.meetingCommandHandler, (event) => this.emit(event),
+        );
+        if (hasSpeakCommand) return;
+        const chatText = visibleText || (hasNonSpeakCommand ? COMMAND_ONLY_ACK : '');
+        if (chatText) {
           this.emit({ kind: 'message', message: {
             type: 'assistant',
-            message: { role: 'assistant', content: [{ type: 'text', text }] },
+            message: { role: 'assistant', content: [{ type: 'text', text: chatText }] },
           } });
         }
       } catch (error) {
@@ -209,7 +242,7 @@ class KimiAcpSession implements BackendSession {
       if (content.length > 2_000_000) throw new Error('File exceeds the 2 MB ACP read limit');
       return { content };
     }
-    if (request.method === 'fs/write_text_file') throw new Error('Kimi Expert sessions are read-only');
+    if (request.method === 'fs/write_text_file') throw new Error('Kimi meeting sessions are read-only');
     if (request.method === 'session/request_permission' && isRecord(request.params)) {
       const params = request.params;
       const id = String(request.id);
@@ -235,8 +268,11 @@ class KimiAcpSession implements BackendSession {
     if (!pending) return;
     this.permissionResolvers.delete(id);
     const desired = decision === 'allow' ? /^allow/ : /^(reject|deny)/;
+    // Fail closed on deny: when the agent offers no reject option, cancel the
+    // request instead of falling back to options[0] (usually an allow kind),
+    // which would invert the user's explicit refusal into an approval.
     const option = pending.options.find((item) => desired.test(String(item.kind ?? '')))
-      ?? pending.options[0];
+      ?? (decision === 'allow' ? pending.options[0] : undefined);
     pending.resolve(option
       ? { outcome: { outcome: 'selected', optionId: option.optionId } }
       : { outcome: { outcome: 'cancelled' } });
@@ -453,7 +489,9 @@ export class KimiBackend extends SubprocessBackend {
     try {
       const initialized = await transport.start();
       const agentInfo = isRecord(initialized.agentInfo) ? initialized.agentInfo : {};
-      if (initialized.protocolVersion !== 1 || agentInfo.version !== SUPPORTED_KIMI_ACP_VERSION) {
+      if (initialized.protocolVersion !== 1 || !isSupportedKimiVersion(
+        typeof agentInfo.version === 'string' ? agentInfo.version : undefined,
+      )) {
         return { loggedIn: false };
       }
       await transport.authenticate();

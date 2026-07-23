@@ -5,7 +5,7 @@
 // fail during the readiness handshake instead of corrupting a live meeting.
 
 import type { BackendSession, BackendSessionConfig, BackendSessionEvent,
-  BackendAuthConfig, BackendCapabilities, InputPriority, NormalizedMessage,
+  BackendAuthConfig, BackendCapabilities, ContentBlock, InputPriority, NormalizedMessage,
   UserContentBlock } from './cli-backend.js';
 import type { AutoApproveScope } from '../auto-approve-policy.js';
 import { accessSync, constants as fsConstants, existsSync, realpathSync } from 'node:fs';
@@ -13,14 +13,22 @@ import { join } from 'node:path';
 import { resolveBinaryFromPath } from './subprocess-backend.js';
 import { runTerminalLogin } from './terminal-login.js';
 import { isolatedSubprocessEnv } from './backend-environment.js';
+import {
+  COMMAND_ONLY_ACK,
+  dispatchMeetingCommandBlocks,
+  meetingCommandHandlerFrom,
+  type MeetingCommandHandler,
+} from './meeting-command-blocks.js';
 
 const QODER_CAPABILITIES: BackendCapabilities = {
-  coordinate: false,
+  coordinate: true,
   // WorkReport/meeting-worker completion is not bridged through this SDK path yet.
   executeTasks: false,
   displayName: 'Qoder',
   iconId: 'qoder',
-  mcp: true,
+  // The adapter does not wire config.mcpServers into the SDK session, so the
+  // in-process meeting MCP is not mountable; coordination uses command blocks.
+  mcp: false,
   permissions: true,
   systemPrompt: true,
   skills: true,
@@ -101,6 +109,7 @@ class QoderSdkSession implements BackendSession {
   private ended = false;
   private authRequiredEmitted = false;
   private autoApproveScope: AutoApproveScope;
+  private readonly meetingCommandHandler: MeetingCommandHandler | undefined;
 
   constructor(
     private readonly binary: string,
@@ -109,6 +118,7 @@ class QoderSdkSession implements BackendSession {
     private emit: (event: BackendSessionEvent) => void,
   ) {
     this.autoApproveScope = config.autoApproveScope ?? 'off';
+    this.meetingCommandHandler = meetingCommandHandlerFrom(config.extra);
   }
 
   async start(): Promise<void> {
@@ -157,7 +167,7 @@ class QoderSdkSession implements BackendSession {
         if (this.closed) break;
         const event = raw as Record<string, unknown>;
         if (event.type === 'assistant') {
-          const message = normalizeQoderMessage(event);
+          const message = this.normalizeAssistantMessage(event);
           if (message) this.emit({ kind: 'message', message });
         } else if (event.type === 'result' && event.subtype !== 'success') {
           const detail = resultError(event);
@@ -174,6 +184,57 @@ class QoderSdkSession implements BackendSession {
         this.emitEnded();
       }
     }
+  }
+
+  /** Strip fenced meeting-command blocks from assistant text and dispatch them
+   *  to the orchestrator. All text blocks are scanned as one joined string —
+   *  a command block may span multiple text blocks when the model interleaves
+   *  tool calls. Speak commands are narrated via TTS, so their text is dropped
+   *  while non-text (tool activity) blocks stay visible; a turn with only
+   *  non-speak commands surfaces an ack line instead of silence. */
+  private normalizeAssistantMessage(event: Record<string, unknown>): NormalizedMessage | null {
+    const message = normalizeQoderMessage(event);
+    if (!message) return null;
+    const content = message.message?.content;
+    if (typeof content === 'string') {
+      const dispatch = dispatchMeetingCommandBlocks(
+        content, this.meetingCommandHandler, (e) => this.emit(e),
+      );
+      if (dispatch.hasSpeakCommand) return null;
+      const chatText = dispatch.visibleText || (dispatch.hasNonSpeakCommand ? COMMAND_ONLY_ACK : '');
+      return chatText
+        ? { ...message, message: { ...message.message, content: [{ type: 'text', text: chatText }] } }
+        : null;
+    }
+    if (!Array.isArray(content)) return message;
+    const nonTextBlocks: ContentBlock[] = [];
+    const textParts: string[] = [];
+    // Index in the merged block array where the scanned text block belongs:
+    // just before the first non-text block that followed the first text block.
+    let firstTextIndex = -1;
+    for (const block of content) {
+      if (block.type === 'text' && typeof block.text === 'string') {
+        if (firstTextIndex === -1) firstTextIndex = nonTextBlocks.length;
+        textParts.push(block.text);
+      } else {
+        nonTextBlocks.push(block);
+      }
+    }
+    if (firstTextIndex === -1) return message; // tool-only message, nothing to scan
+    const dispatch = dispatchMeetingCommandBlocks(
+      textParts.join('\n'), this.meetingCommandHandler, (e) => this.emit(e),
+    );
+    if (dispatch.hasSpeakCommand) {
+      return nonTextBlocks.length > 0
+        ? { ...message, message: { ...message.message, content: nonTextBlocks } }
+        : null;
+    }
+    const blocks = [...nonTextBlocks];
+    const chatText = dispatch.visibleText || (dispatch.hasNonSpeakCommand ? COMMAND_ONLY_ACK : '');
+    if (chatText) blocks.splice(firstTextIndex, 0, { type: 'text', text: chatText });
+    return blocks.length > 0
+      ? { ...message, message: { ...message.message, content: blocks } }
+      : null;
   }
 
   private requestPermission(

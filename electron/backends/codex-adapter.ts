@@ -46,6 +46,11 @@ import {
   type CodexAppServerTransportOptions,
 } from './codex-app-server-transport.js';
 import type { Input as CodexInput, Thread as CodexThread, ThreadEvent, ThreadItem } from '@openai/codex-sdk';
+import {
+  COMMAND_ONLY_ACK,
+  dispatchMeetingCommandBlocks,
+  meetingCommandHandlerFrom,
+} from './meeting-command-blocks.js';
 
 const CODEX_CAPABILITIES: BackendCapabilities = {
   coordinate: true,
@@ -112,10 +117,7 @@ class CodexAppServerSession implements BackendSession {
     private readonly createTransport: (options: CodexAppServerTransportOptions) => CodexAppServerTransport =
       (options) => new CodexAppServerTransport(options),
   ) {
-    const handler = config.extra?.meetingCommandHandler;
-    if (typeof handler === 'function') {
-      this.meetingCommandHandler = handler as (command: unknown) => Promise<unknown> | unknown;
-    }
+    this.meetingCommandHandler = meetingCommandHandlerFrom(config.extra);
   }
 
   async start(): Promise<void> {
@@ -239,7 +241,7 @@ class CodexAppServerSession implements BackendSession {
     switch (item.type) {
       case 'agentMessage': {
         const text = typeof item.text === 'string' ? item.text : '';
-        const { visibleText, hasSpeakCommand, hasNonSpeakCommand } = dispatchAppServerCommands(
+        const { visibleText, hasSpeakCommand, hasNonSpeakCommand } = dispatchMeetingCommandBlocks(
           text, this.meetingCommandHandler, this.emit,
         );
         if (hasSpeakCommand) return null;
@@ -362,10 +364,7 @@ class CodexSession implements BackendSession {
     // Read API key and base URL from config.env where buildEnv placed them
     this.apiKey = config.env?.OPENAI_API_KEY;
     this.baseUrl = config.env?.OPENAI_BASE_URL;
-    const handler = config.extra?.meetingCommandHandler;
-    if (typeof handler === 'function') {
-      this.meetingCommandHandler = handler as (command: unknown) => Promise<unknown> | unknown;
-    }
+    this.meetingCommandHandler = meetingCommandHandlerFrom(config.extra);
   }
 
   start(): Promise<void> {
@@ -485,7 +484,9 @@ class CodexSession implements BackendSession {
     switch (item.type) {
       case 'agent_message':
         {
-          const { visibleText, hasSpeakCommand, hasNonSpeakCommand } = this.dispatchMeetingCommands(item.text);
+          const { visibleText, hasSpeakCommand, hasNonSpeakCommand } = dispatchMeetingCommandBlocks(
+            item.text, this.meetingCommandHandler, this.emit,
+          );
           // `speak` is rendered by Orchestrator.narrateAssistantLine(). Emitting
           // the agent message as well would show the same sentence twice and
           // leak the fenced protocol payload into the chat transcript.
@@ -628,37 +629,6 @@ class CodexSession implements BackendSession {
     this.emit({ kind: 'auth-required', error: 'Codex 登录已失效，请完成重新认证后重连 Host。' });
   }
 
-  private dispatchMeetingCommands(text: string): {
-    visibleText: string; hasSpeakCommand: boolean; hasNonSpeakCommand: boolean;
-  } {
-    const fenced = /```meeting-command\s*([\s\S]*?)```/gi;
-    let hasSpeakCommand = false;
-    let hasNonSpeakCommand = false;
-    for (const match of text.matchAll(fenced)) {
-      try {
-        const command = JSON.parse(match[1]);
-        if (
-          command?.kind === 'speak'
-          && typeof command.text === 'string'
-          && command.text.trim().length > 0
-        ) hasSpeakCommand = true;
-        else hasNonSpeakCommand = true;
-        if (this.meetingCommandHandler) {
-          void Promise.resolve(this.meetingCommandHandler(command)).catch((err) => {
-            this.emit({ kind: 'error', error: `Meeting command failed: ${String(err)}` });
-          });
-        }
-      } catch (err) {
-        this.emit({ kind: 'error', error: `Invalid meeting-command JSON: ${String(err)}` });
-      }
-    }
-    return {
-      visibleText: text.replace(fenced, '').trim(),
-      hasSpeakCommand,
-      hasNonSpeakCommand,
-    };
-  }
-
   end(): void {
     this.closed = true;
     this.currentAbort?.abort();
@@ -798,34 +768,6 @@ function isCodexAuthError(message: string): boolean {
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
-
-function dispatchAppServerCommands(
-  text: string,
-  handler: ((command: unknown) => Promise<unknown> | unknown) | undefined,
-  emit: (event: BackendSessionEvent) => void,
-): { visibleText: string; hasSpeakCommand: boolean; hasNonSpeakCommand: boolean } {
-  const fenced = /```meeting-command\s*([\s\S]*?)```/gi;
-  let hasSpeakCommand = false;
-  let hasNonSpeakCommand = false;
-  for (const match of text.matchAll(fenced)) {
-    try {
-      const command = JSON.parse(match[1]);
-      if (command?.kind === 'speak' && typeof command.text === 'string' && command.text.trim()) {
-        hasSpeakCommand = true;
-      } else hasNonSpeakCommand = true;
-      if (handler) {
-        void Promise.resolve(handler(command)).catch((error) => {
-          emit({ kind: 'error', error: `Meeting command failed: ${String(error)}` });
-        });
-      }
-    } catch (error) {
-      emit({ kind: 'error', error: `Invalid meeting-command JSON: ${String(error)}` });
-    }
-  }
-  return { visibleText: text.replace(fenced, '').trim(), hasSpeakCommand, hasNonSpeakCommand };
-}
-
-const COMMAND_ONLY_ACK = '我正在处理，有结果会马上告诉你。';
 
 function assertNever(value: never): null {
   void value;

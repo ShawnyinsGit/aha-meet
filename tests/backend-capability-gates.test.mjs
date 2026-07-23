@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { Orchestrator } from '../dist-electron/orchestrator.js';
+import { getBackendRegistry } from '../dist-electron/backends/registry.js';
 
 function fakeSessionFactory() {
   return {
@@ -10,13 +11,42 @@ function fakeSessionFactory() {
   };
 }
 
+function registerNonCoordinatorStub() {
+  const registry = getBackendRegistry();
+  if (registry.get('non-coordinator-stub')) return;
+  registry.register({
+    id: 'non-coordinator-stub',
+    capabilities: {
+      coordinate: false, executeTasks: false,
+      displayName: 'Stub', iconId: 'stub',
+      mcp: false, permissions: false, systemPrompt: false, skills: false, interrupt: false,
+    },
+    createSession() { throw new Error('stub backend never creates sessions'); },
+    resolveBinary() { return null; },
+    buildEnv() { return {}; },
+  });
+}
+
 test('a backend without coordinator capability cannot become the default coordinator', () => {
+  registerNonCoordinatorStub();
   assert.throws(() => new Orchestrator({
     emit() {},
     cwd: process.cwd(),
     sessionFactory: fakeSessionFactory,
-    defaultBackendId: 'kimi',
+    defaultBackendId: 'non-coordinator-stub',
   }), /cannot coordinate/i);
+});
+
+test('kimi and qoder pass the default coordinator gate', async () => {
+  for (const backendId of ['kimi', 'qoder']) {
+    const orchestrator = new Orchestrator({
+      emit() {},
+      cwd: process.cwd(),
+      sessionFactory: fakeSessionFactory,
+      defaultBackendId: backendId,
+    });
+    await orchestrator.end();
+  }
 });
 
 test('a plan cannot select a backend that cannot execute delivery tasks', async () => {
@@ -64,7 +94,7 @@ test('unknown executor backends fail instead of silently falling back to Claude'
   }
 });
 
-test('single-task delegation respects the coordinator backend worker capability', async () => {
+test('single-task delegation falls back to an execute-capable backend when the coordinator cannot execute', async () => {
   const orchestrator = new Orchestrator({
     emit() {},
     cwd: process.cwd(),
@@ -72,10 +102,11 @@ test('single-task delegation respects the coordinator backend worker capability'
     defaultBackendId: 'codex',
   });
   try {
-    assert.throws(
-      () => orchestrator.delegateSingleTask('change the code'),
-      /backend 'codex' cannot execute delivery tasks/i,
-    );
+    // codex cannot execute tasks itself; the delegation must land on the first
+    // execute-capable installed backend (claude-code in this repo) instead of
+    // failing with "cannot execute delivery tasks".
+    const result = orchestrator.delegateSingleTask('change the code');
+    assert.equal(typeof result.workerId, 'string');
   } finally {
     await orchestrator.end();
   }

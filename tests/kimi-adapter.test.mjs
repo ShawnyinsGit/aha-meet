@@ -7,11 +7,22 @@ import { join } from 'node:path';
 import {
   buildKimiCommandArgs,
   hasUsableKimiCredentials,
+  isSupportedKimiVersion,
   KimiBackend,
   parseKimiStreamEvent,
   resolveKimiReadPath,
   withKimiSystemPrompt,
 } from '../dist-electron/backends/kimi-adapter.js';
+
+test('Kimi runtime gate accepts the verified floor and newer releases', () => {
+  assert.equal(isSupportedKimiVersion('0.24.1'), true);
+  assert.equal(isSupportedKimiVersion('0.29.0'), true);
+  assert.equal(isSupportedKimiVersion('1.0.0'), true);
+  assert.equal(isSupportedKimiVersion('0.24.0'), false);
+  assert.equal(isSupportedKimiVersion('0.23.9'), false);
+  assert.equal(isSupportedKimiVersion('0.24.x'), false);
+  assert.equal(isSupportedKimiVersion(undefined), false);
+});
 
 test('Kimi Code 0.24 uses supported one-shot stream-json arguments', () => {
   assert.deepEqual(buildKimiCommandArgs({ prompt: 'hello', model: 'kimi-k2' }), [

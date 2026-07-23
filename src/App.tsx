@@ -82,6 +82,12 @@ export function App() {
     return ids;
   }, [workers.hostGroups]);
 
+  // Backends allowed to take over coordination — drives the "设为主持人" button.
+  const coordinatorCapableBackends = useMemo(
+    () => new Set(backends.filter((b) => b.supportsCoordinator).map((b) => b.id)),
+    [backends],
+  );
+
   // Sync the meeting store's default host group with the actual default backend
   useEffect(() => {
     const defaultBackend = backends.find((b) => b.isDefault);
@@ -473,6 +479,7 @@ ${trimmed}`
                 onToggleMuteHost={handleToggleMuteHost}
                 onRemoveHost={handleRemoveHost}
                 coordinatorHostId={workers.coordinatorHostId}
+                coordinatorCapableBackends={coordinatorCapableBackends}
                 onSetCoordinator={handleSetCoordinator}
                 onRestartHost={handleRestartHost}
                 onOpenParticipantsTab={() => {

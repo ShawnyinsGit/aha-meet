@@ -348,8 +348,9 @@ export function registerBackendAuthIpc(): void {
 
     const result = await backend.loginOAuth();
     if (result.ok) {
-      // Update auth mode to oauth on success
-      await setBackendAuth(backendId, { authMode: 'oauth', apiKey: undefined });
+      // Update auth mode to oauth on success; also drop any stored API-key
+      // ciphertext so the stale key is not resurrected on the next read.
+      await setBackendAuth(backendId, { authMode: 'oauth', apiKey: undefined, apiKeyEnc: undefined });
     }
     return result;
   });

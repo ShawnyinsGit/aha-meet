@@ -287,7 +287,7 @@ interface EffectiveCapabilities {
 
 - Claude：满足契约测试后可 Coordinator。
 - Codex：满足契约测试后可 Coordinator。
-- Kimi/Qoder：默认 `coordinate: false`，可作为专家/Worker；逐个通过契约后开放。
+- Kimi/Qoder：默认可作为专家；现已通过 `meeting-command` 块协议开放 Coordinator（`coordinate: true`，不能挂载进程内 meeting MCP 的 backend 由 adapter 解析命令块）。仍不可作为 Worker（`executeTasks: false`）。
 
 ## 7. 统一 MeetingCommand 协议
 
