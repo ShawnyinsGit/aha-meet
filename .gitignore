@@ -12,3 +12,15 @@ audit/
 screenshot/
 deliveries/
 .vibe-materials/
+
+# AhaStation 产品文档/硬件工具属于独立项目，保留在本地但不进入本仓库
+docs/plan-ahastation-rk3588-overall.md
+docs/checklist-s1-bringup.md
+docs/plan-hackathon-s0-concept-demo.md
+docs/plan-phase2-ide-handheld.md
+docs/research-x86-handheld-devices.md
+docs/research/handheld-hackability-report.md
+docs/research/linux-arm64-ai-tools-support.md
+docs/research/pinephone-pro-lessons.md
+docs/research/rk3588-odm-factories.md
+scripts/thermal-log.sh

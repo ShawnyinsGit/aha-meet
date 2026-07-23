@@ -4,8 +4,8 @@
 > **v1.2 变更**：四路红队 grill（架构安全 / 产品 UX / 语音发布 / 硬件整机）结论落地——§2.2 安全规约六条扩为九条、事件归因表替代 sessionID 过滤、hostId 窗口主键、语音默认改流式 provider、Phase 6 拆分、陪伴屏补差异化判据与气泡规范、Phase 5 验收口径修正等 ~20 处。
 > **v1.1 变更**：修正决策登记冲突（新增 §0 映射表）、陪伴屏范围恢复多角色像素会议室、语音供应商口径合并、Electron 33→42、范围声明改写。
 > **依据文档**（事实来源，本文不复述其论证过程）：
-> - `docs/plan-ahastation-rk3588-overall.md`（下称「整体方案」，v1.1 已经硬件整机 grill 评审修订）
-> - `docs/plan-phase2-ide-handheld.md`（下称「Phase2 方案」，v3 红队评审 + grilling 决策版，Phase 0–8，软件 D1–D10）
+> - `docs/plan-ahastation-rk3588-overall.md`（下称「整体方案」，v1.1 已经硬件整机 grill 评审修订；AhaStation 项目文档，已移出本仓库）
+> - `docs/plan-phase2-ide-handheld.md`（下称「Phase2 方案」，v3 红队评审 + grilling 决策版，Phase 0–8，软件 D1–D10；AhaStation 项目文档，已移出本仓库）
 > - `docs/orchestrator-v2-progress.md`（orchestrator v2 实施状态）
 >
 > 范围：**以客户端软件本体为主**（AhaMeet，Electron 42 + React 18 + TS）；硬件/系统仅在涉及软件接口处引用（标注「硬件接口」），其论证见整体方案，不在本文展开。
