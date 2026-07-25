@@ -6892,12 +6892,14 @@ html.popout-view #root {
     background: var(--bg-panel);
   }
 
-  /* ---------- Drawer toggle switch ---------- */
+  /* ---------- Drawer toggle switch ----------
+     Match the auto-approve toggle palette in light mode. */
   .drawer-toggle {
-    background: rgba(0, 0, 0, 0.12);
+    background: var(--bg-panel);
+    border-color: var(--border-soft);
   }
   .drawer-toggle-knob {
-    background: #ffffff;
+    background: #e6ebf2;
   }
   .drawer-toggle-on {
     background: rgba(255, 138, 0, 0.85);
@@ -8040,7 +8042,15 @@ html.popout-view #root {
   .tile-history-panel { border: var(--border-soft); }
   .tile-history-item { border-left: var(--border-soft); }
   .img-preview-close { border: var(--border-strong); }
-  .slash-picker { border: var(--border-soft); }
+  .slash-picker {
+    background: var(--bg-panel);
+    border-color: var(--border-soft);
+    box-shadow: var(--shadow-soft);
+  }
+  .slash-picker-item:hover,
+  .slash-picker-item-active {
+    background: var(--accent-soft);
+  }
   .act-action { border: var(--border-soft); }
   .error-banner__reconnect { border: var(--border-strong); }
   .tiles-bar { border: var(--border-soft); }
@@ -8059,14 +8069,11 @@ html.popout-view #root {
   .host-terminal-strip { border: var(--border-soft); }
   .host-terminal-header { border-bottom: var(--border-soft); }
 
+
   /* ---- Auto-generated light mode overrides for base-style hardcoded colors ---- */
-  .join-avatar { color: var(--text-primary); }
   .join-tile-meta { background: var(--bg-app); }
-  .join-cta { color: var(--text-primary); }
   .join-error { color: var(--danger); }
-  .lobby-install-btn { color: var(--text-primary); }
   .join-auth-error { color: var(--danger); }
-  .mtg-leave { color: var(--text-primary); }
   .mtg-trust-chip { color: var(--warn); }
   .mtg-trust-chip:hover { color: var(--warn); }
   .mtg-approve-toggle { background: var(--bg-hover); }
@@ -8084,15 +8091,13 @@ html.popout-view #root {
   .stage-sharing { background: var(--bg-app); }
   .stage-video { background: var(--bg-app); }
   .stage-error-floating { color: var(--danger); }
-  .stage-banner { background: var(--bg-app); color: var(--text-primary); }
-  .stage-banner-stop { background: var(--bg-panel); color: var(--text-primary); }
+  .stage-banner { background: var(--bg-app); }
+  .stage-banner-stop { background: var(--bg-panel); }
   .stage-banner-stop:hover { background: var(--bg-panel); }
   .stage-tab-close:hover { background: var(--bg-elevated); }
   .stage-tab-popout:hover { background: var(--bg-elevated); }
   .workspace-hero-terminal-btn { background: var(--bg-hover); }
   .workspace-hero-terminal-btn:hover { background: var(--bg-elevated); border-color: var(--border-strong); }
-  .workspace-avatar { color: var(--text-primary); }
-  .workspace-avatar-worker { color: var(--text-primary); }
   .workspace-status-speaking { color: var(--accent); }
   .workspace-feed-row { background: var(--bg-app); }
   .agent-pill-talker { color: var(--accent); }
@@ -8100,7 +8105,6 @@ html.popout-view #root {
   .tiles--overlay .tile { border-color: var(--border-soft); }
   .tiles--overlay .tile-footer { background: var(--bg-app); }
   .tile-role-badge { color: var(--text-muted); background: var(--bg-app); }
-  .avatar { color: var(--text-primary); }
   .tile-status { background: var(--bg-app); }
   .tile-footer { background: var(--bg-app); }
   .tile-specialty-badge { color: var(--text-secondary); background: var(--bg-app); }
@@ -8113,12 +8117,10 @@ html.popout-view #root {
   .drawer-settings { background: var(--bg-stage); }
   .drawer-settings-armed .drawer-settings-title { color: var(--warn); }
   .drawer-settings-armed .drawer-settings-hint { color: var(--warn); }
-  .drawer-toggle { background: var(--bg-elevated); }
-  .drawer-toggle-on .drawer-toggle-knob { background: var(--bg-elevated); }
   .drawer-tabs { background: var(--bg-stage); }
   .msg-user .msg-body { color: var(--accent); }
   .img-preview-backdrop { background: var(--bg-app); }
-  .img-preview-close { background: var(--bg-elevated); color: var(--text-primary); }
+  .img-preview-close { background: var(--bg-elevated); }
   .img-preview-close:hover { background: var(--bg-panel); }
   .drawer-composer { background: var(--bg-app); }
   .drawer-attach-icon:hover:not(:disabled) { background: var(--bg-hover); }
@@ -8132,15 +8134,12 @@ html.popout-view #root {
   .act-action { background: var(--bg-hover); }
   .act-action:hover { background: var(--bg-elevated); border-color: var(--border-strong); }
   .tb-btn-danger { color: var(--danger); }
-  .tb-leave { color: var(--text-primary); }
-  .perm-allow { color: var(--text-primary); }
   .picker-error { color: var(--danger); }
   .picker-btn-relaunch { color: var(--danger); }
   .picker-item img { background: var(--bg-app); }
   .error-banner { color: var(--danger); }
-  .error-banner__reconnect { background: var(--bg-elevated); color: var(--text-primary); }
+  .error-banner__reconnect { background: var(--bg-elevated); }
   .error-banner__reconnect:hover { background: var(--bg-panel); }
-  .picker-btn-primary { color: var(--text-primary); }
   .plan-modal-backdrop { background: var(--bg-app); }
   .plan-modal-help code { background: var(--bg-hover); }
   .plan-modal-textarea { background: var(--bg-app); }
@@ -8148,25 +8147,20 @@ html.popout-view #root {
   .plan-modal-preview code { color: var(--accent); }
   .plan-modal-error { color: var(--danger); }
   .plan-modal-cancel:hover { background: var(--bg-hover); }
-  .plan-modal-submit { color: var(--text-primary); }
   .tiles-bar-collapse { background: var(--bg-hover); color: var(--text-secondary); }
-  .tiles-bar-collapse:hover { background: var(--bg-elevated); color: var(--text-primary); }
+  .tiles-bar-collapse:hover { background: var(--bg-elevated); }
   .tiles-bar-invite-btn { background: var(--bg-hover); color: var(--text-muted); }
-  .tiles-bar-invite-btn:hover { background: var(--bg-elevated); color: var(--text-primary); border-color: var(--border-strong); }
+  .tiles-bar-invite-btn:hover { background: var(--bg-elevated); border-color: var(--border-strong); }
   .tiles-gallery-self:hover { background: var(--bg-hover); }
   .tiles-gallery-self:active { background: var(--bg-elevated); }
   .tiles-gallery-action-btn { background: var(--bg-app); color: var(--text-secondary); }
-  .tiles-gallery-action-btn:hover { background: var(--bg-app); color: var(--text-primary); }
-  .tiles-gallery-action-btn-active { color: var(--text-primary); }
-  .tiles-gallery-action-btn-danger:hover { color: var(--text-primary); }
+  .tiles-gallery-action-btn:hover { background: var(--bg-app); }
   .tiles-gallery-placeholder { background: var(--bg-hover); }
   .tiles-gallery-placeholder:hover { background: var(--bg-hover); border-color: var(--border-soft); }
   .tiles-gallery-placeholder-avatar { background: var(--bg-hover); }
   .worker-card-status-badge { background: var(--bg-app); }
-  .worker-card-gallery .worker-card-avatar { color: var(--text-primary); }
   .worker-card-footer { background: var(--bg-app); }
   .worker-card-sidebar:hover { border-color: var(--border-soft); }
-  .worker-card-avatar-worker { color: var(--text-primary); }
   .worker-card-pill-idle { background: var(--bg-hover); }
   .worker-card-pill-waiting { color: var(--warn); }
   .worker-card-pill-working { color: var(--accent); }
@@ -8191,7 +8185,6 @@ html.popout-view #root {
   .memory-btn-primary { color: var(--accent); }
   .memory-cat-select, .memory-textarea, .memory-tag-input { background: var(--bg-app); }
   .skill-install-input { background: var(--bg-app); }
-  .skill-install-btn { color: var(--text-primary); }
   .skill-install-result-dismiss:hover { background: var(--bg-elevated); }
   .skill-error { color: var(--danger); }
   .skill-item { background: var(--bg-hover); }
@@ -8217,7 +8210,6 @@ html.popout-view #root {
   .workspace-feed-task-pill-failed { color: var(--danger); }
   .workspace-delivery-accept-btn { color: var(--success); }
   .tab-strip-item:hover { background: var(--bg-hover); }
-  .tab-strip-badge { color: var(--text-primary); }
   .tab-strip-close:hover { background: var(--bg-elevated); }
   .tab-strip-popout:hover { background: var(--bg-elevated); }
   .tab-strip-add:hover { background: var(--bg-hover); }
@@ -8267,22 +8259,17 @@ html.popout-view #root {
   .spec-message-role { color: var(--accent); }
   .spec-message-ts { color: var(--text-muted); }
   .spec-message-text { color: var(--text-secondary); }
-  .backend-card-avatar-btn { color: var(--text-primary); }
-  .backend-card-avatar-remove-btn { color: var(--text-primary); }
-  .backend-install-btn { color: var(--text-primary); }
   .host-terminal-tab { color: var(--text-secondary); }
   .host-terminal-tab:hover { background: var(--bg-elevated); color: var(--text-secondary); }
   .host-terminal-tab-active { color: var(--accent); }
   .host-terminal-collapse-btn { color: var(--text-muted); }
   .host-terminal-collapse-btn:hover { background: var(--bg-elevated); color: var(--text-secondary); }
-  .drawer-participant-invite:hover:not(:disabled) { color: var(--text-primary); }
-  .drawer-participant-configure:hover { color: var(--text-primary); }
-
   /* ---- Manual light mode contrast fixes ---- */
   /* Error text on light danger-soft background */
   .join-error { color: var(--danger); }
   /* Keep colored-button hover tints consistent with the theme accent/danger */
   .join-cta:hover { background: var(--accent); }
+  .mtg-leave { color: #ffffff; }
   .mtg-leave:hover { background: var(--danger); }
   .drawer-send-icon:hover { color: var(--accent); }
   .mtg-multi-toggle-on:hover { color: var(--accent); }
